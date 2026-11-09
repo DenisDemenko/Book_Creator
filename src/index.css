@@ -745,6 +745,17 @@ html[data-header-collapsed='true'] {
   }
 }
 
+/* Друк конструктора інструкцій: на екрані корінь друку прихований, при друці — єдине, що лишається
+   на сторінці (інтерфейс сайту ховається). Клас ставить InstructionPrintRoot, поки конструктор відкрито. */
+#instruction-print-root { display: none; }
+@media print {
+  body.nova-printing-instruction > *:not(#instruction-print-root) { display: none !important; }
+  body.nova-printing-instruction #instruction-print-root { display: block !important; background: #fff; color: #000; }
+  body.nova-printing-instruction { background: #fff !important; overflow: visible !important; height: auto !important; }
+  #instruction-print-root img { max-width: 100%; break-inside: avoid; }
+  #instruction-print-root figure { break-inside: avoid; }
+}
+
 /* ============================================================
    ONBOARDING TOUR — спливаючі довідкові вікна для нових авторів.
    Аура тепер ТА САМА, що в «електричних пігулок» адмінпанелі ядра

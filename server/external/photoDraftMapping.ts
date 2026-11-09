@@ -166,7 +166,7 @@ export function toExpressPayload(draft: StoredDraft): Record<string, unknown> {
   const lessons = (draft.structure?.modules ?? []).flatMap((m) => m.lessons.map((l) => ({ module: m, lesson: l })));
 
   // Одне джерело на крок (не більше 20): текст кроку + описи його кадрів; кадр — перший із кроку.
-  const sources: Array<{ id: string; kind: 'photo' | 'note'; title: string; text: string; approved: true; assetId?: string }> = [];
+  const sources: Array<{ id: string; kind: 'photo' | 'note'; title: string; text: string; approved: true; assetId?: string; assetIds?: string[] }> = [];
   const sourceOf: string[] = [];
   lessons.forEach(({ lesson }, i) => {
     const frames = lesson.photoIds.map((id) => byPhoto.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
@@ -182,13 +182,15 @@ export function toExpressPayload(draft: StoredDraft): Record<string, unknown> {
         title: lesson.title.slice(0, 300),
         text: text.slice(0, 100_000),
         approved: true,
-        ...(lead ? { assetId: lead.assetId } : {}),
+        // Перший кадр — головний (`assetId`), але в крок їдуть усі: інакше решта фото губиться по дорозі.
+        ...(lead ? { assetId: lead.assetId, assetIds: [...new Set(frames.map((p) => p.assetId))].slice(0, 20) } : {}),
       });
       sourceOf.push(`src-${i + 1}`);
     } else {
       // Понад межу — крок лишається, а його джерелом стає останнє, куди й дописуємо текст.
       const last = sources[sources.length - 1];
       last.text = `${last.text}\n\n${lesson.title}\n${text}`.slice(0, 100_000);
+      if (frames.length) last.assetIds = [...new Set([...(last.assetIds ?? []), ...frames.map((p) => p.assetId)])].slice(0, 20);
       sourceOf.push(last.id);
     }
   });

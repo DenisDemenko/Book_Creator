@@ -598,8 +598,20 @@ export interface InstructionMaterialRow {
   specLineId?: string;
 }
 
+/**
+ * Кадр кроку інструкції: фото з медіатеки автора (`/api/media/file/<assetId>`). Приходить із
+ * майстра «Інструкція з фото» (кадри з телефона, GrabFusion) і лягає в прев'ю, друк і книгу.
+ */
+export interface InstructionStepImage {
+  assetId?: string;
+  url: string;
+  caption?: string;
+}
+
 /** Один крок послідовності дій — розділ «Кроки складання» та еквіваленти. */
 export interface InstructionStep {
+  /** Кадри кроку; порожньо або немає — крок без фото (як було). */
+  images?: InstructionStepImage[];
   sourceIds?: string[];
   needsVerification?: boolean;
   aiGenerated?: boolean;

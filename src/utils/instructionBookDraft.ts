@@ -23,6 +23,13 @@ import { aiDraftText } from '../../shared/aiTextOrigin';
 import type { Instruction } from '../types';
 import type { InstructionTypeConfig } from '../data/instructionTypes';
 
+/** Ілюстрація майбутньої книги — кадр кроку інструкції; id збігається з маркером `[IMG: …]` у тексті кроку. */
+export interface InstructionBookIllustrationDraft {
+  id: string;
+  url: string;
+  caption: string;
+}
+
 export interface InstructionBookSectionDraft {
   /** Заголовок розділу книги (стає title нового Section). */
   title: string;
@@ -36,6 +43,32 @@ function listBlock(lines: string[], bullet = '— '): string {
     .filter(Boolean)
     .map((l) => `${bullet}${l}`)
     .join('\n');
+}
+
+/**
+ * Кадри кроків, що потраплять у книгу: ті самі кроки, що й у розділі «Кроки» (змістовні), по порядку.
+ * Єдине місце, де народжуються id: і маркери в тексті, і ілюстрації книги беруть їх звідси, тож
+ * розбіжності між ними бути не може.
+ */
+function stepImageEntries(doc: Instruction): Array<InstructionBookIllustrationDraft & { stepIndex: number }> {
+  const steps = doc.steps.filter((s) => s.title.trim() || s.description.trim());
+  const out: Array<InstructionBookIllustrationDraft & { stepIndex: number }> = [];
+  steps.forEach((s, i) => {
+    (s.images ?? []).filter((im) => im.url).forEach((im, n) => {
+      out.push({
+        id: `ill-instr-${s.id}-${n + 1}`.replace(/[^A-Za-z0-9_-]/g, '-'),
+        url: im.url,
+        caption: (im.caption?.trim() || `Крок ${i + 1}, кадр ${n + 1}`).replace(/["\]\[]/g, ''),
+        stepIndex: i,
+      });
+    });
+  });
+  return out;
+}
+
+/** Ілюстрації для книги, створеної з документа (App.tsx кладе їх у `book.illustrations`). */
+export function buildInstructionBookIllustrations(doc: Instruction): InstructionBookIllustrationDraft[] {
+  return stepImageEntries(doc).map(({ id, url, caption }) => ({ id, url, caption }));
 }
 
 /** Назва майбутньої книги — назва документа або плейсхолдер типу, якщо автор її не вписав. */
@@ -84,9 +117,12 @@ export function buildInstructionBookSections(
 
   const steps = doc.steps.filter((s) => s.title.trim() || s.description.trim());
   if (steps.length) {
+    const images = stepImageEntries(doc);
     const blocks = steps.map((s, i) => {
       const parts: string[] = [`### ${i + 1}. ${s.title.trim() || `${type.stepPrefix} ${i + 1}`}`];
       if (s.description.trim()) parts.push(s.aiGenerated ? '[AI-DRAFT]\n\n' + s.description.trim() + '\n\n[/AI-DRAFT]' : s.description.trim());
+      const stepImages = images.filter((im) => im.stepIndex === i);
+      if (stepImages.length) parts.push(stepImages.map((im) => `[IMG: ${im.id} "${im.caption}" wrap=none]`).join('\n\n'));
       const extra: string[] = [];
       if (s.components.trim()) extra.push(`Компоненти/матеріали кроку: ${s.components.trim()}`);
       if (s.toolsResources.trim()) extra.push(`Інструменти/ресурси: ${s.toolsResources.trim()}`);

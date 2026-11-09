@@ -157,6 +157,19 @@ t(`70 кроків: джерел ${mapping.TECHNICAL_MAX_SOURCES}, кроків 
 t('зайві кроки дописані до останнього, а не втрачені', big.technical.proposal.steps[59].description.includes('Крок 70'));
 t('кроки понад 20 посилаються на останнє джерело', big.technical.proposal.steps[40].sourceIds[0] === 'src-20' && big.sourceMaterials[19].text.includes('Крок 25'));
 t('велика інструкція теж проходить обидві перевірки', throws(() => technical.parseTechnicalProposal(JSON.stringify(big.technical.proposal), big.sourceMaterials)) === '' && throws(() => wizard.validateWizardPatch(big)) === '');
+// Усі кадри кроку, а не лише перший (інакше решта фото губиться дорогою в Studio).
+{
+  const d = mkDraft(3);
+  const ls = d.structure.modules[0].lessons;
+  d.structure.modules[0].lessons = [{ ...ls[0], photoIds: ['p1', 'p2'] }, { ...ls[2], photoIds: ['p3'] }];
+  const multi = mapping.toExpressPayload(d) as any;
+  t('кадри кроку: головний — assetId, усі — assetIds', multi.sourceMaterials[0].assetId === 'as1' && multi.sourceMaterials[0].assetIds.join() === 'as1,as2' && multi.sourceMaterials[1].assetIds.join() === 'as3', JSON.stringify(multi.sourceMaterials.map((x: any) => x.assetIds)));
+  t('валідація майстра приймає assetIds', throws(() => wizard.validateWizardPatch(multi)) === '');
+  t('assetIds без повторів, не більше 20', new Set(multi.sourceMaterials[0].assetIds).size === multi.sourceMaterials[0].assetIds.length);
+  const bad = { ...multi, sourceMaterials: [{ ...multi.sourceMaterials[0], assetIds: ['ok', 'не id!'] }] };
+  t('сміття в assetIds валідація відхиляє', throws(() => wizard.validateWizardPatch(bad)) !== '');
+}
+t('70 кроків: у останнє джерело дописуються кадри зайвих кроків, але не більше 20 (решта — лише в тексті)', big.sourceMaterials[19].assetIds.length === 20 && big.sourceMaterials[19].assetIds[0] === 'as20' && big.sourceMaterials[19].assetIds[1] === 'as21');
 const noPhoto = mapping.toExpressPayload(mkDraft(2, { photos: [] })) as any;
 t('крок без кадрів — джерело-нотатка, а не помилка', noPhoto.sourceMaterials.every((s: any) => s.kind === 'note' && !s.assetId) && throws(() => wizard.validateWizardPatch(noPhoto)) === '');
 

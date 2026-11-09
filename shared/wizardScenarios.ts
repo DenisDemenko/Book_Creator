@@ -26,6 +26,8 @@ export const STORY_MODELS=[
 export interface WizardSource {
  id:string;kind:'file'|'photo'|'url'|'note';title:string;text:string;approved:boolean;
  url?:string;assetId?:string;characterId?:string;retrievedAt?:string;
+ /** Усі кадри джерела (крок інструкції за фото: перший — і в `assetId`). */
+ assetIds?:string[];
 }
 export interface WizardScenarioState {
  reviewConfirmed?:boolean;structureConfirmed?:boolean;

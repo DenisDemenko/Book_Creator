@@ -1574,6 +1574,20 @@ function StudioApp() {
       { title, author }
     );
 
+    // Кадри кроків: `withoutDemoContent` обнуляє альбом, тож додаємо їх після. id збігаються з маркерами [IMG: …] у тексті кроків.
+    if (payload.illustrations?.length) {
+      newBook.illustrations = payload.illustrations.map((il) => ({
+        id: il.id,
+        chapterId,
+        url: il.url,
+        caption: il.caption,
+        aspectRatio: '16:9',
+        style: 'Медіатека',
+        source: 'upload' as const,
+        createdAt: new Date().toISOString(),
+      }));
+    }
+
     setBook(newBook);
     setActiveChapterId(chapterId);
     setActiveSectionId(sections[0]?.id || '');

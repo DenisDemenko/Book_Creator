@@ -4,7 +4,7 @@ import { BOOK_SCENARIOS, STORY_MODELS } from '../shared/wizardScenarios';
 const source=z.object({
  id:z.string().min(1).max(160),kind:z.enum(['file','photo','url','note']),title:z.string().max(300),
  text:z.string().max(100000),approved:z.boolean(),url:z.string().max(3000).optional(),
- assetId:z.string().regex(/^[a-zA-Z0-9_-]{1,160}$/).optional(),characterId:z.string().max(160).optional(),retrievedAt:z.string().max(100).optional(),
+ assetId:z.string().regex(/^[a-zA-Z0-9_-]{1,160}$/).optional(),assetIds:z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,160}$/)).max(20).optional(),characterId:z.string().max(160).optional(),retrievedAt:z.string().max(100).optional(),
 }).refine(s=>s.kind!=='photo'||!!s.assetId).refine(s=>{
  if(s.kind!=='url')return true;
  try { const u=new URL(s.url??'');return u.protocol==='https:'&&!u.username&&!u.password; } catch{return false;}

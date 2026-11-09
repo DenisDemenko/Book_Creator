@@ -129,9 +129,11 @@ function readAllowedDraft(id: string, req: any) {
 async function assertSources(req: any, draft: NonNullable<ReturnType<typeof getDraft>>) {
   const errors = scenarioErrors(draft.payload);
   if (errors.length) throw new DraftValidationError(errors.join(' '));
-  for (const source of (draft.payload.sourceMaterials ?? []).filter(s => s.approved && s.assetId)) {
-    const asset = await getAsset(source.assetId!);
-    if (!asset || asset.ownerId !== String(req.principal?.id)) throw new DraftValidationError('Джерело більше недоступне.', 403);
+  for (const source of (draft.payload.sourceMaterials ?? []).filter(s => s.approved)) {
+    for (const assetId of new Set([source.assetId, ...(source.assetIds ?? [])].filter((id): id is string => !!id))) {
+      const asset = await getAsset(assetId);
+      if (!asset || asset.ownerId !== String(req.principal?.id)) throw new DraftValidationError('Джерело більше недоступне.', 403);
+    }
   }
 }
 

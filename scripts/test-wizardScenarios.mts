@@ -48,6 +48,12 @@ check('operation has its own prompt',technicalInstructionPrompt({...settings,mod
 const doc=technicalProposalToInstruction(parsed,settings,[source]);
 check('proposal reuses instruction type and keeps provenance',doc.docType==='assembly'&&doc.sourceBased&&doc.steps[0].needsVerification&&doc.knowledgeBase[0].id==='s1');
 check('AI cannot approve its own technical step',technicalProposalToInstruction({...parsed,steps:parsed.steps.map(s=>({...s,needsVerification:false}))},settings,[source]).steps[0].needsVerification);
+const photoSource={...source,id:'s1',kind:'photo' as const,assetId:'a1',assetIds:['a1','a2','a1']};
+const withPhotos=technicalProposalToInstruction(parsed,settings,[photoSource]);
+check('instruction step receives every frame of its source once, in order',withPhotos.steps[0].images?.map(i=>i.assetId).join()==='a1,a2');
+check('frames point at the author media library',withPhotos.steps[0].images?.every(i=>i.url==='/api/media/file/'+i.assetId)===true);
+check('frame captions name the step',withPhotos.steps[0].images?.[0].caption?.includes(parsed.steps[0].title)===true);
+check('step without photo sources stays without images',doc.steps[0].images===undefined);
 const sections=buildInstructionBookSections(doc,findInstructionType(doc.docType));
 const content=sections.map(s=>s.content).join('\n');
 check('instruction handoff retains AI origin and citations',content.includes('[AI-DRAFT]')&&content.includes('Джерела: T-42 manual'));

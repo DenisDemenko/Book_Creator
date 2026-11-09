@@ -9,10 +9,12 @@
  * тестами формату; сам парсер markerStringToTiptapDoc тестується окремо.
  */
 import {
+  buildInstructionBookIllustrations,
   buildInstructionBookSections,
   buildInstructionBookTitle,
   meaningfulInstructionSteps,
 } from '../src/utils/instructionBookDraft.ts';
+import { imageMarkerRegexp } from '../src/utils/imageMarkers.ts';
 import { createEmptyInstruction, createEmptyStep } from '../src/utils/instructionDraft.ts';
 import { findInstructionType } from '../src/data/instructionTypes.ts';
 import type { Instruction } from '../src/types.ts';
@@ -134,6 +136,27 @@ console.log('\nbuildInstructionBookSections — порожній рядок ел
   const sections = buildInstructionBookSections(doc, assemblyType, ['   ', 'Друге поглиблення.']);
   const steps = sections.find((s) => s.title === assemblyType.sections.steps.heading)!;
   t('лише один [AI-DRAFT] (порожній пропущено)', (steps.content.match(/\[AI-DRAFT\]/g) || []).length === 1);
+}
+
+console.log('\nКадри кроків (фото з телефона):');
+{
+  const doc = filledDoc();
+  doc.steps[0] = { ...doc.steps[0], images: [{ assetId: 'a1', url: '/api/media/file/a1', caption: 'Розпакування, кадр 1' }, { assetId: 'a2', url: '/api/media/file/a2' }] };
+  doc.steps[1] = { ...doc.steps[1], images: [{ assetId: 'skip', url: '/api/media/file/skip' }] }; // порожній крок — кадри не беруться
+  doc.steps[2] = { ...doc.steps[2], images: [{ assetId: 'a3', url: '/api/media/file/a3', caption: 'Ніжка "ліва" [1]' }] };
+  const illustrations = buildInstructionBookIllustrations(doc);
+  t('ілюстрації — лише кадри змістовних кроків', illustrations.map((i) => i.url).join() === '/api/media/file/a1,/api/media/file/a2,/api/media/file/a3');
+  t('id ілюстрацій унікальні й без пробілів', new Set(illustrations.map((i) => i.id)).size === 3 && illustrations.every((i) => /^[A-Za-z0-9_-]+$/.test(i.id)));
+  t('підпис без символів, що ламають маркер', !/["\[\]]/.test(illustrations[2].caption), illustrations[2].caption);
+  t('кадр без підпису отримує «Крок N, кадр M»', illustrations[1].caption === 'Крок 1, кадр 2', illustrations[1].caption);
+  const steps = buildInstructionBookSections(doc, assemblyType).find((s) => s.title === assemblyType.sections.steps.heading)!;
+  const markers = [...steps.content.matchAll(imageMarkerRegexp())];
+  t('у тексті кроків стільки маркерів, скільки ілюстрацій', markers.length === illustrations.length, String(markers.length));
+  t('id маркерів збігаються з id ілюстрацій, по порядку', markers.map((m) => m[1]).join() === illustrations.map((i) => i.id).join());
+  t('маркер стоїть у блоці свого кроку, до наступного заголовка', steps.content.indexOf(illustrations[0].id) > steps.content.indexOf('### 1.') && steps.content.indexOf(illustrations[0].id) < steps.content.indexOf('### 2.'));
+  t('режим обтікання — без обтікання', markers.every((m) => m[3] === 'none'));
+  const plain = buildInstructionBookSections(filledDoc(), assemblyType).map((s) => s.content).join('\n');
+  t('без кадрів у книзі немає маркерів, а ілюстрацій — порожній список', !plain.includes('[IMG:') && buildInstructionBookIllustrations(filledDoc()).length === 0);
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);

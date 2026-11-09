@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { apiPath } from '../utils/basePath';
 import {
   ArrowLeft,
   BookOpen,
@@ -39,7 +41,9 @@ import {
 import {
   buildInstructionBookSections,
   buildInstructionBookTitle,
+  buildInstructionBookIllustrations,
   meaningfulInstructionSteps,
+  type InstructionBookIllustrationDraft,
   type InstructionBookSectionDraft,
 } from '../utils/instructionBookDraft';
 
@@ -47,6 +51,8 @@ import {
 export interface InstructionBookCreationPayload {
   title: string;
   sections: InstructionBookSectionDraft[];
+  /** Кадри кроків: лягають в альбом книги, а в тексті стоять маркерами `[IMG: id …]`. */
+  illustrations?: InstructionBookIllustrationDraft[];
 }
 
 /**
@@ -105,6 +111,75 @@ function labeled(label: string, node: React.ReactNode) {
 // Порожнє поле показує свій плейсхолдер — так само, як і в зразку: людина
 // одразу бачить, ЩО саме опиняється в документі, якщо розділ не заповнити.
 // ---------------------------------------------------------------------------
+
+/**
+ * Друк. Раніше «Друкувати / PDF» був `window.print()` усієї сторінки: у друк потрапляв інтерфейс
+ * сайту (шапка, бічне меню, темний фон), а не документ. Тепер документ лежить у власному корені на
+ * рівні `<body>`, а CSS (`index.css`, `.nova-printing-instruction`) ховає при друці все інше. Клас стоїть,
+ * доки відкрито конструктор, а не лише на час виклику: на телефоні (iOS) вікно друку будується вже
+ * після повернення з `window.print()`, і клас, знятий одразу, дав би друк порожньої сторінки.
+ */
+const InstructionPrintRoot: React.FC<{ doc: Instruction; type: InstructionTypeConfig }> = ({ doc, type }) => {
+  useEffect(() => {
+    document.body.classList.add('nova-printing-instruction');
+    return () => document.body.classList.remove('nova-printing-instruction');
+  }, []);
+  // Серверний рендер (тести, renderToStaticMarkup) документа не має: корінь друку створюється лише в браузері.
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <div id="instruction-print-root">
+      <InstructionArticle doc={doc} type={type} />
+    </div>,
+    document.body
+  );
+};
+
+/** Вибір, що саме зробити з готовим документом: верстка за шаблонами Studio чи швидкий друк. */
+const PdfChoiceDialog: React.FC<{
+  canLayout: boolean;
+  layoutBlockedReason: string | null;
+  busy: boolean;
+  onLayout: () => void;
+  onQuickPrint: () => void;
+  onClose: () => void;
+}> = ({ canLayout, layoutBlockedReason, busy, onLayout, onQuickPrint, onClose }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 print:hidden" role="dialog" aria-modal="true" aria-label="Підготувати PDF" data-pdf-choice>
+    <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="text-base font-bold text-slate-100">Підготувати PDF</h2>
+        <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:text-slate-200" aria-label="Закрити"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="mt-4 space-y-3">
+        <div className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-3">
+          <p className="text-sm font-semibold text-violet-200">Верстка за шаблонами Studio</p>
+          <p className="mt-1 text-xs text-slate-300">Інструкція стає новою книгою в «Книга &amp; Текст»: там можна правити текст, а PDF верстається за шаблонами Studio. Кадри кроків лягають в альбом книги.</p>
+          {!canLayout && layoutBlockedReason && <p className="mt-2 text-xs font-semibold text-amber-300" data-pdf-choice-blocked>{layoutBlockedReason}</p>}
+          <button
+            type="button"
+            data-pdf-choice-layout
+            onClick={onLayout}
+            disabled={!canLayout || busy}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-violet-500 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />} Відкрити у «Книга &amp; Текст»
+          </button>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
+          <p className="text-sm font-semibold text-slate-200">Швидкий друк документа</p>
+          <p className="mt-1 text-xs text-slate-400">Друкує лише цю інструкцію (без інтерфейсу сайту) з кадрами. У вікні друку можна обрати «Зберегти як PDF».</p>
+          <button
+            type="button"
+            data-pdf-choice-print
+            onClick={onQuickPrint}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-emerald-400"
+          >
+            <Printer className="h-3.5 w-3.5" /> Друкувати зараз
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 const InstructionArticle: React.FC<{ doc: Instruction; type: InstructionTypeConfig }> = ({ doc, type }) => {
   const title = doc.title.trim() || type.namePlaceholder;
@@ -175,6 +250,20 @@ const InstructionArticle: React.FC<{ doc: Instruction; type: InstructionTypeConf
               {type.stepPrefix} {i + 1}{s.title.trim() ? `. ${s.title.trim()}` : ''}
             </p>
             <p className="text-slate-700 whitespace-pre-wrap">{s.description.trim() || 'Опишіть дію точно й однозначно.'}</p>
+            {s.images && s.images.length > 0 && (
+              <div className="mt-2 grid grid-cols-2 gap-2" data-step-images>
+                {s.images.map((im, n) => (
+                  <figure key={im.assetId ?? im.url} className="break-inside-avoid">
+                    <img
+                      src={apiPath(im.url)}
+                      alt={im.caption || `${type.stepPrefix} ${i + 1}, кадр ${n + 1}`}
+                      className="max-h-64 w-full rounded-md border border-slate-200 bg-slate-100 object-contain"
+                    />
+                    {im.caption && <figcaption className="mt-0.5 text-[10px] text-slate-500">{im.caption}</figcaption>}
+                  </figure>
+                ))}
+              </div>
+            )}
             <p className="text-xs text-slate-500">{s.components.trim() || '—'} · {s.toolsResources.trim() || '—'}</p>
             {s.warning.trim() && <p className="text-xs text-amber-700">⚠ {s.warning.trim()}</p>}
             <p className="text-xs"><b>Контроль:</b> {s.successCriterion.trim() || 'Вкажіть ознаку правильного виконання.'}</p>
@@ -345,6 +434,7 @@ export const InstructionBuilderView: React.FC<{
   const [kbQuery, setKbQuery] = useState('');
   const [kbDraft, setKbDraft] = useState({ title: '', link: '', excerpt: '' });
   const [isCreatingBook, setIsCreatingBook] = useState(false);
+  const [showPdfChoice, setShowPdfChoice] = useState(false);
   const [createBookError, setCreateBookError] = useState<string | null>(null);
   const firstRender = useRef(true);
 
@@ -410,6 +500,12 @@ export const InstructionBuilderView: React.FC<{
   };
 
   const printDoc = () => window.print();
+  /** Чому верстку за шаблонами зараз не запустити (null — можна). */
+  const layoutBlockedReason: string | null = !onInstructionBookCreated
+    ? 'У цьому режимі перенесення в книгу недоступне.'
+    : doc.sourceBased && doc.steps.some((st) => st.needsVerification)
+      ? 'Спершу перевірте й підтвердьте всі позначені кроки (галочка «перевірено за джерелами» біля кожного).'
+      : null;
 
   const kbResults = kbQuery.trim()
     ? doc.knowledgeBase.filter((k) => k.title.toLowerCase().includes(kbQuery.trim().toLowerCase()))
@@ -478,8 +574,9 @@ export const InstructionBuilderView: React.FC<{
     }
     const sections = buildInstructionBookSections(doc, type, elaborations);
     const title = buildInstructionBookTitle(doc, type);
+    const illustrations: InstructionBookIllustrationDraft[] = buildInstructionBookIllustrations(doc);
     setIsCreatingBook(false);
-    onInstructionBookCreated?.({ title, sections });
+    onInstructionBookCreated?.({ title, sections, ...(illustrations.length ? { illustrations } : {}) });
   };
 
   return (
@@ -514,7 +611,7 @@ export const InstructionBuilderView: React.FC<{
         <button type="button" onClick={exportJson} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.06] transition-colors">
           <Download className="h-3.5 w-3.5" /> Експорт
         </button>
-        <button type="button" onClick={printDoc} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3 py-2 text-xs font-bold text-slate-950 transition-colors">
+        <button type="button" onClick={() => setShowPdfChoice(true)} data-instruction-print className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3 py-2 text-xs font-bold text-slate-950 transition-colors">
           <Printer className="h-3.5 w-3.5" /> Друкувати / PDF
         </button>
         {onInstructionBookCreated && (
@@ -724,6 +821,26 @@ export const InstructionBuilderView: React.FC<{
                   {labeled('Застереження або обмеження', (
                     <input value={s.warning} onChange={(e) => patch({ steps: doc.steps.map((x) => (x.id === s.id ? { ...x, warning: e.target.value } : x)) })} className={inputCls} />
                   ))}
+                  {s.images && s.images.length > 0 && (
+                    <div data-step-thumbs>
+                      <span className={labelCls}>Кадри кроку ({s.images.length})</span>
+                      <div className="flex flex-wrap gap-2">
+                        {s.images.map((im, n) => (
+                          <div key={im.assetId ?? im.url} className="relative">
+                            <img src={apiPath(im.url)} alt={im.caption || `Кадр ${n + 1}`} className="h-16 w-16 rounded-md border border-slate-700 object-cover" />
+                            <button
+                              type="button"
+                              title="Прибрати кадр із кроку"
+                              onClick={() => patch({ steps: doc.steps.map((x) => (x.id === s.id ? { ...x, images: (x.images ?? []).filter((_, k) => k !== n) } : x)) })}
+                              className="absolute -right-1 -top-1 rounded-full bg-slate-900 p-0.5 text-slate-300 hover:text-rose-300"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {s.sourceIds?.length > 0 && <p className="text-xs text-cyan-200">Джерела: {s.sourceIds.map(id=>doc.knowledgeBase.find(k=>k.id===id)?.title??id).join(', ')}</p>}
                   {doc.sourceBased && <label className="flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={!s.needsVerification}
                     onChange={e=>patch({steps:doc.steps.map(x=>x.id===s.id?{...x,needsVerification:!e.target.checked}:x)})}/> Параметри й послідовність цього кроку перевірено за джерелами</label>}
@@ -878,11 +995,19 @@ export const InstructionBuilderView: React.FC<{
         </div>
       )}
 
-      {/* Друк: завжди в DOM, показується лише в @media print (Tailwind print:),
-          незалежно від того, чи відкрита панель прев'ю на екрані. */}
-      <div className="hidden print:block">
-        <InstructionArticle doc={doc} type={type} />
-      </div>
+      {/* Друк: окремий корінь у <body>, решту сторінки при друці ховає CSS (див. InstructionPrintRoot). */}
+      <InstructionPrintRoot doc={doc} type={type} />
+
+      {showPdfChoice && (
+        <PdfChoiceDialog
+          canLayout={!layoutBlockedReason}
+          layoutBlockedReason={layoutBlockedReason}
+          busy={isCreatingBook}
+          onLayout={() => { setShowPdfChoice(false); void createBook(); }}
+          onQuickPrint={() => { setShowPdfChoice(false); setTimeout(printDoc, 60); }}
+          onClose={() => setShowPdfChoice(false)}
+        />
+      )}
 
       {showTypeDialog && (
         <TypeDialog

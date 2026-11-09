@@ -28,7 +28,8 @@ import { assetUrl } from './assetUrl';
  */
 
 /** Префікс без кінцевого слеша: '/studio' або '' для кореня. */
-export const API_BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+// `?.` — як в assetUrl.ts: у тестах під tsx `import.meta.env` немає, і без нього імпорт компонента, що веде фото через apiPath, падав би.
+export const API_BASE = (import.meta.env?.BASE_URL || '/').replace(/\/$/, '');
 
 /** Чи треба взагалі щось префіксувати. */
 export const hasBasePath = API_BASE !== '';

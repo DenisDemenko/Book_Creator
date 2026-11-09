@@ -17,6 +17,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { InstructionBuilderView } from '../src/components/InstructionBuilderView.tsx';
 import { INSTRUCTION_TYPES } from '../src/data/instructionTypes.ts';
+import { createEmptyInstruction, createEmptyStep } from '../src/utils/instructionDraft.ts';
 
 let pass = 0, fail = 0;
 const t = (n: string, c: boolean, e = '') => { c ? pass++ : fail++; console.log(`${c ? '  ✓' : '  ✗'} ${n}${e ? ' — ' + e : ''}`); };
@@ -57,6 +58,21 @@ console.log('\nЗ onChangeTrack кнопка «До вибору напряму�
 {
   const html = renderToStaticMarkup(React.createElement(InstructionBuilderView, { onChangeTrack: () => {} }));
   t('кнопка є, коли onChangeTrack передано', html.includes('До вибору напряму'));
+}
+
+console.log('Кадри кроків у перегляді й друці:');
+{
+  const doc = createEmptyInstruction('assembly');
+  doc.title = 'Стіл';
+  doc.steps = [
+    { ...createEmptyStep(), id: 's1', title: 'Огляд', description: 'Подивіться на схему.', images: [{ assetId: 'a1', url: '/api/media/file/a1', caption: 'Огляд, кадр 1' }, { assetId: 'a2', url: '/api/media/file/a2' }] },
+    { ...createEmptyStep(), id: 's2', title: 'Кріплення', description: 'Закрутіть болти.' },
+  ];
+  const html = renderToStaticMarkup(React.createElement(InstructionBuilderView, { initialInstruction: doc }));
+  t('кадри кроку показані в перегляді', html.includes('/api/media/file/a1') && html.includes('/api/media/file/a2') && html.includes('data-step-images'));
+  t('підпис кадру показано, а без підпису — альтернативний текст кроку', html.includes('Огляд, кадр 1') && html.includes('alt="Крок 1, кадр 2"') || html.includes('кадр 2'));
+  t('кадри лише у кроку, що їх має (2 кадри × панель і вузький екран)', (html.match(/<figure/g) || []).length === 4, String((html.match(/<figure/g) || []).length));
+  t('«Друкувати / PDF» відкриває вибір, а не друк напряму', html.includes('data-instruction-print') && !html.includes('data-pdf-choice'));
 }
 
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
