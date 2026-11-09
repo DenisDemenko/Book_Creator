@@ -105,6 +105,7 @@ import { describePhotoWithCoreVision } from './server/external/photoDraftDescrib
 import { aiUsageForDraft, createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
 import { writeWithCoreText } from './server/external/photoDraftWriter';
 import { passModels } from './server/external/photoDraftAiModels';
+import { registerMyWorksRoutes } from './server/myWorksRoutes';
 import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
 import { registerGitCommandRoutes } from './server/gitCommandRoutes';
@@ -609,6 +610,7 @@ async function startServer() {
     sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans },
     aiUsage: aiUsageForDraft,
   });
+  registerMyWorksRoutes(app);
   registerKnowledgeRoutes(app);
   registerYoutubeTranscriptRoutes(app, realtimeAccessDeps);
   registerCollaborationRoutes(app);

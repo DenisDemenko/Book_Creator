@@ -90,7 +90,7 @@ def create_app(settings: Settings | None = None, *, store: SessionStore | None =
     @app.get("/api/config")
     def config() -> dict[str, object]:
         # Токена тут немає й не буде: він живе лише в сесіях на сервері.
-        return {"studioUrl": cfg.studio_url, "marketUrl": cfg.market_url,
+        return {"studioUrl": cfg.studio_url, "studioPublicUrl": cfg.studio_public_url, "marketUrl": cfg.market_url,
                 "contractVersion": contract.contract_version()}
 
     app.include_router(build_router(deps))

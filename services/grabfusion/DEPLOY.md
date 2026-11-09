@@ -29,6 +29,7 @@
 | `GRABFUSION_STUDIO_URL` | `https://bookcreator-production-7304.up.railway.app/api/external/v1` | де живе Studio (частина A). Напряму на Railway, а не через `fusionlab.in.ua`: це запити сервер → сервер, Vercel між ними зайвий, а без префікса `/studio` апекс-домен веде в маркетплейс, не в Studio |
 | `GRABFUSION_COOKIE_SECURE` | `1` | cookie лише по HTTPS (обовʼязково в проді) |
 | `GRABFUSION_MARKET_URL` | `https://www.fusionlab.in.ua` | посилання на маркетплейс. З `www`: клієнт не йде за редиректами, а апекс дає 308 |
+| `GRABFUSION_STUDIO_PUBLIC_URL` | `https://www.fusionlab.in.ua/studio` | адреса Студії для людей: на неї веде кнопка «Відкрити в Studio» (з 09.11.2026). Без неї береться походження `GRABFUSION_STUDIO_URL`, тобто службова адреса Railway, де в людини немає входу |
 | `GRABFUSION_SESSION_DB` | шлях до файлу SQLite | сесії (токени Studio) — на **постійному** диску, інакше після перезапуску всім доведеться підключатись знову |
 | `GRABFUSION_HOST` / `GRABFUSION_PORT` | `0.0.0.0` / `8000` | де слухає процес |
 

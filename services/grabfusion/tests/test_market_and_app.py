@@ -41,4 +41,13 @@ def test_app_health_and_config_have_no_token_fields():
     c = TestClient(create_app(Settings(), store=SessionStore(":memory:")))
     assert c.get("/healthz").json()["contractVersion"] == "1.4.0"
     cfg = c.get("/api/config").json()
-    assert set(cfg) == {"studioUrl", "marketUrl", "contractVersion"}
+    assert set(cfg) == {"studioUrl", "studioPublicUrl", "marketUrl", "contractVersion"}
+    assert cfg["studioPublicUrl"] == ""  # не задано — сторінка бере походження studioUrl
+
+
+def test_public_studio_url_comes_from_env_and_is_exposed():
+    from grabfusion.sessions import SessionStore
+    s = Settings.from_env({"GRABFUSION_STUDIO_PUBLIC_URL": " https://www.fusionlab.in.ua/studio/ "})
+    assert s.studio_public_url == "https://www.fusionlab.in.ua/studio"
+    c = TestClient(create_app(s, store=SessionStore(":memory:")))
+    assert c.get("/api/config").json()["studioPublicUrl"] == "https://www.fusionlab.in.ua/studio"

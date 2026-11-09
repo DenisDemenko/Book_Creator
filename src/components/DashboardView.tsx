@@ -25,6 +25,9 @@ import {
 import type { AuthUser, Book, NavigationTab, WriterMasteryState, SkillCategory } from '../types';
 import { SKILL_CATEGORIES, SKILL_TASKS, INITIAL_MASTERY_STATE } from '../data/skillsData';
 import { useLanguage } from '../i18n/LanguageContext';
+import { CoursesBlock, InstructionsBlock, PhoneDraftsBlock, useMyWorks } from './MyWorksBlocks';
+import { loadInstructionDraft } from '../utils/instructionDraft';
+import { apiPath } from '../utils/basePath';
 import { listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
 import {StudioBookDocuments} from './StudioBookDocuments';
 
@@ -41,6 +44,12 @@ interface DashboardViewProps {
   onOpenExistingBook: (book: Book, serverRevision?: number) => Promise<void>;
   /** Видалити книгу за id (власник обробляє перемикання активної книги). */
   onDeleteBook: (id: string) => void;
+  /** «Мої роботи»: відкрити експрес-чернетку інструкції (майстер інструкцій із цією чернеткою). */
+  onOpenExpressInstruction?: (draftId: string) => void;
+  /** «Мої роботи»: відкрити інструкцію, що лежить у цьому браузері (конструктор). */
+  onOpenLocalInstruction?: () => void;
+  /** «Мої роботи»: відкрити курс у «Створити курс». */
+  onOpenCourse?: (courseId: string) => void;
 }
 
 interface ServerBookSummary {
@@ -79,8 +88,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onCreateBlankBook,
   onOpenExistingBook,
   onDeleteBook,
+  onOpenExpressInstruction,
+  onOpenLocalInstruction,
+  onOpenCourse,
 }) => {
   const { t } = useLanguage();
+
+  // «Мої роботи»: інструкції, курси й чернетки з телефона поряд із книгами.
+  const myWorks = useMyWorks(authUser?.id);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const localInstruction = useMemo(() => {
+    const doc = loadInstructionDraft();
+    const title = doc?.title?.trim();
+    return doc && (title || doc.steps?.some((st) => st.title?.trim() || st.description?.trim())) ? title || 'Інструкція без назви' : null;
+  }, [book.id, book.updatedAt]);
+  const handleRestoreInstruction = async (phoneDraftId: string) => {
+    if (restoringId) return;
+    setRestoringId(phoneDraftId);
+    setRestoreError(null);
+    try {
+      const res = await fetch(apiPath(`/api/my-works/phone-drafts/${encodeURIComponent(phoneDraftId)}/reopen-instruction`), {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || typeof data?.draftId !== 'string') throw new Error(data?.error || 'Не вдалося відновити інструкцію.');
+      onOpenExpressInstruction?.(data.draftId);
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : 'Не вдалося відновити інструкцію.');
+    } finally {
+      setRestoringId(null);
+    }
+  };
 
   // Стан майстерності живе лише в MasteryView (localStorage) — тут лише
   // читаємо той самий ключ, як і AIStudioView/MasteryView уже роблять одне
@@ -521,7 +561,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Мої роботи: книги, інструкції й курси — усе, що автор створив, в одному ряду. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" data-my-works>
         {/* Мої книги — де мені це подивитися */}
         <div className="nova-glass-dark rounded-2xl p-5 border border-slate-800">
           <div className="flex items-center gap-2 mb-4">
@@ -582,6 +623,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </div>
 
+        <InstructionsBlock
+          state={myWorks}
+          localTitle={localInstruction}
+          restoringId={restoringId}
+          error={restoreError}
+          onOpenExpress={(id) => onOpenExpressInstruction?.(id)}
+          onRestore={(id) => void handleRestoreInstruction(id)}
+          onOpenLocal={() => onOpenLocalInstruction?.()}
+        />
+        <CoursesBlock state={myWorks} onOpenCourse={(id) => onOpenCourse?.(id)} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Мій облік витрат токенів */}
         {authUser?.id && (
           <div className="nova-glass-dark rounded-2xl p-5 border border-slate-800">
@@ -619,6 +673,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             )}
           </div>
         )}
+        <PhoneDraftsBlock state={myWorks} />
       </div>
 
       {/* 7. Швидкий доступ */}

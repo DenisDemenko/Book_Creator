@@ -1514,6 +1514,33 @@ function StudioApp() {
    * обгорнутим у [AI-DRAFT], тому тут з ним нічого додатково робити не
    * треба — TipTap-редактор сам покаже їх як AI-чернетку.
    */
+  /**
+   * Дашборд «Мої роботи» → відкрити експрес-чернетку інструкції. Майстер бере чернетку зі сховища браузера
+   * (див. TECHNICAL_DRAFT_STORAGE_KEY), так само, як при вході за посиланням `/express/<id>`.
+   */
+  const handleOpenExpressInstruction = (draftId: string) => {
+    try {
+      window.localStorage.setItem(TECHNICAL_DRAFT_STORAGE_KEY, draftId);
+    } catch {
+      /* без сховища майстер відкриється порожнім — як і при вході за посиланням */
+    }
+    setEntryIdea(null);
+    setEntryTrack('technical_instruction');
+    handleSelectTab('express');
+  };
+
+  /** Дашборд → інструкція, що лежить у цьому браузері: напрям «Інструкція» (конструктор) бере її з localStorage. */
+  const handleOpenLocalInstruction = () => {
+    setEntryIdea(null);
+    setEntryTrack('instruction');
+    handleSelectTab('express');
+  };
+
+  const handleOpenCourseFromDashboard = (courseId: string) => {
+    setInitialCourseId(courseId);
+    handleSelectTab('course-studio');
+  };
+
   const handleInstructionBookCreated = (payload: InstructionBookCreationPayload) => {
     const now = Date.now();
     const bookId = `BK-${now.toString(36).toUpperCase()}`;
@@ -2423,6 +2450,9 @@ function StudioApp() {
             onCreateBlankBook={handleCreateBlankBook}
             onOpenExistingBook={handleOpenExistingBook}
             onDeleteBook={handleDeleteBook}
+            onOpenExpressInstruction={handleOpenExpressInstruction}
+            onOpenLocalInstruction={handleOpenLocalInstruction}
+            onOpenCourse={handleOpenCourseFromDashboard}
           />
         )}
 

@@ -8,6 +8,10 @@ from dataclasses import dataclass
 class Settings:
     studio_url: str = "http://127.0.0.1:8765/api/external/v1"
     market_url: str = "https://fusionlab.in.ua"
+    # Адреса Студії для ЛЮДЕЙ (посилання «Відкрити в Studio»): напр. "https://www.fusionlab.in.ua/studio".
+    # Не те саме, що studio_url — той веде до API Studio (на Railway це службова адреса), а людина має
+    # потрапляти на справжню, де в неї вхід і її дані. Порожньо — береться походження studio_url.
+    studio_public_url: str = ""
     host: str = "127.0.0.1"
     port: int = 8000
     session_db: str = "grabfusion.sqlite3"
@@ -22,6 +26,7 @@ class Settings:
         return cls(
             studio_url=e.get("GRABFUSION_STUDIO_URL", d.studio_url).rstrip("/"),
             market_url=e.get("GRABFUSION_MARKET_URL", d.market_url).rstrip("/"),
+            studio_public_url=e.get("GRABFUSION_STUDIO_PUBLIC_URL", d.studio_public_url).strip().rstrip("/"),
             host=e.get("GRABFUSION_HOST", d.host),
             # Railway/Render/Heroku віддають порт у PORT; явний GRABFUSION_PORT має пріоритет.
             port=int(e.get("GRABFUSION_PORT") or e.get("PORT") or d.port),

@@ -868,7 +868,8 @@ async function flushQueue() {
 /* ---------- старт ---------- */
 async function start() {
   try { state.limits = (await api('GET', '/limits')).limits; } catch (e) { /* дефолти */ }
-  try { state.studioOrigin = new URL((await api('GET', '/config')).studioUrl).origin; } catch (e) { /* без посилання */ }
+  // Посилання на Студію ведемо на справжню адресу (studioPublicUrl, напр. https://www.fusionlab.in.ua/studio); без неї — на походження API.
+  try { const cfg = await api('GET', '/config'); state.studioOrigin = (cfg.studioPublicUrl || new URL(cfg.studioUrl).origin).replace(/\/$/, ''); } catch (e) { /* без посилання */ }
   state.queue = await qAll();
   document.getElementById('btn-logout').hidden = false;
   await openList();

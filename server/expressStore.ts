@@ -203,6 +203,15 @@ export function createDraft(userId: string | null, payload: ExpressPayload = {})
   return draft;
 }
 
+/** Живі (не прострочені) чернетки користувача, найновіші першими — для переліку «Мої роботи» на дашборді. */
+export function listUserDrafts(userId: string): ExpressDraft[] {
+  const db = requireDb();
+  const rows = db
+    .prepare('SELECT * FROM express_drafts WHERE user_id = ? AND expires_at > ? ORDER BY updated_at DESC')
+    .all(userId, new Date().toISOString()) as Row[];
+  return rows.map(toDraft);
+}
+
 /** Прострочена чернетка не повертається, навіть якщо рядок ще на місці. */
 export function getDraft(id: string): ExpressDraft | undefined {
   const db = requireDb();
