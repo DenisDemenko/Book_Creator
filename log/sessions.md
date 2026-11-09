@@ -3753,3 +3753,20 @@ CI, продовження #490: після першого виправленн�
 ## 02.11.2026 #04 — Codex: AI workspace, запис #491
 
 Реалізовано підтримку уточнень у Студії та всі сім доповнень у суміжному Marketplace. Прийнято актуальні master 3d81f7c / 716faf5, окремі checkout/гілки. 72 цільові перевірки й Chromium пройшли, Studio build/typecheck та Marketplace API build/lint/web typecheck пройшли. Нові production/CI ще не підтверджені на момент коміту, результати відстежуються в PR. Не зроблено і чому: платний OpenAI/живий Firebase не запускались; PostgreSQL e2e виконує CI через недоступний локальний Docker socket. Деталі й порядок встановлення — #491. Дозвіл на коміт/push/публікацію отримано в поточній розмові.
+
+## Журнал сесій · 29.10.2026 #01 · GeoHome
+- Запис #487: Pro/Ultra cloud, KumCAD, 3D. 38 API checks та browser flow пройшли.
+- Не зроблено: live Firebase/native GUI; production у процесі після дозволу власника.
+
+## Журнал сесій · 30.10.2026 #01 · GeoHome single-door contract
+- Запис #488: optional історичні поля дверей, 55 HTTP/SQLite перевірок; повний контекст у [log/sessions.md](log/sessions.md).
+- Не зроблено: master merge / production/Firebase/Railway — поза цим завданням; код `3a8068b`, push feature-гілки та Draft PR виконує батьківська сесія.
+
+## Журнал сесій · 01.11.2026 #01 · GeoHome / KumCAD
+- Запис #489: локальне злиття PR #32 в master, 55 HTTP/SQLite, Chromium та STEP/OpenCASCADE пройшли.
+- Не зроблено і чому: native KumCAD на комп'ютері власника не підключено; production, live Firebase та платежі не перевірені. Повний контекст у [log/sessions.md](log/sessions.md).
+
+
+## Журнал сесій · 06.11.2026 #01 · PDF шафи в Книгах
+
+Codex: #528 — PDF/проєкт шафи у Книгах, текстовий редактор, примітки, порядок, навігація та незмінна шапка PDF столів/куполів/шаф. CI/Chromium і live assets/guards/PDF пройшли; функціональні релізи 31eaf85 / b6d4291 опубліковані. **Не зроблено і чому:** production Firebase-login не виконувався; перевірено ізольований auth seam. Захист шапки діє в редакторі, зовнішній PDF-DRM не реалізується. Відкритих функціональних робіт немає.
