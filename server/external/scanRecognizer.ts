@@ -8,39 +8,31 @@
  * вибором ключа (власний ключ автора → платформний → серверний) і тим самим
  * логуванням витрат. Відрізняється лише промпт: дослівний OCR замість сцени.
  *
+ * Ліміт часу й запасні моделі — у visionFailover.ts: без них мовчазна модель
+ * тримала сторінку по 5 хвилин (заміри 09.11.2026 — там само).
+ *
  * Окремий файл від маршрутів: маршрути тестуються з підставним
  * розпізнаванням, і їм не треба тягнути за собою мережеві провайдери.
  */
 
-import { GEMINI_MODEL, generateText } from '../aiCore';
-import { engineConfigured, modelSupportsVision, resolveEngine, ENGINE_ENV_KEY } from '../chatProviders';
-import { resolveEngineKey } from '../platformKeys';
+import { GEMINI_MODEL } from '../aiCore';
 import { resolveModuleModelId } from '../coreModuleModels';
 import { buildScanOcrPrompt, scanOcrSystemInstruction } from './scanOcrPrompt';
+import { generateVisionWithFailover } from './visionFailover';
 import type { RecognizeParams } from './externalApiRoutes';
 
 export async function recognizeScanWithCoreVision(p: RecognizeParams): Promise<{ text: string; modelId: string }> {
-  const modelId = (await resolveModuleModelId('textFromImage')) || GEMINI_MODEL;
-  if (!modelSupportsVision(modelId)) {
-    throw new Error(
-      `Модель «${modelId}», привʼязана до модуля «Текст за фото», не бачить зображень — оберіть модель із зором в «Ядрі AI».`
-    );
-  }
-  const engine = resolveEngine(modelId);
-  const userKey = await resolveEngineKey(p.ownerId, engine, 'scan-ocr');
-  if (!userKey && !engineConfigured(engine)) {
-    throw new Error(`Модель не налаштована: потрібен ${ENGINE_ENV_KEY[engine]} на сервері або власний ключ автора.`);
-  }
-  const result = await generateText({
-    engine,
-    modelId,
-    prompt: buildScanOcrPrompt({ languageHint: 'uk', note: p.note }),
-    systemInstruction: scanOcrSystemInstruction(),
-    apiKeyOverride: userKey,
-    images: [{ mimeType: p.mimeType, dataBase64: p.base64 }],
-    req: p.req,
-    label: p.draftId ? `Сторінка рукопису (GrabFusion) ${p.draftId}` : 'Скан сторінки з телефону (WriterScan)',
-    bookId: p.bookId || undefined,
+  return generateVisionWithFailover({
+    primaryModelId: (await resolveModuleModelId('textFromImage')) || GEMINI_MODEL,
+    ownerId: p.ownerId,
+    keyLabel: 'scan-ocr',
+    params: {
+      prompt: buildScanOcrPrompt({ languageHint: 'uk', note: p.note }),
+      systemInstruction: scanOcrSystemInstruction(),
+      images: [{ mimeType: p.mimeType, dataBase64: p.base64 }],
+      req: p.req,
+      label: p.draftId ? `Сторінка рукопису (GrabFusion) ${p.draftId}` : 'Скан сторінки з телефону (WriterScan)',
+      bookId: p.bookId || undefined,
+    },
   });
-  return { text: result.text, modelId };
 }

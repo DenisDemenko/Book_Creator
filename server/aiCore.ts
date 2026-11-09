@@ -301,7 +301,17 @@ interface GenerateTextParams {
   label: string;
   bookId?: string;
   /** Т5.4: параметри вузла LLM — температура, ліміт токенів, тайм-аут (мс). Без них — як раніше. */
-  generation?: { temperature?: number; maxTokens?: number; timeoutMs?: number };
+  generation?: {
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+    thinkingLevel?: 'low';
+    /**
+     * Скільки разів повторювати тимчасову відмову (за замовчуванням TRANSIENT_RETRIES). Виклик, у якого є
+     * запасна модель, ставить 0: перевантажену модель краще залишити одразу, а не стукати в неї ще тричі.
+     */
+    transientRetries?: number;
+  };
 }
 
 /** Скільки РАЗІВ ПОВТОРИТИ виклик після тимчасової відмови (усього спроб — на одну більше). */
@@ -424,7 +434,8 @@ export async function generateText(
     try {
       const g = p.generation;
       const result = await withTimeout(g?.timeoutMs, (signal) => {
-        const opts: GenerationOptions | undefined = g || signal ? { temperature: g?.temperature, maxTokens: g?.maxTokens, signal } : undefined;
+        const opts: GenerationOptions | undefined =
+          g || signal ? { temperature: g?.temperature, maxTokens: g?.maxTokens, thinkingLevel: g?.thinkingLevel, signal } : undefined;
         return p.engine === 'gemini' && p.json
           ? dispatchGeminiSdk(p.prompt, systemInstruction, true, opts)
           : dispatch(p.engine, modelId, p.prompt, systemInstruction || '', p.apiKeyOverride, p.images, p.json, opts);
@@ -436,7 +447,7 @@ export async function generateText(
         await logTextUsage(ctx, modelId, p.engine, 0, 0, false);
         throw err;
       }
-      const canRetry = attempt < TRANSIENT_RETRIES && isTransientAiError(err);
+      const canRetry = attempt < (p.generation?.transientRetries ?? TRANSIENT_RETRIES) && isTransientAiError(err);
       if (!canRetry) {
         // Лог невдачі пишеться один раз — за підсумком, а не на кожну
         // спробу: інакше один клік автора давав би три записи «провал»
@@ -446,7 +457,7 @@ export async function generateText(
         throw humanizeAiError(err, p.engine);
       }
       console.warn(
-        `[aiCore] ${p.label}: тимчасова відмова ${p.engine} (спроба ${attempt + 1}/${TRANSIENT_RETRIES + 1}), ` +
+        `[aiCore] ${p.label}: тимчасова відмова ${p.engine} (спроба ${attempt + 1}/${(p.generation?.transientRetries ?? TRANSIENT_RETRIES) + 1}), ` +
           `повтор через ${RETRY_DELAYS_MS[attempt]} мс — ${p.privateContent?'private provider failure':String((err as Error)?.message ?? err).slice(0, 160)}`
       );
       await sleep(RETRY_DELAYS_MS[attempt]);

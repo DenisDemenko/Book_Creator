@@ -117,6 +117,12 @@ export interface GenerationOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /**
+   * Глибина «мислення» Gemini 3. Для дослівного розпізнавання сторінки думати
+   * нема про що: на живому замірі 09.11.2026 `low` скоротив відповідь
+   * gemini-3.5-flash з 42 с до 6 с без жодної помилки в тексті. Інші рушії параметр ігнорують.
+   */
+  thinkingLevel?: 'low';
 }
 
 export interface ChatModelInfo {
@@ -446,7 +452,11 @@ async function generateGemini(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemInstruction }] },
       contents: [{ parts: [...imageParts, { text: prompt }] }],
-      generationConfig: { temperature: opts?.temperature ?? 0.7, ...(opts?.maxTokens ? { maxOutputTokens: opts.maxTokens } : {}) },
+      generationConfig: {
+        temperature: opts?.temperature ?? 0.7,
+        ...(opts?.maxTokens ? { maxOutputTokens: opts.maxTokens } : {}),
+        ...(opts?.thinkingLevel ? { thinkingConfig: { thinkingLevel: opts.thinkingLevel } } : {}),
+      },
     }),
     signal: opts?.signal,
   });
