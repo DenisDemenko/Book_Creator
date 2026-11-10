@@ -120,8 +120,17 @@ document.getElementById('btn-back').addEventListener('click', () => openList());
 document.getElementById('btn-logout').addEventListener('click', async () => { await api('POST', '/logout').catch(() => {}); state.user = null; go('pair'); });
 
 /* ---------- підключення ---------- */
+/* Код з посилання QR: `#pair=ABCD-EFGH`. Фрагмент браузер нікуди не надсилає, тож код не потрапляє ні в проксі, ні в журнали, ні в Referer.
+   Лише літери, цифри й дефіс (так його видає Studio); усе інше — не наш код. */
+function pairCodeFromHash(hash) {
+  const m = /^#pair=([A-Za-z0-9-]{4,32})$/.exec(hash || '');
+  return m ? m[1] : null;
+}
+
 function viewPair() {
   const err = h('p', { class: 'err', id: 'pair-err' });
+  // Невдалий вхід за QR (прострочений, уже використаний): пояснюємо тут, а ручний ввід лишається запасним шляхом.
+  err.textContent = state.pairNotice || ''; state.pairNotice = '';
   const input = h('input', { id: 'code', placeholder: 'Код підключення', autocomplete: 'off', autocapitalize: 'characters' });
   const form = h('form', { class: 'card hero', onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
@@ -131,7 +140,7 @@ function viewPair() {
     } catch (e2) { err.textContent = e2.message; }
   } },
     h('h2', { text: 'Підключіть застосунок' }),
-    h('p', { class: 'muted', text: 'У Studio: Медіатека → Скани з телефону → Підключення застосунку → «Код підключення GrabFusion». Код діє 5 хвилин.' }),
+    h('p', { class: 'muted', text: 'У Studio: Медіатека → Скани з телефону → Підключення застосунку → «QR-код для входу в GrabFusion» і наведіть на нього камеру телефона — застосунок підключиться сам. Або введіть код нижче (діє 5 хвилин).' }),
     h('label', { for: 'code', text: 'Код' }), input, err,
     h('p', null, h('button', { class: 'primary', type: 'submit', text: 'Підключити' })));
   return form;
@@ -877,6 +886,20 @@ async function start() {
 }
 (async function boot() {
   setNet();
+  const qrCode = pairCodeFromHash(location.hash);
+  if (qrCode) {
+    // Код одноразовий: з адреси його прибираємо ще до обміну, щоб він не лишився в історії й закладках.
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      const r = await api('POST', '/pair', { code: qrCode });
+      state.user = r.user; await start(); return;
+    } catch (e) {
+      state.pairNotice = e.kind === 'network'
+        ? 'Немає звʼязку з сервісом. Відскануйте QR ще раз, коли звʼязок зʼявиться.'
+        : (e.message || 'Не вдалося підключитись за QR.') + ' Створіть новий QR у Studio або введіть код вручну.';
+      go('pair'); return;
+    }
+  }
   try {
     const s = await api('GET', '/session');
     if (s.paired) { state.user = s.user; await start(); } else go('pair');

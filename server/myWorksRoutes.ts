@@ -19,6 +19,7 @@ import { toExpressPayload } from './external/photoDraftMapping';
 import { createExpressInstruction } from './external/photoDraftSinks';
 import type { PhotoDraftStatus } from '../shared/photoDraftContract';
 import type { MyInstruction, MyPhoneDraft, MyWorks } from '../shared/myWorks';
+import { grabfusionPublicUrl } from '../shared/grabfusionPair';
 
 export type { MyInstruction, MyPhoneDraft, MyWorks };
 
@@ -94,10 +95,8 @@ export function buildMyWorks(express: ExpressDraft[], phone: StoredDraft[], grab
   return { instructions, phoneDrafts, grabfusionUrl };
 }
 
-export function grabfusionPublicUrl(env: NodeJS.ProcessEnv = process.env): string | null {
-  const raw = (env.GRABFUSION_PUBLIC_URL ?? '').trim().replace(/\/+$/, '');
-  return /^https?:\/\//i.test(raw) ? raw : null;
-}
+// Живе в shared/grabfusionPair.ts (потрібне й видачі QR підключення); тут реекспорт для наявних імпортів і тестів.
+export { grabfusionPublicUrl };
 
 export function registerMyWorksRoutes(app: Express): void {
   app.get('/api/my-works', requireAuth, async (req, res) => {

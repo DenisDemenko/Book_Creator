@@ -104,6 +104,37 @@ t('вигаданий код — 404', (await call('POST', '/api/external/v1/pai
 const tokens = await call('GET', '/api/external-tokens', { session: 'u-a' });
 t('токен видно в списку автора (можна відкликати)', tokens.data.tokens?.some((x: any) => x.name === 'DesignCraft (локально)'));
 
+// ── QR підключення GrabFusion (запис #537): посилання з адресою застосунка й одноразовим кодом ──────────
+console.log('\nQR-посилання GrabFusion:');
+{
+  const { buildGrabfusionPairUrl, grabfusionPublicUrl } = await import('../shared/grabfusionPair');
+  const www = 'https://www.fusionlab.in.ua/grabfisionstidio';
+  t('посилання = адреса + #pair=код (код у фрагменті, не в запиті)', buildGrabfusionPairUrl(www, 'ABCD-EFGH') === `${www}#pair=ABCD-EFGH`);
+  t('слеш у кінці адреси не дає «//»', buildGrabfusionPairUrl(`${www}/`, 'ABCD-EFGH') === `${www}#pair=ABCD-EFGH`);
+  t('немає адреси чи вона не http(s) — немає посилання', buildGrabfusionPairUrl(null, 'ABCD-EFGH') === null && buildGrabfusionPairUrl('', 'ABCD-EFGH') === null && buildGrabfusionPairUrl('javascript:alert(1)', 'ABCD-EFGH') === null && buildGrabfusionPairUrl('ftp://x', 'ABCD-EFGH') === null);
+  t('код із сторонніми символами відхиляється (нічого екранувати)', buildGrabfusionPairUrl(www, 'AB CD') === null && buildGrabfusionPairUrl(www, 'AB&x=1') === null && buildGrabfusionPairUrl(www, 'A#B-CD') === null && buildGrabfusionPairUrl(www, '') === null);
+  t('grabfusionPublicUrl: прибирає слеші, не приймає чуже', grabfusionPublicUrl({ GRABFUSION_PUBLIC_URL: ` ${www}// ` }) === www && grabfusionPublicUrl({}) === null && grabfusionPublicUrl({ GRABFUSION_PUBLIC_URL: 'www.x.ua' }) === null);
+
+  const prev = process.env.GRABFUSION_PUBLIC_URL;
+  process.env.GRABFUSION_PUBLIC_URL = www;
+  const g1 = await call('POST', '/api/external-tokens/pairing-code', { session: 'u-a', body: { scope: 'photo-drafts' } });
+  t('для GrabFusion відповідь має appUrl з тим самим кодом', g1.status === 201 && g1.data.appUrl === `${www}#pair=${g1.data.code}`, JSON.stringify(g1.data));
+  t('код у QR — той самий, що й текстовий', String(g1.data.appUrl).endsWith(`#pair=${g1.data.code}`));
+  const g2 = await call('POST', '/api/external-tokens/pairing-code', { session: 'u-a', body: { scope: 'photo-drafts' } });
+  t('кожне натискання — новий код і новий QR', g2.data.code !== g1.data.code && g2.data.appUrl !== g1.data.appUrl);
+  t('попередній QR уже не працює (скасовано новим)', (await call('POST', '/api/external/v1/pair', { body: { code: g1.data.code } })).status === 404);
+  const viaQr = await call('POST', '/api/external/v1/pair', { body: { code: g2.data.code } });
+  t('поточний QR міняється на токен області photo-drafts', viaQr.status === 201 && String(viaQr.data.token).startsWith('nst_') && viaQr.data.record?.scope === 'photo-drafts', JSON.stringify(viaQr.data).slice(0, 200));
+  t('після обміну QR одноразовий', (await call('POST', '/api/external/v1/pair', { body: { code: g2.data.code } })).status === 404);
+  const plain = await call('POST', '/api/external-tokens/pairing-code', { session: 'u-a', body: {} });
+  t('код не для GrabFusion (DesignCraft) без appUrl', plain.status === 201 && plain.data.appUrl === null);
+  t('гість QR не отримує', (await call('POST', '/api/external-tokens/pairing-code', { body: { scope: 'photo-drafts' } })).status === 401);
+  delete process.env.GRABFUSION_PUBLIC_URL;
+  const none = await call('POST', '/api/external-tokens/pairing-code', { session: 'u-a', body: { scope: 'photo-drafts' } });
+  t('адресу GrabFusion не задано — код є, appUrl null (вводять вручну)', none.status === 201 && typeof none.data.code === 'string' && none.data.appUrl === null);
+  if (prev !== undefined) process.env.GRABFUSION_PUBLIC_URL = prev;
+}
+
 server.close();
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало.`);
 if (fail) process.exit(1);

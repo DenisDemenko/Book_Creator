@@ -7,6 +7,7 @@ import type { DescribeRevealTarget } from './MediaLibraryView';
 import { apiPath } from '../utils/basePath';
 import { groupScanBatches } from '../utils/manuscriptBatch';
 import { ScanBatchCard } from './ScanBatchCard';
+import QRCode from 'qrcode';
 
 /**
  * «Скани з телефону» — Студійна половина зовнішнього API (WriterScan).
@@ -84,7 +85,10 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   // GrabFusion: одноразовий код замість токена — застосунок сам обміняє його на токен з областю photo-drafts.
-  const [grabCode, setGrabCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [grabCode, setGrabCode] = useState<{ code: string; expiresAt: string; appUrl: string | null } | null>(null);
+  /** QR-код з посиланням на GrabFusion і одноразовим кодом (малюється в браузері; код нікуди, крім цього екрана, не йде). */
+  const [grabQr, setGrabQr] = useState<string | null>(null);
+  const [grabExpired, setGrabExpired] = useState(false);
   const [grabBusy, setGrabBusy] = useState(false);
 
   const chapters = useMemo(() => [...(book.chapters || [])].sort((a, b) => a.order - b.order), [book.chapters]);
@@ -267,12 +271,39 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
         showToast(String(data?.error || t('scanInbox.grabFailed')));
         return;
       }
-      setGrabCode({ code: String(data.code), expiresAt: String(data.expiresAt) });
+      setGrabExpired(false);
+      setGrabCode({ code: String(data.code), expiresAt: String(data.expiresAt), appUrl: typeof data.appUrl === 'string' && data.appUrl ? data.appUrl : null });
       loadTokens();
     } finally {
       setGrabBusy(false);
     }
   };
+
+  // QR малюється з appUrl, який видала Студія; новий код = новий QR, попередній уже недійсний на сервері.
+  useEffect(() => {
+    let alive = true;
+    setGrabQr(null);
+    if (!grabCode?.appUrl) return undefined;
+    QRCode.toDataURL(grabCode.appUrl, { errorCorrectionLevel: 'M', margin: 2, width: 240 })
+      .then((url) => alive && setGrabQr(url))
+      .catch(() => alive && setGrabQr(null));
+    return () => {
+      alive = false;
+    };
+  }, [grabCode]);
+
+  // Після строку дії QR більше не показуємо: код однаково вже не прийме Студія.
+  useEffect(() => {
+    if (!grabCode) return undefined;
+    const left = new Date(grabCode.expiresAt).getTime() - Date.now();
+    if (!Number.isFinite(left)) return undefined;
+    if (left <= 0) {
+      setGrabExpired(true);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setGrabExpired(true), left);
+    return () => window.clearTimeout(timer);
+  }, [grabCode]);
 
   const handleRevoke = async (id: string) => {
     setRevokeConfirmId(null);
@@ -519,19 +550,64 @@ export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBo
                       {grabBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <KeyRound className="w-3 h-3" />}
                       {t('scanInbox.grabGetCode')}
                     </button>
-                    {grabCode && (
-                      <>
-                        <code className="px-3 py-1 rounded bg-slate-950 border border-cyan-500/40 text-cyan-100 text-sm tracking-[0.2em]" data-grabfusion-code>
-                          {grabCode.code}
-                        </code>
-                        <span className="text-[11px] text-slate-500">
-                          {t('scanInbox.grabCodeValid', {
-                            time: new Date(grabCode.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                          })}
-                        </span>
-                      </>
+                    {grabCode && !grabExpired && (
+                      <span className="text-[11px] text-slate-500">
+                        {t('scanInbox.grabCodeValid', {
+                          time: new Date(grabCode.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        })}
+                      </span>
                     )}
                   </div>
+                  {grabCode && grabExpired && (
+                    <p className="text-[11px] text-amber-300" data-grabfusion-expired>
+                      {t('scanInbox.grabQrExpired')}
+                    </p>
+                  )}
+                  {grabCode && !grabExpired && (
+                    <div className="flex flex-wrap items-start gap-3" data-grabfusion-pair>
+                      {grabCode.appUrl ? (
+                        <>
+                          {grabQr && (
+                            <img
+                              src={grabQr}
+                              alt={t('scanInbox.grabQrAlt')}
+                              width={192}
+                              height={192}
+                              className="rounded-lg bg-white p-1 shrink-0"
+                              data-grabfusion-qr
+                            />
+                          )}
+                          <div className="space-y-1.5 min-w-[12rem] flex-1">
+                            <p className="text-[11px] text-slate-300 leading-snug">{t('scanInbox.grabQrScan')}</p>
+                            <button
+                              type="button"
+                              onClick={() => copy('grab-link', grabCode.appUrl as string)}
+                              className="px-2.5 py-1 rounded-lg border border-cyan-500/40 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5"
+                              data-grabfusion-copy-link
+                            >
+                              {copiedKey === 'grab-link' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                              {copiedKey === 'grab-link' ? t('scanInbox.grabQrLinkCopied') : t('scanInbox.grabQrCopyLink')}
+                            </button>
+                            <p className="text-[11px] text-slate-500">
+                              {t('scanInbox.grabManualCode')}{' '}
+                              <code className="px-2 py-0.5 rounded bg-slate-950 border border-cyan-500/40 text-cyan-100 tracking-[0.2em]" data-grabfusion-code>
+                                {grabCode.code}
+                              </code>
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] text-slate-400" data-grabfusion-no-qr>
+                            {t('scanInbox.grabQrUnavailable')}
+                          </p>
+                          <code className="px-3 py-1 rounded bg-slate-950 border border-cyan-500/40 text-cyan-100 text-sm tracking-[0.2em]" data-grabfusion-code>
+                            {grabCode.code}
+                          </code>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {tokens.length === 0 ? (

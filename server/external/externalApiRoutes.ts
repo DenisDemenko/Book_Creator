@@ -47,6 +47,7 @@ import {
 } from './externalApiStore';
 import { cleanOcrText } from './scanOcrPrompt';
 import { PairingCodeStore, PAIRING_TTL_MS } from './pairingCodes';
+import { buildGrabfusionPairUrl, grabfusionPublicUrl } from '../../shared/grabfusionPair';
 
 /** Межі — однакові для застосунку й тестів, тому експортовані. */
 export const EXTERNAL_LIMITS = {
@@ -348,7 +349,10 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
       const scope = parseTokenScope(req.body?.scope);
       const defaultName = scope === 'photo-drafts' ? 'GrabFusion' : 'DesignCraft (локально)';
       const issued = pairing.issue(userId, String(req.body?.name || defaultName), scope);
-      res.status(201).json({ code: issued.display, expiresAt: issued.expiresAt, ttlSec: Math.round(PAIRING_TTL_MS / 1000) });
+      // Для GrabFusion — ще й посилання для QR: адреса застосунка + цей самий одноразовий код у фрагменті (shared/grabfusionPair.ts).
+      // null, коли GRABFUSION_PUBLIC_URL не задано або це код не для GrabFusion: тоді автор вводить код вручну, як раніше.
+      const appUrl = scope === 'photo-drafts' ? buildGrabfusionPairUrl(grabfusionPublicUrl(), issued.display) : null;
+      res.status(201).json({ code: issued.display, expiresAt: issued.expiresAt, ttlSec: Math.round(PAIRING_TTL_MS / 1000), appUrl });
     } catch (err) {
       console.error('[externalApi] pairing code:', err);
       fail(res, 500, 'server_error', 'Не вдалося створити код підключення.');
