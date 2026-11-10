@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-10.11 #539: Studio `48ff6e5` + журнал, маркетплейс `77db5fe` (`/grabfusion`); `git push production HEAD:master`. Після push: Railway `Book_Creator`, Vercel маркетплейсу; перевірити меню блоками, реєстрацію з галочками (Firebase), `/uk/grabfusion`.
+10.11 #539: Studio `48ff6e5` + журнал, маркетплейс `77db5fe` (`/grabfusion`); `git push production HEAD:master`. Деплої зелені; лишилось: реєстрація з галочками (Firebase), меню й `/grabfusion` на телефоні.
 
 10.11 #538: крок 3 — код `d2992d0` + журнал; `git push production HEAD:master`. Після push: Railway `Book_Creator` (GrabFusion не перевиставляти), `/api/admin/db-backups`, у логах `[dbBackup]`, `[creditGate] повернено`; звірити `[бали]` по кадрах.
 
