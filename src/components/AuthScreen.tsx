@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User as UserIcon, ArrowRight, Eye, Sparkles, AlertTriangle, Sun, Moon } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getRoleInfo } from '../utils/rbac';
+import type { UserRole } from '../types';
 import fusionLabStudioBrand from '../assets/fusion-lab-studio-brand.png';
+
+/** Ролі, що їх відмічають галочками при реєстрації (без адміністратора — його не обирають). Порядок = пріоритет головної ролі на сервері. */
+const REGISTRATION_ROLE_IDS: UserRole[] = ['writer', 'publisher', 'designer', 'translator', 'reader'];
 
 interface AuthScreenProps {
   onLogin: (email: string, password: string) => Promise<boolean>;
-  onRegister: (email: string, password: string, name: string) => Promise<boolean>;
+  onRegister: (email: string, password: string, name: string, roles?: UserRole[]) => Promise<boolean>;
   onLoginWithGoogle: () => Promise<boolean>;
   onContinueAsGuest: () => void;
   onClearError: () => void;
@@ -31,12 +36,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   theme = 'dark',
   onToggleTheme,
 }) => {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [roles, setRoles] = useState<UserRole[]>(['writer']);
+  const [rolesError, setRolesError] = useState(false);
 
   const switchMode = (next: 'login' | 'register') => {
     setMode(next);
@@ -46,9 +53,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
+    if (mode === 'register' && roles.length === 0) {
+      setRolesError(true);
+      return;
+    }
     setBusy(true);
     if (mode === 'login') await onLogin(email.trim(), password);
-    else await onRegister(email.trim(), password, name.trim());
+    else await onRegister(email.trim(), password, name.trim(), REGISTRATION_ROLE_IDS.filter((r) => roles.includes(r)));
     setBusy(false);
   };
 
@@ -188,6 +199,41 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     />
                   </div>
                 </div>
+
+                {mode === 'register' && (
+                  <fieldset data-register-roles>
+                    <legend className="text-xs text-slate-400 mb-1.5">{t('auth.rolesLabel')}</legend>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {REGISTRATION_ROLE_IDS.map((id) => {
+                        const info = getRoleInfo(id);
+                        const checked = roles.includes(id);
+                        return (
+                          <label
+                            key={id}
+                            className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                              checked ? 'border-amber-400/60 bg-amber-500/10 text-white' : 'border-white/[0.08] bg-slate-950/60 text-slate-300 hover:border-white/20'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              data-register-role={id}
+                              onChange={() => {
+                                setRolesError(false);
+                                setRoles((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+                              }}
+                              className="accent-amber-400"
+                            />
+                            <span>{info.badgeEmoji}</span>
+                            <span className="font-semibold truncate">{lang === 'en' ? info.nameEn : info.nameUk}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1.5 leading-snug">{t('auth.rolesHint')}</p>
+                    {rolesError && <p className="text-[11px] text-rose-300 mt-1" role="alert">{t('auth.rolesRequired')}</p>}
+                  </fieldset>
+                )}
 
                 <button
                   id="auth-submit-btn"

@@ -9,12 +9,10 @@ import {
   Feather, 
   Building2, 
   Layers, 
-  Check, 
   Shuffle, 
   ArrowRight 
 } from 'lucide-react';
 import { UserRole } from '../types';
-import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface CreateBookModalProps {
@@ -44,8 +42,7 @@ export const CreateBookModal: React.FC<CreateBookModalProps> = ({
   authorName,
   onCreateBook,
 }) => {
-  const { lang, t } = useLanguage();
-  const roleName = (info: ReturnType<typeof getRoleInfo>) => (lang === 'en' ? info.nameEn : info.nameUk);
+  const { t } = useLanguage();
 
   const generateRandomBookId = () => {
     const timestamp = Date.now().toString(36).toUpperCase().slice(-4);
@@ -60,7 +57,9 @@ export const CreateBookModal: React.FC<CreateBookModalProps> = ({
   const [genre, setGenre] = useState<string>('Кіберпанк / Наукова фантастика');
   const [bookId, setBookId] = useState<string>(generateRandomBookId());
   const [initialVersion, setInitialVersion] = useState<string>('v1.0.0');
-  const [creatorRole, setCreatorRole] = useState<UserRole>(currentRole);
+  // Роль творця — роль самого користувача в обліковому записі (для адміна — адмін). Вибирати її тут не можна: кнопка
+  // «адміністратор» у майстрі була небезпечною, а ролі користувач ставить один раз при реєстрації.
+  const creatorRole: UserRole = currentRole;
   const [initialNote, setInitialNote] = useState<string>(t('bookModals.defaultInitialNote'));
 
   if (!isOpen) return null;
@@ -83,8 +82,6 @@ export const CreateBookModal: React.FC<CreateBookModalProps> = ({
     );
     onClose();
   };
-
-  const creatorRoleInfo = getRoleInfo(creatorRole);
 
   const genrePresets = [
     'Кіберпанк / Наукова фантастика',
@@ -212,36 +209,6 @@ export const CreateBookModal: React.FC<CreateBookModalProps> = ({
                   </option>
                 ))}
               </select>
-            </div>
-          </div>
-
-          {/* Creator Role */}
-          <div>
-            <label className="text-slate-300 font-medium block mb-1.5">
-              {t('bookModals.creatorRoleLabel')}
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {ALL_ROLES.map((r) => {
-                const isSel = creatorRole === r.id;
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => setCreatorRole(r.id)}
-                    className={`p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
-                      isSel
-                        ? 'bg-amber-500/20 border-amber-500/80 text-white ring-1 ring-amber-400/40'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="text-base">{r.badgeEmoji}</span>
-                      <span className="font-semibold text-xs truncate">{roleName(r)}</span>
-                    </div>
-                    {isSel && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                  </button>
-                );
-              })}
             </div>
           </div>
 

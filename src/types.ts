@@ -1091,6 +1091,9 @@ export interface AuthUser {
   disabled?: boolean;
   createdAt?: string;
   lastLoginAt?: string;
+  /** Ролі з галочок при реєстрації (журнал #539); `rolesChosen` — чи вибір уже зроблено. */
+  roles?: UserRole[];
+  rolesChosen?: boolean;
 }
 
 /** Обліковий запис у списку панелі адміністратора. */

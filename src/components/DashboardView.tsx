@@ -21,11 +21,13 @@ import {
   BookPlus,
   X,
   FileText,
+  Smartphone,
 } from 'lucide-react';
 import type { AuthUser, Book, NavigationTab, WriterMasteryState, SkillCategory } from '../types';
 import { SKILL_CATEGORIES, SKILL_TASKS, INITIAL_MASTERY_STATE } from '../data/skillsData';
 import { useLanguage } from '../i18n/LanguageContext';
 import { CoursesBlock, InstructionsBlock, PhoneDraftsBlock, useMyWorks } from './MyWorksBlocks';
+import { GrabfusionConnectModal } from './GrabfusionConnectModal';
 import { loadInstructionDraft } from '../utils/instructionDraft';
 import { apiPath } from '../utils/basePath';
 import { listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
@@ -272,6 +274,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Модалка вибору способу створення (візард / з нульової планки) і
   // підтвердження видалення книги.
   const [createChooserOpen, setCreateChooserOpen] = useState(false);
+  const [grabfusionOpen, setGrabfusionOpen] = useState(false);
   const [bookToDelete, setBookToDelete] = useState<BookSummary | null>(null);
 
   // Персональний облік витрат токенів (Завдання 2 grill-me сесії) — та сама
@@ -750,10 +753,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
                 <p className="text-xs text-slate-400 mt-1">{t('dashboard.createBookBlankDesc')}</p>
               </button>
+              <button
+                onClick={() => {
+                  setCreateChooserOpen(false);
+                  setGrabfusionOpen(true);
+                }}
+                data-create-book-grabfusion
+                className="w-full text-left p-4 rounded-xl bg-slate-800/60 border border-slate-700 hover:border-violet-500/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-violet-300 font-bold text-sm">
+                  <Smartphone className="w-4 h-4" />
+                  <span>{t('dashboard.createBookGrabfusion')}</span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">{t('dashboard.createBookGrabfusionDesc')}</p>
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {grabfusionOpen && <GrabfusionConnectModal onClose={() => setGrabfusionOpen(false)} />}
 
       {/* Модалка підтвердження видалення книги */}
       {bookToDelete && (

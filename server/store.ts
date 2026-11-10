@@ -47,6 +47,9 @@ export interface StoredUser {
   firebaseUid?: string;
   avatarUrl?: string;
   disabled?: boolean;
+  /** Ролі, відмічені галочками при реєстрації (журнал #539); `role` — головна з них. Один раз, далі — лише адмін. */
+  roles?: string[];
+  rolesChosenAt?: string;
   createdAt: string;
   lastLoginAt?: string;
 }
@@ -144,6 +147,7 @@ interface UserRow {
   password_hash: string | null; google_id: string | null; firebase_uid: string | null;
   avatar_url: string | null;
   disabled: number; created_at: string; last_login_at: string | null;
+  roles?: string | null; roles_chosen_at?: string | null;
 }
 
 function rowToUser(row: UserRow): StoredUser {
@@ -160,6 +164,15 @@ function rowToUser(row: UserRow): StoredUser {
   if (row.firebase_uid) user.firebaseUid = row.firebase_uid;
   if (row.avatar_url) user.avatarUrl = row.avatar_url;
   if (row.last_login_at) user.lastLoginAt = row.last_login_at;
+  if (row.roles) {
+    try {
+      const parsed = JSON.parse(row.roles);
+      if (Array.isArray(parsed)) user.roles = parsed.filter((r): r is string => typeof r === 'string');
+    } catch {
+      /* пошкоджений JSON — як «ролей не обрано» */
+    }
+  }
+  if (row.roles_chosen_at) user.rolesChosenAt = row.roles_chosen_at;
   return user;
 }
 
@@ -268,14 +281,15 @@ function useJson(): boolean {
 function insertUserRow(user: StoredUser): void {
   getDb()!
     .prepare(
-      `INSERT INTO users (id, email, name, role, password_hash, google_id, firebase_uid, avatar_url, disabled, created_at, last_login_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, email, name, role, password_hash, google_id, firebase_uid, avatar_url, disabled, created_at, last_login_at, roles, roles_chosen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          email = excluded.email, name = excluded.name, role = excluded.role,
          password_hash = excluded.password_hash, google_id = excluded.google_id,
          firebase_uid = excluded.firebase_uid,
          avatar_url = excluded.avatar_url, disabled = excluded.disabled,
-         last_login_at = excluded.last_login_at`
+         last_login_at = excluded.last_login_at,
+         roles = excluded.roles, roles_chosen_at = excluded.roles_chosen_at`
     )
     .run(
       user.id,
@@ -288,7 +302,9 @@ function insertUserRow(user: StoredUser): void {
       user.avatarUrl ?? null,
       user.disabled ? 1 : 0,
       user.createdAt,
-      user.lastLoginAt ?? null
+      user.lastLoginAt ?? null,
+      user.roles ? JSON.stringify(user.roles) : null,
+      user.rolesChosenAt ?? null
     );
 }
 

@@ -16,6 +16,7 @@
  * отримує роль admin автоматично, як тільки з'явиться в системі.
  */
 
+import { ROLE_CHOICE_MESSAGES, canChooseRoles, normalizeRegistrationRoles, primaryRegistrationRole } from './roleChoice';
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction, Express } from 'express';
 import {
@@ -296,6 +297,9 @@ export function publicUser(user: StoredUser) {
     disabled: !!user.disabled,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
+    // Ролі з галочок при реєстрації (журнал #539); `rolesChosen` — чи вибір уже зроблено.
+    roles: user.roles ?? [],
+    rolesChosen: !!user.rolesChosenAt,
   };
 }
 
@@ -506,6 +510,28 @@ export function registerAuthRoutes(app: Express): void {
     } catch (err) {
       console.error('[auth] firebase-session:', err);
       res.status(500).json({ error: 'Не вдалося увійти.' });
+    }
+  });
+
+  /**
+   * Ролі, які користувач відмітив галочками при реєстрації. Один раз і лише щойно створеному обліковому запису
+   * з типовою роллю (server/roleChoice.ts); головна роль із переліку стає роллю облікового запису, і за нею
+   * вантажаться простір і меню. Адмін і ролі маркетплейсу не змінюються.
+   */
+  app.post('/api/auth/roles', requireAuth, async (req, res) => {
+    try {
+      const roles = normalizeRegistrationRoles(req.body?.roles);
+      if (!roles) return res.status(400).json({ error: 'Оберіть хоча б одну роль зі списку.', kind: 'bad_input' });
+      const stored = await findUserById(String(req.principal!.id));
+      if (!stored) return res.status(404).json({ error: 'Обліковий запис не знайдено.' });
+      const verdict = canChooseRoles(stored, Date.now());
+      if (!verdict.ok) return res.status(409).json({ error: ROLE_CHOICE_MESSAGES[verdict.reason!], kind: verdict.reason });
+      const updated = { ...stored, role: primaryRegistrationRole(roles), roles, rolesChosenAt: new Date().toISOString() };
+      await saveUser(updated);
+      res.json({ user: publicUser(updated), permissions: await effectivePermissions(updated.role) });
+    } catch (err) {
+      console.error('[auth] roles:', err);
+      res.status(500).json({ error: 'Не вдалося зберегти ролі.' });
     }
   });
 
