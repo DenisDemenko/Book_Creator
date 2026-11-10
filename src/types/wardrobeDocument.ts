@@ -3,7 +3,7 @@ export interface WardrobeTextBlock {
   role?:string;links?:{label:string;pageId:string}[];
 }
 export interface WardrobePdfData {
-  schema:'fusionlab.wardrobe.pdf';version:1;title:string;createdAt:string;
+  schema:'fusionlab.wardrobe.pdf'|'fusionlab.bed.pdf';version:1;title:string;createdAt:string;
   backgroundPdf:string;font:string;pages:{id:string;title:string;blocks:WardrobeTextBlock[]}[];
   pageOrder:string[];edits:Record<string,{text:string;size?:number}>;notes:Record<string,string>;
 }

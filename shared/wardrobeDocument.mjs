@@ -5,7 +5,7 @@ export function toBase64(bytes){let s='';for(let i=0;i<bytes.length;i+=32768)s+=
 export function fromBase64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0));}
 export function validateEditableDocument(d){
   const bad=()=>{throw Error('Некоректний редагований PDF-документ.');};
-  if(!d||d.schema!=='fusionlab.wardrobe.pdf'||d.version!==1||typeof d.title!=='string'||d.title.length>300||!Array.isArray(d.pages)||!d.pages.length||d.pages.length>2000)bad();
+  if(!d||!['fusionlab.wardrobe.pdf','fusionlab.bed.pdf'].includes(d.schema)||d.version!==1||typeof d.title!=='string'||d.title.length>300||!Array.isArray(d.pages)||!d.pages.length||d.pages.length>2000)bad();
   for(const key of ['backgroundPdf','font'])if(typeof d[key]!=='string'||d[key].length>(key==='font'?1500000:8000000)||!/^[A-Za-z0-9+/]*={0,2}$/.test(d[key]))bad();
   if(fromBase64(d.font).slice(0,4).toString()!=='0,1,0,0')bad();
   if(fromBase64(d.backgroundPdf).slice(0,5).toString()!=='37,80,68,70,45')bad();

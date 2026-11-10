@@ -189,7 +189,7 @@ const INITIAL_LOG_ENTRIES: AuditLogEntry[] = [
 const WardrobeBookEntry=React.lazy(()=>import('./components/pdf/WardrobeBookEntry').then(m=>({default:m.WardrobeBookEntry})));
 export default function App(){
   const initialEntry=useRef(parseAppPath(window.location.pathname,API_BASE)),route=initialEntry.current;
-  if(route?.tab==='pdf-editor'&&/^WD-[a-f0-9-]{36}$/i.test(route.projectId))return <React.Suspense fallback={<p>Завантажуємо документ…</p>}><WardrobeBookEntry documentId={route.projectId}/></React.Suspense>;
+  if(route?.tab==='pdf-editor'&&/^(?:WD|BD)-[a-f0-9-]{36}$/i.test(route.projectId))return <React.Suspense fallback={<p>Завантажуємо документ…</p>}><WardrobeBookEntry documentId={route.projectId}/></React.Suspense>;
   return <StudioApp/>;
 }
 function StudioApp() {
