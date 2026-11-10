@@ -140,7 +140,7 @@ function viewPair() {
     } catch (e2) { err.textContent = e2.message; }
   } },
     h('h2', { text: 'Підключіть застосунок' }),
-    h('p', { class: 'muted', text: 'У Studio: Медіатека → Скани з телефону → Підключення застосунку → «QR-код для входу в GrabFusion» і наведіть на нього камеру телефона — застосунок підключиться сам. Або введіть код нижче (діє 5 хвилин).' }),
+    h('p', { class: 'muted', text: 'Введіть код підключення нижче. Його видає сторінка fusionlab.in.ua/grabfusion (кнопка «Отримати код») на комп’ютері. Або в Studio: Медіатека → Скани з телефону → «QR-код для входу в GrabFusion» — наведіть камеру, і застосунок підключиться сам. Код діє 5 хвилин.' }),
     h('label', { for: 'code', text: 'Код' }), input, err,
     h('p', null, h('button', { class: 'primary', type: 'submit', text: 'Підключити' })));
   return form;
