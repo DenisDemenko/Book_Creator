@@ -572,3 +572,11 @@ AGENTS.md забороняє їх без прямого прохання. Код
 Фінальна інтегрована перевірка 10.11: Studio build/types, 80/80 journal tests, journal-check, 23 guarded bridge routes та PDF fixture checks пройшли. API build, web types, kernel і 25 HTTP/PostgreSQL/Chromium тестів Marketplace пройшли після інтеграції master. Marketplace b551d5f уже підтверджено в origin/master; Railway/Vercel pending на момент перевірки. Індекс журналу повернуто нижче 120 КБ перенесенням старих станів і повного контексту DesignCraft до log/state-history-2026-10.md без втрати тексту. Studio готова до push. Живий Firebase, реальні тарифи/замовлення/ЧПУ не перевірялись.
 
 Публікація коду 10.11 підтверджена: Marketplace origin/master=b551d5fa4f616b1fe8466d8d87adde0aac46a0f0, Studio origin/master=b91e4cd02890586bc3822e58a7e2d8662e2a8c6b. Обидва push fast-forward, SHA звірено через ls-remote. Наступний коміт фіксує лише цю квитанцію. CI/production ще не підтверджені; для появи owner-кнопки на API задати CONSTRUCTOR_OWNER_EMAIL=tropazemli@gmail.com або перевірений UID, заповнити справжні тарифи. Попередні позначки «не комічено/не запитано/готове до push» є історичними.
+
+## Приймання — Codex, 10.11.2026 #02, bed-documents
+Прочитано AGENTS.md, HANDOFF.md, поточний план і останні записи; origin Book_Creator, чистий HEAD 82ae6ae82596193b91e7b9f54c0dd961dc397915. Створено власний session.lock. Попередні сторонні зміни не переносяться і не скасовуються. Завдання власника — конструктор ліжок з можливостями шаф/тумб, включно з редагованими PDF у Книгах; суміжний Marketplace feat/bed-builder. Запис у серверній адмінці не створювався. Попередні записи не є підтвердженням production Firebase-входу або нашого нового деплою.
+
+
+Ліжка #545: код 99ce5f9 на актуальному b5227a4; чужі записи збережено, власний номер 542. Локальні TypeScript/production build/HTTP SQLite/Chromium PDF.js успішні. CI й публікація ще очікуються; Studio перед Marketplace. Дозвіл власника чинний, lock bed-documents наш. Production Firebase-клієнт не використовувався, тільки fixture identities; фінанси/томи/ключі не змінені.
+
+Інтегровано de47b72; чужі записи #542–#544 збережені, власний номер тепер #545. Push/CI/deploy ще очікуються.
