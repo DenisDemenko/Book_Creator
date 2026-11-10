@@ -467,7 +467,9 @@ t('кожен урок має позначку «написано ШІ» (тек
 t('витрати ШІ на чернетку — з журналу', (origin0.ai?.calls ?? 0) >= 4 && origin0.ai?.costUsd === Math.round((origin0.ai?.calls ?? 0) * 0.01 * 10000) / 10000, JSON.stringify(origin0.ai));
 t('обкладинка — перший кадр, ціни ще немає (її ставить автор)', course.coverUrl === urls[0] && course.priceMinor === undefined && course.audience.join() === 'початківці');
 t('повторний submit — 409 wrong_status, другого курсу немає', isError(await call('POST', `${PD}/${cd}/submit`, { token: grab }), 409, 'wrong_status') && courses.listCoursesForOwner('u-a').length === 1);
-t('відправлену не правлять і не відкидають', isError(await call('DELETE', `${PD}/${cd}`, { token: grab }), 409, 'wrong_status'));
+const delSent = await call('DELETE', `${PD}/${cd}`, { token: grab });
+t('відправлену чернетку можна прибрати зі списку (з 10.11.2026), а курс у Studio лишається', delSent.status === 200 && delSent.data.draft.status === 'discarded' && courses.listCoursesForOwner('u-a').length === 1);
+t('…і в переліку чернеток її вже немає', !(await call('GET', PD, { token: grab })).data.drafts.some((x: any) => x.draftId === cd));
 
 console.log('\nВідправка: інструкція');
 const ins = await makeReady('instruction');

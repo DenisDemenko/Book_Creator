@@ -143,7 +143,34 @@ function viewPair() {
     h('p', { class: 'muted', text: 'Введіть код підключення нижче. Його видає сторінка fusionlab.in.ua/grabfusion (кнопка «Отримати код») на комп’ютері. Або в Studio: Медіатека → Скани з телефону → «QR-код для входу в GrabFusion» — наведіть камеру, і застосунок підключиться сам. Код діє 5 хвилин.' }),
     h('label', { for: 'code', text: 'Код' }), input, err,
     h('p', null, h('button', { class: 'primary', type: 'submit', text: 'Підключити' })));
-  return form;
+  return h('div', null, form, viewPairByEmail(input, err));
+}
+
+/* Не біля комп'ютера: код надсилається на пошту облікового запису (журнал #541). Відповідь Studio однакова, чи є такий обліковий запис. */
+function viewPairByEmail(codeInput, codeErr) {
+  let saved = '';
+  try { saved = localStorage.getItem('gf_email') || ''; } catch (e) { /* приватний режим */ }
+  const email = h('input', { id: 'pair-email', type: 'email', inputmode: 'email', autocomplete: 'email', autocapitalize: 'off', placeholder: 'пошта вашого облікового запису' });
+  email.value = saved;
+  const note = h('p', { class: 'muted', id: 'pair-email-note' });
+  const err = h('p', { class: 'err', id: 'pair-email-err' });
+  const btn = h('button', { class: 'small', type: 'submit', id: 'btn-pair-email', text: 'Надіслати код на пошту' });
+  return h('form', { class: 'card', id: 'pair-email-form', onsubmit: async (e) => {
+    e.preventDefault(); err.textContent = ''; note.textContent = '';
+    const value = email.value.trim();
+    if (!value) { err.textContent = 'Введіть пошту, з якою ви входите у Fusion Lab.'; return; }
+    btn.disabled = true;
+    try {
+      const r = await api('POST', '/pair/email', { email: value });
+      try { localStorage.setItem('gf_email', value); } catch (e2) { /* не критично */ }
+      note.textContent = r.message + ' Відкрийте лист на цьому телефоні: натисніть кнопку в листі або введіть код у поле вище.';
+      codeInput.focus();
+    } catch (e2) { err.textContent = e2.message; } finally { btn.disabled = false; }
+  } },
+    h('h3', { text: 'Немає комп’ютера поруч?' }),
+    h('p', { class: 'muted', text: 'Введіть пошту свого облікового запису — ми надішлемо код підключення листом. Код діє 15 хвилин.' }),
+    h('label', { for: 'pair-email', text: 'Пошта' }), email, err, note,
+    h('p', null, btn));
 }
 
 /* ---------- список чернеток ---------- */
@@ -163,9 +190,28 @@ function viewList() {
     box.append(h('div', { class: 'card row', 'data-draft': d.draftId },
       h('div', { class: 'grow' }, h('strong', { text: d.title || 'Без назви' }),
         h('div', { class: 'muted', text: `${KIND[d.kind] || d.kind} · ${STATUS[d.status] || d.status} · кадрів: ${d.photoCount}` })),
-      h('button', { text: 'Відкрити', onclick: () => openDraft(d.draftId) })));
+      h('div', { class: 'row' },
+        h('button', { text: 'Відкрити', onclick: () => openDraft(d.draftId) }),
+        h('button', { class: 'small danger', 'data-delete-draft': d.draftId, text: 'Видалити', onclick: () => deleteDraft(d) }))));
   }
   return box;
+}
+
+/* Видалення чернетки з системи (запит власника 10.11.2026): прибирає її зі списку, у тому числі відправлену. Те, що вже в Studio
+   (книга, курс, інструкція, «Вхідні») і фото в медіатеці, лишається — про це й попереджаємо. */
+async function deleteDraft(d) {
+  const name = d.title || 'Без назви';
+  const sent = d.status === 'submitted';
+  const msg = `Видалити чернетку «${name}»?\n\n` + (sent
+    ? 'Вона зникне зі списку. Те, що вже відправлено в Studio (книга, курс чи інструкція), і фото в медіатеці лишаться там.'
+    : 'Кадри й текст цієї чернетки буде прибрано зі списку. Дію не можна скасувати.');
+  if (!window.confirm(msg)) return;
+  try {
+    await api('DELETE', `/drafts/${d.draftId}`);
+    state.drafts = state.drafts.filter((x) => x.draftId !== d.draftId);
+    toast('Чернетку видалено.');
+  } catch (e) { toast(e.message); }
+  render();
 }
 
 function viewCreate() {

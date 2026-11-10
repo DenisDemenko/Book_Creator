@@ -779,9 +779,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         String(req.params.draftId),
         owner(req),
         (d) => {
-          if (d.status === 'submitted') {
-            throw new DraftChangeError(409, 'wrong_status', 'Відправлену чернетку відкинути не можна — курс уже в Studio.');
-          }
+          // З 10.11.2026 (запит власника: видалення чернеток з системи) прибрати можна й ВІДПРАВЛЕНУ: чернетка — лише запис
+          // на боці телефона, а результат (книга, курс, інструкція, «Вхідні») живе в Studio окремо й цим не зачіпається.
           d.status = 'discarded';
           d.job = null;
         },

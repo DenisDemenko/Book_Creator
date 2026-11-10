@@ -25,8 +25,9 @@
  */
 
 import type { Express, NextFunction, Request, Response } from 'express';
-import { requireAuth, requirePermission } from '../auth';
-import { findUserById } from '../store';
+import { can, requireAuth, requirePermission } from '../auth';
+import { findUserByEmail, findUserById } from '../store';
+import { mailConfig, sendMail } from '../mail';
 import { getBook, listBooks } from '../bookStore';
 import { bookToMarkdown } from '../pdf/bookToMarkdown';
 import { readAsset, saveAsset } from '../media/mediaLibraryStore';
@@ -47,6 +48,7 @@ import {
 } from './externalApiStore';
 import { cleanOcrText } from './scanOcrPrompt';
 import { PairingCodeStore, PAIRING_TTL_MS } from './pairingCodes';
+import { PairEmailLimiter, requestPairingEmail, type PairEmailDeps } from './pairEmail';
 import { buildGrabfusionPairUrl, grabfusionPublicUrl } from '../../shared/grabfusionPair';
 
 /** Межі — однакові для застосунку й тестів, тому експортовані. */
@@ -95,6 +97,8 @@ export interface ExternalApiDeps {
    */
   schedule?: (task: () => Promise<void>) => void;
   now?: () => Date;
+  /** Код підключення на пошту (журнал #541): підміна пошти, ліміту й пошуку користувача для тестів. */
+  pairEmail?: Partial<PairEmailDeps>;
 }
 
 declare global {
@@ -383,6 +387,42 @@ export function registerExternalApiRoutes(app: Express, deps: ExternalApiDeps): 
     } catch (err) {
       console.error('[externalApi] pair:', err);
       fail(res, 500, 'server_error', 'Не вдалося підключити застосунок.');
+    }
+  });
+
+  /**
+   * Код підключення на ПОШТУ облікового запису — для автора, який не біля комп'ютера (журнал #541). Без входу; відповідь однакова,
+   * чи є такий обліковий запис (202), лист іде у фоні. Деталі безпеки — server/external/pairEmail.ts.
+   */
+  const pairEmailLimiter = new PairEmailLimiter();
+  const pairEmailDeps: PairEmailDeps = {
+    store: pairing,
+    limiter: pairEmailLimiter,
+    mailEnabled: () => mailConfig.enabled,
+    findUserByEmail: (email) => findUserByEmail(email),
+    canEditContent: (role) => can(role as never, 'canEditContent'),
+    sendMail,
+    publicUrl: () => grabfusionPublicUrl(),
+    ...(deps.pairEmail ?? {}),
+  };
+  app.post('/api/external/v1/pair/email', async (req, res) => {
+    try {
+      const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+      const out = await requestPairingEmail(pairEmailDeps, { email: req.body?.email, ip: forwarded || String(req.ip || req.socket?.remoteAddress || '') });
+      if (out.kind === 'mail_unavailable') {
+        return fail(res, 503, 'mail_unavailable', 'Надсилання листів на сервері не налаштовано. Візьміть код на комп’ютері: Студія → Медіатека → «Скани з телефону».');
+      }
+      if (out.kind === 'bad_email') return fail(res, 400, 'bad_input', 'Введіть електронну пошту свого облікового запису.');
+      if (out.kind === 'limited') {
+        return fail(res, 429, 'too_many_attempts', 'Забагато запитів коду. Зачекайте кілька хвилин і спробуйте ще раз або візьміть код на комп’ютері.');
+      }
+      res.status(202).json({
+        ok: true,
+        message: 'Якщо для цієї пошти є обліковий запис, ми надіслали лист із кодом. Він діє 15 хвилин. Перевірте також «Спам».',
+      });
+    } catch (err) {
+      console.error('[externalApi] pair/email:', err);
+      fail(res, 500, 'server_error', 'Не вдалося надіслати код. Спробуйте ще раз.');
     }
   });
 

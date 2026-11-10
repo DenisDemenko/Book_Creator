@@ -21,9 +21,15 @@ from .imaging import prepare_photo
 from .models import Limits
 from .sessions import Session, SessionStore
 from .settings import Settings
-from .studio_client import StudioClient, pair_with_code
+from .studio_client import StudioClient, pair_with_code, request_pair_email
 
 COOKIE = "gf_session"
+
+
+def client_ip(request: Request) -> str | None:
+    """Адреса телефона: перша в X-Forwarded-For (за проксі маркетплейсу), інакше пряме з'єднання."""
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return forwarded or (request.client.host if request.client else None)
 LIMITS_TTL = 600.0
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024  # сире фото з телефона до стиснення
 
@@ -95,7 +101,7 @@ def build_router(deps: Deps) -> APIRouter:
         if not code:
             raise StudioError("bad_input", "Введіть код підключення зі Studio.")
         try:
-            res = pair_with_code(deps.settings.studio_url, code, transport=deps.transport)
+            res = pair_with_code(deps.settings.studio_url, code, transport=deps.transport, client_ip=client_ip(request))
         except httpx.TransportError:
             raise StudioError("server_error", "Studio зараз недоступна. Спробуйте за хвилину.", 502) from None
         user = res.get("user") if isinstance(res.get("user"), dict) else {}
@@ -105,6 +111,22 @@ def build_router(deps: Deps) -> APIRouter:
         response.set_cookie(COOKIE, s.sid, httponly=True, samesite="strict", secure=deps.settings.cookie_secure,
                             max_age=60 * 60 * 24 * 90, path=deps.settings.base_path or "/")
         return {"paired": True, "user": {"name": s.user_name}}
+
+    @router.post("/pair/email")
+    async def pair_email(request: Request) -> dict[str, Any]:
+        """Код підключення на пошту — для автора, який не біля комп'ютера. Відповідь однакова, чи є обліковий запис."""
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        email = str(body.get("email", "")).strip() if isinstance(body, dict) else ""
+        if not email or "@" not in email or len(email) > 254:
+            raise StudioError("bad_input", "Введіть електронну пошту свого облікового запису в Studio.")
+        try:
+            res = request_pair_email(deps.settings.studio_url, email, transport=deps.transport, client_ip=client_ip(request))
+        except httpx.TransportError:
+            raise StudioError("server_error", "Studio зараз недоступна. Спробуйте за хвилину.", 502) from None
+        return {"ok": True, "message": str(res.get("message") or "Якщо для цієї пошти є обліковий запис, ми надіслали лист із кодом.")}
 
     @router.post("/logout")
     def logout(request: Request, response: Response) -> dict[str, bool]:
