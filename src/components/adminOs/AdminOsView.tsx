@@ -136,7 +136,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
     ? 'crm'
     : authUser?.role === 'furniture_designer' ? 'slab-tables' : null;
 
-  const [activeId, setActiveId] = useState<string | null>(restrictedToNodeId);
+  const [activeId, setActiveId] = useState<string | null>(restrictedToNodeId||(new URL(location.href).searchParams.get("adminNode")==="products"?"products":null));
   useEffect(() => {
     if (restrictedToNodeId) setActiveId(restrictedToNodeId);
   }, [restrictedToNodeId]);

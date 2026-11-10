@@ -75,6 +75,8 @@ export const AdminProductsView: React.FC = () => {
     void load();
   }, [load]);
 
+  useEffect(()=>{const id=new URL(location.href).searchParams.get("constructorProduct");if(id){const p=drafts.find(p=>p.id==="CP-"+id);if(p)setEditing({product:p});}},[drafts]);
+
   const removeDraft = async (id: string) => {
     setBusy(true);
     setError(null);
@@ -100,6 +102,7 @@ export const AdminProductsView: React.FC = () => {
       <FurnitureProductEditor
         initial={editing.product}
         onBack={() => {
+          const url=new URL(location.href);url.searchParams.delete('constructorProduct');history.replaceState(null,'',url);
           setEditing(null);
           void load();
         }}
