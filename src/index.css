@@ -756,100 +756,32 @@ html[data-header-collapsed='true'] {
   #instruction-print-root figure { break-inside: avoid; }
 }
 
-/* ============================================================
-   ONBOARDING TOUR — спливаючі довідкові вікна для нових авторів.
-   Аура тепер ТА САМА, що в «електричних пігулок» адмінпанелі ядра
-   сайту (`.os-pill`/`.os-pill--active`, adminOs.css): один ціановий
-   акцент (#00d2ff/#00f0ff), а не веселкова рамка з переливом усіх
-   кольорів через hue-rotate — власник: «зроби дизайн цих вікон такий
-   самий, як кнопки в адмін панелі ядра управління сайтом». Той самий
-   прийом, три складові:
-     • кільце — конічний градієнт, що обертається (як `.os-pill::before`,
-       `os-spin`), а не веселка, що змінює відтінок;
-     • світіння — статичний box-shadow, як у `.os-pill--active` (картка
-       підказки завжди «активна», а не лише при наведенні, тож без
-       дихання-jitter, розрахованого на hover);
-     • жодного окремого розмитого ореолу (`::after` з `filter: blur`) —
-       в адмінці аура це кільце + box-shadow, без третього шару.
-   Прожектор навколо цільової кнопки й далі затемнює решту екрана
-   величезним box-shadow, лише в тому самому ціановому тоні.
-   ============================================================ */
-
-@keyframes nova-tour-ring-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes nova-tour-card-in {
-  from { opacity: 0; transform: translateY(6px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes nova-tour-ring-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.65), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
-  50% { box-shadow: 0 0 0 6px rgba(0, 240, 255, 0.9), 0 0 0 9999px rgba(2, 6, 23, 0.62); }
-}
-
-.nova-tour-spotlight {
-  position: fixed;
-  border-radius: 16px;
-  pointer-events: none;
-  z-index: 80;
-  animation: nova-tour-ring-pulse 2.2s ease-in-out infinite;
-  transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
-}
-
+/* Довідка без обертання, пульсації та затемнення навігації. */
 .nova-tour-card {
   position: fixed;
-  isolation: isolate;
-  border-radius: 1.1rem;
-  /* Темно-синій фон адмінпанелі (`.os-pill-inner`), а не сіро-блакитний
-     градієнт попередньої версії — картка й кільце тепер одна система. */
-  background: linear-gradient(180deg, #0d1a2c 0%, #070e1a 100%);
-  box-shadow: 0 25px 60px -20px rgba(2, 8, 23, 0.75), 0 0 22px rgba(0, 240, 255, 0.55);
-  animation: nova-tour-card-in 0.28s ease-out;
+  right: 20px;
+  bottom: 24px;
+  z-index: 85;
+  width: min(400px, calc(100vw - 24px));
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid rgba(103, 232, 249, 0.35);
+  border-radius: 22px;
+  background: linear-gradient(145deg, #152238, #0b1220);
+  box-shadow: 0 18px 60px rgba(2, 6, 23, 0.45);
 }
-
-/* Ціанове електричне кільце 2px — та сама маска XOR, що й раніше (повний
-   прямокутник мінус звужений на товщину рамки), лише градієнт тепер
-   одного кольору, як у `.os-pill::before`: не веселка, а дуга ціану, що
-   пробігає по колу з "іскрою" (білий спалах на піку). */
-.nova-tour-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  padding: 2px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    rgba(0, 210, 255, 0.05) 50deg,
-    rgba(0, 240, 255, 0.3) 100deg,
-    rgba(0, 255, 255, 0.95) 130deg,
-    rgba(255, 255, 255, 1) 140deg,
-    rgba(0, 240, 255, 0.95) 150deg,
-    rgba(14, 165, 233, 0.3) 180deg,
-    transparent 210deg,
-    rgba(0, 210, 255, 0.2) 280deg,
-    rgba(56, 189, 248, 0.85) 320deg,
-    rgba(255, 255, 255, 0.95) 330deg,
-    rgba(0, 210, 255, 0.6) 340deg,
-    transparent 360deg
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  animation: nova-tour-ring-spin 12s linear infinite;
-  pointer-events: none;
-  z-index: 2;
+.nova-tour-card:focus-visible,
+.nova-tour-card button:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 3px;
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .nova-tour-card::before,
-  .nova-tour-spotlight {
-    animation: none !important;
-  }
+.nova-tour-target {
+  outline: 2px solid #22d3ee;
+  outline-offset: 4px;
+}
+@media (max-width: 480px) {
+  .nova-tour-card { right: 12px; bottom: 12px; padding: 20px; }
 }
 
 /* ============================================================
