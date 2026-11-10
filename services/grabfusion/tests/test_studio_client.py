@@ -154,9 +154,10 @@ def test_structure_generate_return_running_job(client):
 
 
 def test_submit_follows_draft_kind(client):
-    for kind, target in [("course", "course"), ("instruction", "express"), ("book", "inbox"),
-                         ("manuscript", "inbox")]:
-        fields = {"bookId": "b1"} if kind == "book" else {}
+    # Рукопис без книги (1.5.0) — `book`; з наявною книгою — `inbox`.
+    for kind, target, fields in [("course", "course", {}), ("instruction", "express", {}),
+                                 ("book", "inbox", {"bookId": "b1"}), ("manuscript", "book", {}),
+                                 ("manuscript", "inbox", {"bookId": "b1"})]:
         d = client.create_draft(kind, **fields)
         res = client.submit(d.draftId)
         assert res.target.kind == target and res.target.studioUrl.startswith("/")

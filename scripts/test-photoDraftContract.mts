@@ -130,7 +130,8 @@ for (const { name, draft } of drafts) {
   t(`${name}: описи вміщаються в 500 символів`, draft.notes.every((n) => c.noteFits(n.text)));
   const lessonPhotos = (draft.structure?.modules ?? []).flatMap((m) => m.lessons.flatMap((l) => l.photoIds));
   t(`${name}: уроки посилаються на наявні кадри`, lessonPhotos.every((id) => ids.has(id)));
-  t(`${name}: book має bookId, інші — ні`, (draft.kind === 'book') === (draft.bookId !== null));
+  // `manuscript` може мати bookId (наявна книга) або ні (нова книга: з 1.5.0 її створює Studio).
+  t(`${name}: book має bookId, інші — ні (рукопис — за вибором)`, draft.kind === 'manuscript' || (draft.kind === 'book') === (draft.bookId !== null));
   t(`${name}: submitted ⇔ є ціль`, (draft.status === 'submitted') === (draft.submitted !== null));
   if (draft.status === 'written') {
     t(`${name}: written — усі модулі написані`, (draft.structure?.modules ?? []).every((m) => m.written));

@@ -484,9 +484,12 @@ class Sim:
         if bl:
             return _err(400, "submit_blocked", "Чернетка ще не готова до відправки.", blockers=bl)
         if d["kind"] == "manuscript":
-            tid = self._next("scn")
-            url = "/media?tab=inbox" + (f"&bookId={d['bookId']}" if d["bookId"] else "")
-            target = {"kind": "inbox", "id": tid, "studioUrl": url}
+            if not d["bookId"]:
+                # Контракт 1.5.0: без наявної книги Studio створює її сама, ціль — `book` (id книги, дашборд).
+                target = {"kind": "book", "id": self._next("BK"), "studioUrl": "/"}
+            else:
+                tid = self._next("scn")
+                target = {"kind": "inbox", "id": tid, "studioUrl": f"/media?tab=inbox&bookId={d['bookId']}"}
             d["status"], d["submitted"] = "submitted", target
             self._bump(d)
             return 201, {"draft": copy.deepcopy(d), "target": target}

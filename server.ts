@@ -102,7 +102,7 @@ import { registerExternalApiRoutes } from './server/external/externalApiRoutes';
 import { recognizeScanWithCoreVision } from './server/external/scanRecognizer';
 import { registerPhotoDraftRoutes } from './server/external/photoDraftRoutes';
 import { describePhotoWithCoreVision } from './server/external/photoDraftDescriber';
-import { aiUsageForDraft, createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
+import { aiUsageForDraft, createBookFromManuscript, createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
 import { writeWithCoreText } from './server/external/photoDraftWriter';
 import { passModels } from './server/external/photoDraftAiModels';
 import { startMaintenance } from './server/maintenance';
@@ -608,7 +608,7 @@ async function startServer() {
     checkAiBudget: ({ userId, role }) => checkChatQuota(userId, role, 'GrabFusion (опис кадрів)'),
     writeText: writeWithCoreText,
     passModels,
-    sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans },
+    sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans, createManuscriptBook: createBookFromManuscript },
     aiUsage: aiUsageForDraft,
   });
   registerMyWorksRoutes(app);

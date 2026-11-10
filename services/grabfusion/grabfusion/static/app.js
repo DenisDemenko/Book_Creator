@@ -583,9 +583,26 @@ async function doSubmit() {
   render();
 }
 
+/* Куди потрапляє «Набір книги» без наявної книги (контракт 1.5.0): Studio створює книгу сама й кладе розпізнане в три місця. */
+function manuscriptPlaces() {
+  return h('ul', { class: 'places', id: 'places' },
+    h('li', null, h('strong', { text: 'Дашборд' }), document.createTextNode(' — нова книга зʼявиться в переліку ваших книг.')),
+    h('li', null, h('strong', { text: 'Книга & Текст' }), document.createTextNode(' — розпізнаний текст у главі, його можна редагувати; він приїжджає чернеткою ШІ — прийміть або виправте.')),
+    h('li', null, h('strong', { text: 'Медіатека' }), document.createTextNode(' — фото всіх сторінок цієї книги.')));
+}
+
 function viewSubmitted(d) {
   const t = d.submitted || state.target;
   const href = t ? state.studioOrigin + t.studioUrl : '#';
+  if (t && t.kind === 'book') {
+    const name = d.newBookTitle || d.title || 'Нова книга';
+    return h('div', { class: 'card', id: 'submitted' },
+      h('h2', { text: 'Книгу створено в Studio' }),
+      h('p', { id: 'submitted-text', text: `Studio створила нову книгу «${name}» і поклала розпізнане в три місця:` }),
+      manuscriptPlaces(),
+      h('p', { class: 'muted', text: 'Відкрийте Studio — книга вже чекає на дашборді; натисніть «Відкрити книгу».' }),
+      h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити Studio' })));
+  }
   return h('div', { class: 'card', id: 'submitted' },
     h('h2', { text: 'Відправлено в Studio' }),
     h('p', { text: t && t.kind === 'course' ? 'Чернетку курсу створено — ціну, категорію й відео додасте в Studio.' : t && t.kind === 'express' ? 'Експрес-чернетку створено. Відкрийте її в Studio протягом 24 годин — потім вона зникне.' : t && t.kind === 'inbox' ? (d.bookId ? 'Сторінки лежать у «Вхідних» книги одним пакетом — вставте главу звідти.' : 'Сторінки лежать у «Вхідних» одним пакетом. Створіть книгу в Studio й натисніть «Вставити главу» — текст приїде чернеткою ШІ.') : 'Готово.' }),
@@ -733,6 +750,12 @@ function viewMsActions(d, mine) {
   if (!d.photos.length) box.append(h('p', { class: 'muted', text: 'Спершу зніміть хоч одну сторінку.' }));
   else if (mine.length) box.append(h('p', { class: 'muted', text: 'Дочекайтесь, поки всі сторінки надішлються.' }));
   else if (processing) box.append(h('p', { class: 'muted', id: 'ocr-banner', text: 'Сторінки розпізнаються…' }));
+  // Що станеться після натискання — одразу над кнопкою (запит власника 10.11.2026).
+  if (!d.bookId) {
+    box.append(h('p', { id: 'submit-explain', text: `Після «Відправити» Studio сама створить нову книгу «${d.newBookTitle || d.title || 'Нова книга'}» і покладе розпізнане в три місця:` }), manuscriptPlaces());
+  } else {
+    box.append(h('p', { class: 'muted', id: 'submit-explain', text: 'Після «Відправити» сторінки потраплять у «Вхідні» вибраної книги одним пакетом — вставте главу звідти.' }));
+  }
   box.append(h('div', { class: 'row' }, h('button', { class: 'primary', id: 'btn-submit', text: 'Відправити главу у Studio', disabled: lock, onclick: doSubmit })));
   if (state.blockers) box.append(h('div', { class: 'err', id: 'blockers' }, h('strong', { text: 'Ще не готово до відправки:' }),
     h('ul', null, state.blockers.map((b) => h('li', { 'data-blocker': b.kind, text: b.message })))));

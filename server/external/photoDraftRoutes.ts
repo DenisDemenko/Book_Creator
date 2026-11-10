@@ -174,6 +174,20 @@ export interface PassModels {
 export interface PhotoDraftSinks {
   createCourse: (ownerId: string, input: CourseInput) => Promise<string>;
   createExpress: (ownerId: string, payload: Record<string, unknown>) => Promise<string>;
+  /**
+   * «Набір книги» без наявної книги: Studio сама створює книгу з текстом (#540). Немає чи повернув `null` —
+   * пакет кладеться у «Вхідні», як до 1.5.0.
+   */
+  createManuscriptBook?: (p: {
+    ownerId: string;
+    ownerName: string;
+    ownerRole: string;
+    bookTitle: string;
+    chapterTitle: string;
+    items: InboxItem[];
+    tokenId?: string | null;
+    batchId: string;
+  }) => Promise<{ bookId: string; chapterTitle: string; pages: number } | null>;
   /** Повертає id першого запису у «Вхідних». */
   createInboxScans: (p: {
     ownerId: string;
@@ -1403,14 +1417,38 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             const id = await sinks.createExpress(ownerId, toExpressPayload(d));
             target = { kind: 'express', id, studioUrl: `/express/${id}` };
           } else if (d.kind === 'manuscript') {
-            const id = await sinks.createInboxScans({
-              ownerId,
-              bookId: d.bookId ?? '',
-              items: toManuscriptItems(d),
-              tokenId: d.tokenId,
-              batch: { id: d.id, bookTitle: d.bookId ? null : d.newBookTitle ?? null },
-            });
-            target = { kind: 'inbox', id, studioUrl: d.bookId ? `/media?tab=inbox&bookId=${encodeURIComponent(d.bookId)}` : '/media?tab=inbox' };
+            const items = toManuscriptItems(d);
+            // Нової книги ще немає — Studio створює її сама (дашборд, «Книга & Текст», медіатека); збій чи порожній текст — як раніше, «Вхідні».
+            let made: { bookId: string; chapterTitle: string; pages: number } | null = null;
+            if (!d.bookId && sinks.createManuscriptBook) {
+              try {
+                const p = req.principal as { name?: string; role?: string } | undefined;
+                made = await sinks.createManuscriptBook({
+                  ownerId,
+                  ownerName: String(p?.name || ''),
+                  ownerRole: String(p?.role || 'writer'),
+                  bookTitle: (d.newBookTitle ?? '').trim() || (d.title ?? '').trim(),
+                  chapterTitle: (d.title ?? '').trim(),
+                  items,
+                  tokenId: d.tokenId,
+                  batchId: d.id,
+                });
+              } catch (err) {
+                console.error('[photoDrafts] книга з рукопису не створена, пакет іде у «Вхідні»:', err);
+              }
+            }
+            if (made) {
+              target = { kind: 'book', id: made.bookId, studioUrl: '/' };
+            } else {
+              const id = await sinks.createInboxScans({
+                ownerId,
+                bookId: d.bookId ?? '',
+                items,
+                tokenId: d.tokenId,
+                batch: { id: d.id, bookTitle: d.bookId ? null : d.newBookTitle ?? null },
+              });
+              target = { kind: 'inbox', id, studioUrl: d.bookId ? `/media?tab=inbox&bookId=${encodeURIComponent(d.bookId)}` : '/media?tab=inbox' };
+            }
           } else {
             const id = await sinks.createInboxScans({ ownerId, bookId: d.bookId!, items: toInboxItems(d), tokenId: d.tokenId });
             target = { kind: 'inbox', id, studioUrl: `/media?tab=inbox&bookId=${encodeURIComponent(d.bookId!)}` };

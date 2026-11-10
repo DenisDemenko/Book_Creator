@@ -12,6 +12,11 @@ import { createCourse } from '../courseStore';
 import { createDraft as createExpressDraft } from '../expressStore';
 import { listUsageSince } from '../store';
 import { createScan, updateScan } from './externalApiStore';
+import { saveBook } from '../bookStore';
+import { attachAssetsToBook } from '../media/mediaLibraryStore';
+import { buildBookFromManuscript } from '../../src/utils/manuscriptBook';
+import { joinManuscriptPages } from '../../src/utils/manuscriptBatch';
+import type { UserRole } from '../../src/types';
 import type { CourseInput, InboxItem } from './photoDraftMapping';
 import type { WriteTextParams } from './photoDraftRoutes';
 
@@ -96,4 +101,56 @@ export async function createInboxScans(p: {
     if (!first) first = scan.id;
   }
   return first;
+}
+
+/**
+ * «Набір книги» без наявної книги (журнал #540): Studio САМА створює книгу з розпізнаним текстом (дашборд → «Книга & Текст»),
+ * привʼязує фото сторінок до її медіатеки й лишає записи «Вхідних» як історію зі станом `inserted` — вставляти їх ще раз не треба
+ * (текст уже в книзі). `null` — сторінки порожні (книги з нічого не робимо), тоді маршрут кладе пакет у «Вхідні», як раніше.
+ */
+export async function createBookFromManuscript(p: {
+  ownerId: string;
+  ownerName: string;
+  ownerRole: string;
+  bookTitle: string;
+  chapterTitle: string;
+  items: InboxItem[];
+  tokenId?: string | null;
+  batchId: string;
+}): Promise<{ bookId: string; chapterTitle: string; pages: number } | null> {
+  const text = joinManuscriptPages(p.items.map((i) => i.text));
+  const built = buildBookFromManuscript({
+    title: p.bookTitle,
+    chapterTitle: p.chapterTitle,
+    text,
+    author: p.ownerName || 'Автор',
+    authorRole: p.ownerRole as UserRole,
+    now: Date.now(),
+    pageCount: p.items.length,
+  });
+  if (!built) return null;
+  const saved = await saveBook({ book: built.book as unknown as Record<string, unknown>, ownerId: p.ownerId });
+  await attachAssetsToBook(p.items.map((i) => i.assetId), p.ownerId, saved.id);
+  let order = 0;
+  for (const item of p.items) {
+    order += 1;
+    const scan = await createScan({
+      ownerId: p.ownerId,
+      bookId: saved.id,
+      assetId: item.assetId,
+      imageUrl: item.imageUrl,
+      tokenId: p.tokenId ?? null,
+      batch: { id: p.batchId, order, bookTitle: p.bookTitle || null },
+    });
+    await updateScan(scan.id, p.ownerId, {
+      status: 'inserted',
+      recognizedText: item.text,
+      text: item.text,
+      chapterId: built.chapterId,
+      chapterTitle: built.chapterTitle,
+      sectionTitle: item.sectionTitle,
+      modelId: 'grabfusion',
+    });
+  }
+  return { bookId: saved.id, chapterTitle: built.chapterTitle, pages: p.items.length };
 }

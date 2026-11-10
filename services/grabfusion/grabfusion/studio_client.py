@@ -1,4 +1,4 @@
-"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.4.0).
+"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.5.0).
 
 Синхронний (httpx). Токен тримає сервер GrabFusion. Розгалужуватись слід лише за `StudioError.kind`.
 """

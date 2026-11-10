@@ -1,4 +1,4 @@
-# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.4.0
+# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.5.0
 
 Крок A0 плану `docs/proposals/GRABFUSION_PHOTO_COURSE_APP_2026-10-28.md`. Цей опис, типи
 `shared/photoDraftContract.ts`, схема `docs/photo-drafts-api/schema.json` (JSON Schema draft-07) і
@@ -73,7 +73,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 - `assumptions[]` — що ШІ припустило й викладач має підтвердити (`open` / `confirmed` / `rejected`).
 - `job` — фонова робота (`structure` або `generate`), `running` або `failed` з причиною; `null`,
   коли нічого не виконується.
-- `submitted` — куди лягла чернетка після відправки (`course` / `express` / `inbox`, `id`,
+- `submitted` — куди лягла чернетка після відправки (`course` / `express` / `inbox` / `book`, `id`,
   `studioUrl`). `studioUrl` — відносний шлях у Studio, застосунок лише відкриває його як посилання;
   точні шляхи фіксує етап 3.
 
@@ -97,7 +97,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `POST /photo-drafts/:draftId/structure` | 3 | 202 | `structure-running` |
 | `POST /photo-drafts/:draftId/modules/:moduleId/generate` | 3 | 202 | `generate-running` |
 | `GET /photo-drafts/:draftId/ai-options` | 3 | 200 | `ai-options` |
-| `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book`, `submit-manuscript` |
+| `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book`, `submit-manuscript`, `submit-manuscript-existing-book` |
 
 Подробиці:
 
@@ -193,7 +193,10 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
     «**Увага:** …», «**Результат кроку:** …» стають полями кроку; крок, текст якого написав ШІ й
     викладач не правив, у майстрі позначено «потребує перевірки». Експрес-чернетки живуть 24 години —
     застосунок має сказати викладачу відкрити її в Studio протягом доби.
-  - `manuscript` → «Вхідні» книги одним пакетом (див. «Рукопис» нижче); `target.id` — перша сторінка пакета.
+  - `manuscript` з `bookId` → «Вхідні» цієї книги одним пакетом (див. «Рукопис» нижче); `target.id` — перша сторінка пакета.
+  - `manuscript` БЕЗ `bookId` (з 1.5.0, журнал #540) → Studio САМА створює книгу (`target.kind: "book"`, `target.id` — id книги, `studioUrl: "/"` — дашборд): назва з
+    `newBookTitle`, одна глава з розпізнаним текстом (приїздить AI-чернеткою, автор приймає чи виправляє в «Книга & Текст»), фото сторінок привʼязані до медіатеки цієї книги, записи пакета
+    у «Вхідних» лишаються історією зі станом `inserted` і повторної вставки не просять. Збій створення чи порожній текст — пакет іде у «Вхідні», як до 1.5.0 (`target.kind: "inbox"`).
   - `book` → «Вхідні» книги (`/media?tab=inbox&bookId=<id>`): по запису на урок (текст уроку, назва
     модуля як глава, назва уроку як розділ); `target.id` — перший із записів.
 
@@ -208,9 +211,9 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 (`title_missing`) і книгу або назву нової (`book_missing`). Результат — по запису у «Вхідних» на сторінку, з
 однаковим `batchId` (= `draftId`) і `batchOrder` (з 1, за порядком сторінок); `chapterTitle` — назва чернетки,
 підпис — «Сторінка N». З `bookId` запис належить книзі (`studioUrl` = `/media?tab=inbox&bookId=…`); з
-`newBookTitle` книги на сервері немає (вона живе в браузері автора), тож записи йдуть без книги з
-`batchBookTitle`, а автор у Studio створює книгу й вставляє главу кнопкою «Вставити главу» (текст приїздить
-AI-чернеткою). Скани у «Вхідних» (`GET /api/scans/inbox`, лише сесія Studio) мають нові необовʼязкові поля
+`newBookTitle` (до 1.5.0) книги на сервері не було, тож записи йшли без книги з `batchBookTitle`, а автор створював
+книгу сам і вставляв главу кнопкою «Вставити главу» (текст приїздить AI-чернеткою). З 1.5.0 книгу створює Studio
+(див. `target.kind: "book"` вище); цей шлях лишився запасним — на збій створення. Скани у «Вхідних» (`GET /api/scans/inbox`, лише сесія Studio) мають нові необовʼязкові поля
 `batchId`, `batchOrder`, `batchBookTitle`.
 
 **Опитування.** Поки є фото в `processing` або `job.status = running`, застосунок раз на
@@ -268,6 +271,7 @@ B просить A коментарем у документі плану.
 
 | Версія | Дата | Зміна |
 |---|---|---|
+| 1.5.0 | 2026-11-10 | «Набір книги» без наявної книги: `submit` сам створює книгу в Studio — новий вид цілі `book` (адитивно: решта цілей без змін), фікстури `submit-manuscript` (книга) і `submit-manuscript-existing-book` (`inbox`). |
 | 1.4.0 | 2026-11-09 | Вибір моделі й бали за проходи 2–3: новий `GET …/ai-options`, необовʼязкове `modelId` у `POST …/structure` і `…/generate` (нове необовʼязкове тіло), бали резервуються до запуску й списуються за фактичною вартістю; нових `kind` помилок немає (недоступна модель → `bad_input`, бракує балів → `ai_budget_exceeded`) |
 | 1.3.0 | 2026-10-28 | A5: `kind: manuscript` («Набір книги»): сторінки розпізнаються дослівно (`photo.text`, `textEdited`), нові `newBookTitle`, `PUT …/photos/:photoId/text`, `note` у тілі додавання фото, `bookId` у PATCH рукопису, межі `maxManuscriptPages` / `manuscriptPagesPerHour` / `maxPageTextChars`, блокер `empty_page`; відправка — пакетом у «Вхідні» (`batchId` / `batchOrder` / `batchBookTitle`). Лише додавання |
 | 1.2.0 | 2026-10-28 | A4: для `kind: instruction` — `instructionMode` (`assembly` / `operation`) і `modelCode` у чернетці, при створенні й у PATCH; відправка інструкції дає готову пропозицію кроків у майстрі технічних інструкцій. Лише додавання |

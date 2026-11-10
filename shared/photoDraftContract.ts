@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.4.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.5.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -128,7 +128,11 @@ export const ASSUMPTION_STATUSES = ['open', 'confirmed', 'rejected'] as const;
 export type AssumptionStatus = (typeof ASSUMPTION_STATUSES)[number];
 
 /** Куди лягла відправлена чернетка. */
-export const SUBMIT_TARGET_KINDS = ['course', 'express', 'inbox'] as const;
+/**
+ * `book` (з 1.5.0, журнал #540): «Набір книги» без наявної книги — Studio САМА створила книгу (дашборд, «Книга & Текст»)
+ * із розпізнаним текстом, а фото сторінок лягли в її медіатеку; `id` — id книги.
+ */
+export const SUBMIT_TARGET_KINDS = ['course', 'express', 'inbox', 'book'] as const;
 export type SubmitTargetKind = (typeof SUBMIT_TARGET_KINDS)[number];
 
 /**
@@ -550,6 +554,7 @@ export const PHOTO_DRAFT_EXTRA_FIXTURES: Readonly<Record<string, string>> = {
   'submit-instruction': 'SubmitResponse',
   'submit-book': 'SubmitResponse',
   'submit-manuscript': 'SubmitResponse',
+  'submit-manuscript-existing-book': 'SubmitResponse',
   'get-draft-manuscript': 'DraftResponse',
   'error-note-too-long': 'Error',
   'error-revision-conflict': 'Error',

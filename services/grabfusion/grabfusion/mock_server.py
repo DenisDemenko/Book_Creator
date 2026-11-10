@@ -78,7 +78,7 @@ def fixture_is_image(route: Route) -> bool:
 def fixtures_served_by_routes() -> set[str]:
     """Усі фікстури, які мок може віддати за таблицею (без ручного вибору заголовком)."""
     names = {r.fixture for r in ROUTES if r.fixture}
-    names |= set(SUBMIT_BY_KIND.values())
+    names |= set(SUBMIT_BY_KIND.values()) | {"submit-manuscript-existing-book"}
     names |= {"get-draft-structured", "get-draft-written", "get-draft-job-failed", "get-draft-manuscript"}
     return names
 
@@ -140,6 +140,7 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
     limits = contract.default_limits()
     seen_clients: dict[tuple[str, str], bool] = {}
     kinds: dict[str, str] = {}
+    with_book: set[str] = set()  # рукописи, створені з наявною книгою (їх `submit` лишається `inbox`, контракт 1.5.0)
     app.state.calls = []  # (METHOD path, fixture) — для тестів
     sim = Sim() if stateful else None
     app.state.sim = sim
@@ -241,6 +242,8 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
                 return _err("bad_input", "Потрібен text (рядок у межах maxPageTextChars).")
         elif route.name == "POST /photo-drafts/:draftId/submit":
             fixture = SUBMIT_BY_KIND.get(kinds.get(params["draftId"], "course"), "submit-course")
+            if fixture == "submit-manuscript" and params["draftId"] in with_book:
+                fixture = "submit-manuscript-existing-book"
 
         app.state.calls.append((route.name, fixture))
         if fixture is None:
@@ -250,6 +253,8 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
             fx["duplicate"] = True
         if route.name == "POST /photo-drafts" and isinstance(body, dict):
             kinds[fx["draft"]["draftId"]] = body["kind"]
+            if body.get("kind") == "manuscript" and body.get("bookId"):
+                with_book.add(fx["draft"]["draftId"])
         return JSONResponse(fx, status_code=route.status)
 
     return app
