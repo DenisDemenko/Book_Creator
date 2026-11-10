@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Sparkles } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { X, Compass, ArrowLeft, ArrowRight } from 'lucide-react';
 import type { AuthUser, NavigationTab } from '../types';
 import { useOnboardingTour } from './useOnboardingTour';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -7,162 +7,65 @@ import { useLanguage } from '../i18n/LanguageContext';
 interface OnboardingTourProps {
   currentTab: NavigationTab;
   authUser?: AuthUser | null;
+  startRequest?: number;
 }
 
-interface TargetRect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-const CARD_WIDTH = 320;
-const GUTTER = 14;
-
-/**
- * Спливаюче довідкове вікно поверх кнопок сайту.
- *
- * Для кожної вкладки шукає в DOM елемент з `data-tour="<tabId>__N"`,
- * підсвічує його «прожектором» (затемнення решти екрана + світляна рамка)
- * і малює поруч картку з поясненням у ціановій рамці — той самий
- * акцент (#00d2ff/#00f0ff), що й у «електричних пігулок» адмінпанелі
- * ядра сайту (.os-pill, src/components/adminOs/adminOs.css), а не
- * попередня веселкова рамка з ефектом аврори.
- * Один екземпляр монтується один раз у корені застосунку — активна
- * підказка визначається пропом currentTab.
- */
-export const OnboardingTour: React.FC<OnboardingTourProps> = ({ currentTab, authUser }) => {
+/** Немодальна довідка залишає навігацію Студією доступною. */
+export const OnboardingTour: React.FC<OnboardingTourProps> = ({ currentTab, authUser, startRequest = 0 }) => {
   const { t } = useLanguage();
-  const { step, stepNumber, totalSteps, isLast, next, later, gotIt } = useOnboardingTour(currentTab, authUser);
-  const [rect, setRect] = useState<TargetRect | null>(null);
-  const [placement, setPlacement] = useState<'top' | 'bottom'>('bottom');
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { step, stepNumber, totalSteps, isLast, next, previous, stop } = useOnboardingTour(currentTab, authUser, startRequest);
+  const card = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!step) {
-      setRect(null);
-      return;
-    }
-    let cancelled = false;
-    let attempts = 0;
+    if (!startRequest) return;
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [startRequest]);
 
-    const measure = () => {
-      if (cancelled) return;
-      const el = document.querySelector<HTMLElement>(`[data-tour="${step.dataTour}"]`);
-      if (!el) {
-        attempts += 1;
-        if (attempts < 20) {
-          retryTimer.current = setTimeout(measure, 150);
-        }
-        return;
+  useEffect(() => {
+    if (!step) return;
+    card.current?.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        stop();
+        opener.current?.focus();
       }
-      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-      const apply = () => {
-        if (cancelled) return;
-        const r = el.getBoundingClientRect();
-        setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
-        setPlacement(r.top > window.innerHeight / 2 ? 'top' : 'bottom');
-      };
-      // Невелика пауза, щоб scrollIntoView встиг доскролити перед виміром.
-      retryTimer.current = setTimeout(apply, 260);
     };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [step, stop]);
 
-    measure();
-
-    const onViewportChange = () => {
-      const el = document.querySelector<HTMLElement>(`[data-tour="${step.dataTour}"]`);
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
-      setPlacement(r.top > window.innerHeight / 2 ? 'top' : 'bottom');
-    };
-    window.addEventListener('scroll', onViewportChange, true);
-    window.addEventListener('resize', onViewportChange);
-
-    return () => {
-      cancelled = true;
-      if (retryTimer.current) clearTimeout(retryTimer.current);
-      window.removeEventListener('scroll', onViewportChange, true);
-      window.removeEventListener('resize', onViewportChange);
-    };
+  useEffect(() => {
+    if (!step) return;
+    // Не блокуємо вікно довідки, якщо ціль прихована або ще завантажується.
+    const target = document.querySelector<HTMLElement>(`[data-tour="${step.dataTour}"]`);
+    target?.classList.add('nova-tour-target');
+    return () => target?.classList.remove('nova-tour-target');
   }, [step]);
 
-  if (!step || !rect) return null;
-
-  const top = placement === 'bottom' ? rect.top + rect.height + GUTTER : undefined;
-  const bottom = placement === 'top' ? window.innerHeight - rect.top + GUTTER : undefined;
-  let left = rect.left + rect.width / 2 - CARD_WIDTH / 2;
-  left = Math.max(10, Math.min(left, window.innerWidth - CARD_WIDTH - 10));
+  if (!step) return null;
+  const close = () => { stop(); opener.current?.focus(); };
 
   return (
-    <>
-      {/* Прожектор: затемнює сторінку, лишаючи світлу рамку навколо цільового елемента */}
-      <div
-        className="nova-tour-spotlight"
-        style={{
-          top: rect.top - 8,
-          left: rect.left - 8,
-          width: rect.width + 16,
-          height: rect.height + 16,
-        }}
-      />
-
-      {/* Картка підказки з ціановим електричним кільцем — стиль .os-pill адмінпанелі */}
-      <div
-        className="nova-tour-card fixed z-[85]"
-        style={{ top, bottom, left, width: CARD_WIDTH }}
-        role="dialog"
-        aria-live="polite"
-      >
-        <div className="relative z-10 p-4 rounded-[1.1rem]">
-          <div className="flex items-center justify-between mb-1.5 gap-2">
-            <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-white/85">
-              <Sparkles className="w-3 h-3" />
-              {t('onboardingTour.stepLabel', { current: String(stepNumber), total: String(totalSteps) })}
-            </span>
-            <button
-              type="button"
-              onClick={later}
-              aria-label={t('onboardingTour.closeAriaLabel')}
-              className="text-white/70 hover:text-white p-0.5 rounded transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <h4 className="text-sm font-extrabold text-white mb-1 leading-snug drop-shadow-sm">
-            {step.title}
-          </h4>
-          <p className="text-xs leading-relaxed text-white font-medium mb-3">
-            {step.text}
-          </p>
-
-          <button
-            type="button"
-            onClick={next}
-            className="w-full px-3 py-2 rounded-xl bg-white text-blue-700 text-xs font-black hover:bg-white/90 active:scale-[0.98] transition-all shadow-md"
-          >
-            {isLast ? t('onboardingTour.finishBtn') : t('onboardingTour.nextBtn')}
-          </button>
-
-          <div className="flex items-center justify-between gap-2 mt-2">
-            <button
-              type="button"
-              onClick={later}
-              className="text-[11px] font-bold text-white/85 hover:text-white underline underline-offset-2 decoration-white/40"
-            >
-              {t('onboardingTour.laterBtn')}
-            </button>
-            <button
-              type="button"
-              onClick={gotIt}
-              className="text-[11px] font-bold text-white/85 hover:text-white underline underline-offset-2 decoration-white/40"
-            >
-              {t('onboardingTour.gotItBtn')}
-            </button>
-          </div>
-        </div>
+    <section ref={card} className="nova-tour-card" role="dialog" aria-modal="false" aria-labelledby="nova-tour-title" aria-describedby="nova-tour-description" tabIndex={-1}>
+      <div className="flex items-start justify-between gap-4">
+        <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
+          <Compass className="h-4 w-4" />{t('onboardingTour.tourTitle')}
+        </span>
+        <button type="button" onClick={close} aria-label={t('onboardingTour.closeAriaLabel')} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
       </div>
-    </>
+      <div className="mb-5 mt-3 h-1 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+        <div className="h-full rounded-full bg-cyan-400" style={{ width: `${stepNumber / totalSteps * 100}%` }} />
+      </div>
+      <p className="mb-2 text-xs text-slate-400">{t('onboardingTour.stepLabel', { current: String(stepNumber), total: String(totalSteps) })}</p>
+      <h2 id="nova-tour-title" className="mb-3 text-xl font-bold text-white">{step.title}</h2>
+      <p id="nova-tour-description" className="text-sm leading-6 text-slate-200">{step.text}</p>
+      <p className="mb-5 mt-4 text-xs leading-5 text-slate-400">{t('onboardingTour.navigationHint')}</p>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={previous} disabled={stepNumber === 1} aria-label={t('onboardingTour.previousBtn')} className="rounded-xl border border-white/15 p-3 text-white disabled:opacity-30"><ArrowLeft className="h-4 w-4" /></button>
+        <button type="button" onClick={next} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 hover:bg-cyan-200">{isLast ? t('onboardingTour.finishBtn') : t('onboardingTour.nextBtn')}<ArrowRight className="h-4 w-4" /></button>
+      </div>
+      <button type="button" onClick={close} className="mt-4 text-xs text-slate-400 underline underline-offset-4 hover:text-white">{t('onboardingTour.stopBtn')}</button>
+    </section>
   );
 };

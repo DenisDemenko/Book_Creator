@@ -227,6 +227,7 @@ function StudioApp() {
 
   // Т6.3: опитувальник ролі (Role Onboarding) — хто відкрив, для якого проєкту.
   const [onboarding, setOnboarding] = useState<{ source: string; projectId?: string | null; projectType?: string | null; orderId?: string | null; projectTitle?: string | null; pending?: boolean } | null>(null);
+  const [tourStartRequest, setTourStartRequest] = useState(0);
   /** Чи сервер показує майстер автоматично (ROLE_ONBOARDING ≠ off). */
   const [onboardingEnabled, setOnboardingEnabled] = useState(false);
   /** «Відкрити у Студії» конкретний проєкт (з маркетплейсу) — чекає входу. */
@@ -2089,6 +2090,7 @@ function StudioApp() {
 
       {/* Top Header Navigation */}
       <HeaderNav
+        onStartSiteTour={() => setTourStartRequest((value) => value + 1)}
         saveState={saveState}
         lastSavedAt={lastSavedAt}
         authUser={auth.user}
@@ -2665,10 +2667,8 @@ function StudioApp() {
         onGoToSubscription={() => handleSelectTab('subscription')}
       />
 
-      {/* Довідковий тур: спливаючі підказки біля ключових кнопок кожної
-          вкладки для нових користувачів. Сам відстежує зміну currentTab
-          і показує 3-5 підказок при першому відвідуванні вкладки. */}
-      <OnboardingTour currentTab={currentTab} authUser={auth.user} />
+      {/* Огляд запускається кнопкою в шапці та супроводжує переходи між вкладками. */}
+      <OnboardingTour currentTab={currentTab} authUser={auth.user} startRequest={tourStartRequest} />
 
       {/* Сторінка довідки (кнопка в футері вище). Поверх студії, а не
           вкладкою: автор читає її, не втрачаючи місця, де працював. */}

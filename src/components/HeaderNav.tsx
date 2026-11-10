@@ -43,6 +43,7 @@ function darkenHex(hex: string, factor: number): string {
 }
 
 interface HeaderNavProps {
+  onStartSiteTour?: () => void;
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
   book: Book;
@@ -78,6 +79,7 @@ interface HeaderNavProps {
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
+  onStartSiteTour,
   currentTab,
   onSelectTab,
   book,
@@ -298,6 +300,10 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               </div>
             </div>
           </div>
+
+          <button type="button" onClick={onStartSiteTour} className="shrink-0 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-xs font-bold [color:var(--sun-soft)] hover:bg-cyan-400/20">
+            {t('onboardingTour.startBtn')}
+          </button>
 
           {/* Info chips: збереження, ID, слова, формат/сторінки.
               `2xl` — не випадково: чіпи показуються лише тоді, коли шапка
