@@ -184,6 +184,7 @@ export type FurnitureElectronicsController = 'esp32' | 'arduino';
 
 /** Повна картка виробу. */
 export interface FurnitureProduct {
+  constructorSource?: {id:string;revision:number;subject:string;tariffVersion:number;quote:any;bom:any[];quantities:Record<string,number>;commercial:Record<string,any>};
   id: string;
   /** Артикул — він же джерело `externalId` мосту (стабільна пара). */
   sku: string;
@@ -575,6 +576,7 @@ export const MAX_GALLERY_VIDEOS = 2;
  */
 export function furniturePublishIssues(p: FurnitureProduct): string[] {
   const issues: string[] = [];
+  if(p.constructorSource){if(!p.constructorSource.quote.ready)issues.push('Заповніть і збережіть калькуляцію конструктора.');if(!p.marketplaceCategory)issues.push('Оберіть категорію вітрини.');if(!p.leadTime.trim())issues.push('Вкажіть строк виготовлення.');}
   const photoCount = p.media.filter((m) => !isVideoMedia(m)).length;
   const videoCount = p.media.filter((m) => isVideoMedia(m)).length;
   if (!p.name.trim()) issues.push('Немає назви виробу.');

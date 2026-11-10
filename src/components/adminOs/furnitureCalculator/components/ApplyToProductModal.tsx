@@ -26,6 +26,7 @@ interface ApplyToProductModalProps {
   /** result.totalSellingPrice поточного розрахунку — завжди в гривнях. */
   totalSellingPriceUah: number;
   currency: Currency;
+  calculationKey?:string;
   onApplied: (message: string) => void;
 }
 
@@ -46,6 +47,7 @@ export const ApplyToProductModal: React.FC<ApplyToProductModalProps> = ({
   onClose,
   totalSellingPriceUah,
   currency,
+  calculationKey,
   onApplied,
 }) => {
   const [products, setProducts] = useState<FurnitureProductLite[]>([]);
@@ -95,7 +97,12 @@ export const ApplyToProductModal: React.FC<ApplyToProductModalProps> = ({
     setApplyingId(selected.id);
     setError(null);
     try {
-      const updated = { ...selected, priceUah: Math.round((selected.priceUah || 0) + totalSellingPriceUah) };
+      const updated: FurnitureProductLite = { ...selected, priceUah: Math.round((selected.priceUah || 0) + totalSellingPriceUah) };
+      if(selected.constructorSource){
+        const source=selected.constructorSource as any,key=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(calculationKey||String(totalSellingPriceUah))))).map(v=>v.toString(16).padStart(2,'0')).join('');
+        const applied=source.commercial?.lastSupplementKey===key;
+        updated.constructorSource={...source,commercial:{...source.commercial,adjustmentMinor:(source.commercial?.adjustmentMinor||0)+(applied?0:Math.round(totalSellingPriceUah*100)),reason:'Додаткові роботи з калькулятора витрат',lastSupplementKey:key}};
+      }
       const res = await fetch('/api/admin/furniture-products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -105,8 +112,8 @@ export const ApplyToProductModal: React.FC<ApplyToProductModalProps> = ({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Не вдалося оновити ціну товару.');
       onApplied(
-        `${selected.name || selected.sku}: ціну збільшено на ${formatMoney(totalSellingPriceUah, currency)} → ${formatMoney(
-          updated.priceUah,
+        `${selected.name || selected.sku}: розрахунок застосовано → ${formatMoney(
+          data.product?.priceUah??updated.priceUah,
           currency
         )}`
       );

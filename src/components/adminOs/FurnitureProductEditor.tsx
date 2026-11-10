@@ -1,3 +1,4 @@
+import {ConstructorCostEditor} from './ConstructorCostEditor';
 /**
  * «Управління карткою товару» — редактор фізичного виробу (меблі/дерево).
  *
@@ -798,6 +799,7 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Ліва колонка — дані */}
           <div className="lg:col-span-8 space-y-5">
+            {product.constructorSource&&<ConstructorCostEditor product={product} change={setProduct}/>}
             <Section t={t} icon={<Package className="w-4 h-4" />} title="Основна інформація про товар" sub="Назва, ціноутворення, артикул та складський облік">
               <div className="space-y-4">
                 <div>
@@ -841,7 +843,7 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <Label>Поточна ціна (₴)</Label>
-                    <input data-field="price" className={`w-full rounded-xl px-3 py-2.5 text-sm font-bold outline-none ${t.input}`} type="number" min={0} value={product.priceUah || ''} onChange={(e) => patch({ priceUah: Number(e.target.value) || 0 })} />
+                    <input data-field="price" className={`w-full rounded-xl px-3 py-2.5 text-sm font-bold outline-none ${t.input}`} type="number" min={0} readOnly={!!product.constructorSource} value={product.priceUah || ''} onChange={(e) => patch({ priceUah: Number(e.target.value) || 0 })} />
                   </div>
                   <div>
                     <Label muted>Базова ціна / До знижки</Label>
@@ -909,7 +911,7 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                     <p className="text-xs">Варіантів немає — товар продається одним артикулом.</p>
                     <button
                       type="button"
-                      data-field="add-variant"
+                      disabled={!!product.constructorSource} data-field="add-variant"
                       onClick={addVariant}
                       className={`mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider ${t.backPill}`}
                     >
@@ -1035,7 +1037,7 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                     {(product.variants || []).length < MAX_VARIANTS ? (
                       <button
                         type="button"
-                        data-field="add-variant"
+                        disabled={!!product.constructorSource} data-field="add-variant"
                         onClick={addVariant}
                         className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider ${t.backPill}`}
                       >
@@ -1398,7 +1400,7 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                         <span className="text-[8.5px] leading-tight text-center px-1 font-medium">Додати нові фотографії</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept={product.constructorSource ? "image/png,image/jpeg,image/webp" : "image/*"}
                           multiple
                           className="hidden"
                           onChange={(e) => void onFiles(e.target.files)}
@@ -1464,9 +1466,9 @@ export const FurnitureProductEditor: React.FC<FurnitureProductEditorProps> = ({ 
                   <Upload className="w-6 h-6 mx-auto mb-1 opacity-80" />
                   <p className="text-[11px] font-medium">Перетягніть нові фото або відеоогляд</p>
                   <p className="text-[10px] opacity-70 mt-0.5">
-                    PNG / JPG / WEBP — фото (до {MAX_GALLERY_PHOTOS}); MP4 / WEBM / MOV — відео (до {MAX_GALLERY_VIDEOS})
+                    PNG / JPG / WEBP — фото (до {MAX_GALLERY_PHOTOS}){!product.constructorSource && `; MP4 / WEBM / MOV — відео (до ${MAX_GALLERY_VIDEOS})`}
                   </p>
-                  <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
+                  <input type="file" accept={product.constructorSource ? "image/png,image/jpeg,image/webp" : "image/*,video/*"} multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
                 </label>
               </div>
             </Section>

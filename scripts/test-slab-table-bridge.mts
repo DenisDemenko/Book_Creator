@@ -89,7 +89,7 @@ const app = new Proxy(
   },
 ) as Express;
 registerSlabTableRoutes(app);
-assert.equal(routes.length, 22);
+assert.equal(routes.length, 23);
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/drawings-templates" && r.handlers[0] === requireAdmin), "the list of PDF templates is for the administrator only");
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/drawings/:id" && r.handlers[0] === requireAdmin), "the PDF drawings are for the administrator only");
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/resin-textures/:id" && r.handlers[0] === requireAdmin), "texture edit route is admin-only");
@@ -119,7 +119,7 @@ for (const principal of [
   assert.equal(next, false);
 }
 console.log(
-  "All twenty-two Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
+  "All twenty-three Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
 );
 
 let facadeForwarded = false;
@@ -135,3 +135,16 @@ assert(cadForwarded);
 for (const path of ["/cad/cabinet/../dwg", "/cad/cabinet/00000000-0000-4000-8000-000000000001/exe", "/cad/customer/00000000-0000-4000-8000-000000000001/obj"])
  await assert.rejects(() => tableBridge("GET", path));
 console.log("CAD and cabinet inquiry routes remain admin-only; allowlisted bridge preserves binary payload and refuses arbitrary paths.");
+
+let engravingForwarded = false;
+await tableBridge("GET", "/cad/cabinet/00000000-0000-4000-8000-000000000001/engraving", undefined, {
+ settings: { url: "https://example.test", key: "test-only-key" },
+ fetch: async (url) => { engravingForwarded = true; assert.equal(String(url), "https://example.test/bridge/tables/cad/cabinet/00000000-0000-4000-8000-000000000001/engraving"); return new Response(JSON.stringify({ filename: "cabinet-engraving.zip", base64: "UEs=", type: "application/zip" })); }
+});
+assert(engravingForwarded);
+
+for (const path of ["/wardrobe-production", "/cad/wardrobe/00000000-0000-4000-8000-000000000001/engraving", "/cad/wardrobe/00000000-0000-4000-8000-000000000001/json"]) {
+  let forwarded=false;
+  await tableBridge("GET",path,undefined,{settings:{url:"https://example.test",key:"test-only-key"},fetch:async url=>{forwarded=true;assert.equal(String(url),"https://example.test/bridge/tables"+path);return new Response(JSON.stringify({filename:"wardrobe.zip",base64:"UEs="}));}});
+  assert(forwarded);
+}

@@ -1,3 +1,4 @@
+import {ConstructorTariffEditor} from '../ConstructorTariffEditor';
 import React, { useState, useEffect } from 'react';
 import { CalculationInput, Currency, ProductTemplate, CurrencyRates } from './types';
 import { PRODUCT_TEMPLATES } from './data/woodPresets';
@@ -317,6 +318,7 @@ export const FurnitureCalculatorPanel: React.FC = () => {
           try{const res=await fetch('/api/admin/slab-tables/publish-costs',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({input,rates})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Помилка публікації');showNotification(`Ставки опубліковано. Базова площа: ${data.referenceAreaM2.toFixed(3)} м².`);}catch(e){showNotification(e instanceof Error?e.message:'Не вдалося опублікувати тарифи.');}
         }}>Опублікувати тарифи конструктора столів</button>
       </div>
+      <ConstructorTariffEditor input={input} rates={rates}/>
       {/* Toast Notification */}
       {notification && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900/90 text-cyan-300 px-4 py-2.5 rounded-2xl neo-card border border-cyan-400/40 text-xs font-mono shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
@@ -461,6 +463,7 @@ export const FurnitureCalculatorPanel: React.FC = () => {
         isOpen={isApplyToProductModalOpen}
         onClose={() => setIsApplyToProductModalOpen(false)}
         totalSellingPriceUah={result.totalSellingPrice}
+        calculationKey={JSON.stringify({input,rates})}
         currency={currency}
         onApplied={(msg) => showNotification(msg)}
       />
