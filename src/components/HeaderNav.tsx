@@ -611,77 +611,28 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               )}
             </div>
 
-            {/* Active Role Selector Widget */}
+            {/* Роль облікового запису — лише показ (запит власника 10.11.2026). Перемикати «на льоту» не можна: роль
+                задає обліковий запис (для звичайного користувача — галочки при реєстрації, далі лише адмін), а кнопка
+                адміністратора в списку була небезпечною. Адмін лишається адміном завжди; йому значок відкриває матрицю прав. */}
             <div className="relative" ref={dropdownRef}>
-              <button
-                id="role-switcher-btn"
-                onClick={() => !roleLocked && setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-                disabled={roleLocked}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95 shadow-sm ${
-                  roleLocked ? 'opacity-70 cursor-not-allowed' : ''
-                } ${activeRoleInfo.badgeColor}`}
-                title={roleLocked ? t('header.roleLockedTitle') : t('header.roleSwitcherTitle')}
-              >
-                {roleLocked ? <Lock className="w-3.5 h-3.5" /> : <span className="text-sm">{activeRoleInfo.badgeEmoji}</span>}
-                <span className="hidden md:inline">{roleName(activeRoleInfo)}</span>
-                {!roleLocked && (
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isRoleDropdownOpen ? 'rotate-180' : ''}`} />
-                )}
-              </button>
-
-              {/* Dropdown Menu */}
-              {isRoleDropdownOpen && !roleLocked && (
-                <div className="absolute right-0 mt-2 w-72 rounded-2xl glass-panel-elevated shadow-2xl z-50 p-2 text-xs animate-in fade-in zoom-in-95">
-                  <div className="px-3 py-2 border-b border-white/[0.06] mb-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      {t('header.chooseRole')}
-                    </span>
-                    <p className="text-[11px] text-slate-300 mt-0.5">
-                      {t('header.chooseRoleHint')}
-                    </p>
-                  </div>
-
-                  <div className="space-y-1">
-                    {ALL_ROLES.map((role) => {
-                      const isCurrent = currentRole === role.id;
-                      return (
-                        <button
-                          key={role.id}
-                          onClick={() => {
-                            onSelectRole(role.id);
-                            setIsRoleDropdownOpen(false);
-                          }}
-                          className={`w-full p-2 rounded-xl text-left transition-all flex items-center justify-between ${
-                            isCurrent
-                              ? '[background-color:var(--sun-acc-20)] [color:var(--sun-acc)] font-bold border [border-color:var(--sun-acc-40)]'
-                              : 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="text-base">{role.badgeEmoji}</span>
-                            <div className="truncate">
-                              <div className="font-semibold text-xs leading-tight">{roleName(role)}</div>
-                              <div className="text-[10px] text-slate-400 font-mono truncate">{lang === 'en' ? role.nameUk : role.nameEn}</div>
-                            </div>
-                          </div>
-                          {isCurrent && <Check className="w-4 h-4 [color:var(--sun-acc)] shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pt-2 mt-1.5 border-t border-white/[0.06]">
-                    <button
-                      onClick={() => {
-                        setIsRoleDropdownOpen(false);
-                        onOpenRoleModal();
-                      }}
-                      className="w-full py-2 px-3 rounded-xl badge-glass hover:[border-color:var(--sun-acc-40)] [color:var(--sun-soft)] font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 [color:var(--sun-acc)]" />
-                      <span>{t('header.rolesMatrixBtn')}</span>
-                    </button>
-                  </div>
+              {currentRole === 'admin' && !roleLocked ? (
+                <button
+                  id="role-switcher-btn"
+                  onClick={onOpenRoleModal}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95 shadow-sm ${activeRoleInfo.badgeColor}`}
+                  title={t('header.rolesMatrixBtn')}
+                >
+                  <span className="text-sm">{activeRoleInfo.badgeEmoji}</span>
+                  <span className="hidden md:inline">{roleName(activeRoleInfo)}</span>
+                </button>
+              ) : (
+                <div
+                  id="role-badge"
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border shadow-sm ${activeRoleInfo.badgeColor}`}
+                  title={roleLocked ? t('header.roleLockedTitle') : roleName(activeRoleInfo)}
+                >
+                  {roleLocked ? <Lock className="w-3.5 h-3.5" /> : <span className="text-sm">{activeRoleInfo.badgeEmoji}</span>}
+                  <span className="hidden md:inline">{roleName(activeRoleInfo)}</span>
                 </div>
               )}
             </div>

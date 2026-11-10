@@ -17,6 +17,8 @@ import { randomInt } from 'node:crypto';
 export const PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const PAIRING_CODE_LENGTH = 8;
 export const PAIRING_TTL_MS = 5 * 60 * 1000;
+/** Код з листа: пошта доходить не миттєво й відкривається на телефоні, тож живе довше за код із екрана Студії. */
+export const PAIRING_EMAIL_TTL_MS = 15 * 60 * 1000;
 export const PAIRING_MAX_FAILURES = 10;
 export const PAIRING_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 /**
@@ -65,14 +67,20 @@ export class PairingCodeStore {
   ) {}
 
   /** Новий код для автора. Попередній невикористаний код цього автора стає недійсним. */
-  issue(userId: string, name = 'DesignCraft (локально)', scope: string | null = null): PairingIssue {
+  issue(
+    userId: string,
+    name = 'DesignCraft (локально)',
+    scope: string | null = null,
+    options: { ttlMs?: number; keepOthers?: boolean } = {}
+  ): PairingIssue {
     this.sweep();
-    for (const [code, pending] of this.codes) if (pending.userId === userId) this.codes.delete(code);
+    // `keepOthers` — для коду з листа: запит без входу не має скасовувати код, який автор зараз бачить на екрані Студії.
+    if (!options.keepOthers) for (const [code, pending] of this.codes) if (pending.userId === userId) this.codes.delete(code);
     let code = '';
     do {
       code = Array.from({ length: PAIRING_CODE_LENGTH }, () => PAIRING_ALPHABET[this.random(PAIRING_ALPHABET.length)]).join('');
     } while (this.codes.has(code));
-    const expiresAt = this.now() + PAIRING_TTL_MS;
+    const expiresAt = this.now() + (options.ttlMs ?? PAIRING_TTL_MS);
     this.codes.set(code, { userId, name: String(name || '').slice(0, 80) || 'DesignCraft (локально)', scope, expiresAt });
     return { code, display: formatPairingCode(code), expiresAt: new Date(expiresAt).toISOString() };
   }

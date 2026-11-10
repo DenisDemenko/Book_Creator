@@ -169,7 +169,7 @@ async function resolveUnicodeFont(): Promise<Uint8Array | null> {
   const url = process.env.ETSY_README_FONT_URL;
   if (!url) return null;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!res.ok) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
     await fsp.mkdir(cacheDir, { recursive: true });

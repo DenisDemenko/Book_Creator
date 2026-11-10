@@ -1,4 +1,4 @@
-"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.4.0).
+"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.5.0).
 
 Синхронний (httpx). Токен тримає сервер GrabFusion. Розгалужуватись слід лише за `StudioError.kind`.
 """
@@ -180,14 +180,19 @@ class StudioClient:
             self._sleep(step)
 
 
+def _ip_headers(client_ip: str | None) -> dict[str, str]:
+    """Адреса телефона для лімітів Studio: інакше всі користувачі виглядали б однією адресою (сервісу GrabFusion)."""
+    return {"X-Forwarded-For": client_ip} if client_ip else {}
+
+
 def pair_with_code(base_url: str, code: str, *, timeout: float = 20.0,
-                   transport: httpx.BaseTransport | None = None) -> dict[str, Any]:
+                   transport: httpx.BaseTransport | None = None, client_ip: str | None = None) -> dict[str, Any]:
     """Обмін одноразового коду підключення на токен: `POST /pair` → `{token, record, user}`.
 
     Помилки: `invalid_code` 404, `code_expired` 410, `too_many_attempts` 429.
     """
     with httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, transport=transport) as http:
-        resp = http.post("/pair", json={"code": code})
+        resp = http.post("/pair", json={"code": code}, headers=_ip_headers(client_ip))
         try:
             body = resp.json()
         except ValueError:
@@ -197,3 +202,21 @@ def pair_with_code(base_url: str, code: str, *, timeout: float = 20.0,
     if not isinstance(body, dict) or not isinstance(body.get("token"), str):
         raise StudioError("server_error", "Studio повернула неочікувану відповідь на підключення.")
     return body
+
+
+def request_pair_email(base_url: str, email: str, *, timeout: float = 20.0,
+                       transport: httpx.BaseTransport | None = None, client_ip: str | None = None) -> dict[str, Any]:
+    """Код підключення на пошту облікового запису: `POST /pair/email` → `202 {ok, message}`.
+
+    Студія відповідає однаково, чи є такий обліковий запис (по відповіді адресу не вгадати). Помилки:
+    `bad_input` 400, `too_many_attempts` 429, `mail_unavailable` 503 (SMTP на сервері не налаштовано).
+    """
+    with httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, transport=transport) as http:
+        resp = http.post("/pair/email", json={"email": email}, headers=_ip_headers(client_ip))
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+    if resp.status_code >= 400:
+        raise StudioError.from_response(resp.status_code, body)
+    return body if isinstance(body, dict) else {"ok": True}

@@ -563,7 +563,7 @@ async function submitPollAndDownload(
 
   let submitRes: Response;
   try {
-    submitRes = await fetch(submitUrl, { method: 'POST', headers, body: JSON.stringify(body) });
+    submitRes = await fetch(submitUrl, { signal: AbortSignal.timeout(60_000), method: 'POST', headers, body: JSON.stringify(body) });
   } catch (err) {
     throw new VideoGenerationError('unknown', `Leonardo.Ai недоступний: ${(err as Error).message}`, engine.id, err);
   }
@@ -635,6 +635,7 @@ async function submitPollAndDownload(
     let pollRes: Response;
     try {
       pollRes = await fetch(`${pollBaseUrl}/generations/${generationId}`, {
+        signal: AbortSignal.timeout(20_000),
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
       });
     } catch (err) {
@@ -694,7 +695,7 @@ async function submitPollAndDownload(
 
   let downloadRes: Response;
   try {
-    downloadRes = await fetch(videoUrl);
+    downloadRes = await fetch(videoUrl, { signal: AbortSignal.timeout(180_000) });
   } catch (err) {
     throw new VideoGenerationError('unknown', `Не вдалося завантажити відео Leonardo.Ai: ${(err as Error).message}`, engine.id, err);
   }

@@ -177,14 +177,31 @@ export function useAuth() {
   }, []);
 
   const register = useCallback(
-    async (email: string, password: string, name: string): Promise<boolean> => {
+    async (email: string, password: string, name: string, roles?: UserRole[]): Promise<boolean> => {
       setState((p) => ({ ...p, error: null }));
       try {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         if (name.trim()) {
           await updateProfile(credential.user, { displayName: name.trim() });
         }
-        return applySessionResult(await exchangeForSession());
+        const session = await exchangeForSession();
+        // Ролі з галочок — один раз, одразу після створення облікового запису (сервер пускає лише щойно створеного).
+        // Не вдалось — лишається типова роль, а вхід від цього не страждає.
+        if (roles && roles.length && 'user' in session) {
+          try {
+            const res = await fetch('/api/auth/roles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ roles }),
+            });
+            const data = await res.json().catch(() => null);
+            if (res.ok && data?.user) return applySessionResult({ user: { ...data.user, isGuest: false }, permissions: data.permissions || {} });
+          } catch {
+            /* типова роль */
+          }
+        }
+        return applySessionResult(session);
       } catch (err) {
         setState((p) => ({ ...p, error: firebaseErrorMessage(err) }));
         return false;

@@ -112,7 +112,7 @@ export async function loadImageBytes(
 
   if (/^https?:\/\//.test(url)) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const bytes = Buffer.from(await res.arrayBuffer());
       // Заголовок `content-type` з чужого сервера перевіряється байтами:

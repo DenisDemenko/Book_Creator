@@ -75,6 +75,7 @@ export async function synthesizeNarration(
   let res: Response;
   try {
     res = await fetch(`${ELEVEN_BASE_URL}/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      signal: AbortSignal.timeout(120_000),
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,

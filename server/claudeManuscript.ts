@@ -134,6 +134,7 @@ export async function formatManuscriptWithClaude(opts: FormatManuscriptOptions):
   let res: Response;
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
+      signal: AbortSignal.timeout(280_000),
       method: 'POST',
       headers: {
         'x-api-key': anthropicConfig.apiKey,

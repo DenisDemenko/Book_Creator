@@ -223,7 +223,8 @@ def test_manuscript_ocr_text_edit_and_submit_to_inbox(api):
     assert api.call("PUT", f"/photo-drafts/{did}/photos/{pid}/text", {"text": 5}, expect=400)["kind"] == "bad_input"
     assert api.call("POST", f"/photo-drafts/{did}/structure", expect=409)["kind"] == "wrong_status"
     res = api.call("POST", f"/photo-drafts/{did}/submit", expect=201, schema="SubmitResponse")
-    assert res["target"]["kind"] == "inbox" and res["target"]["studioUrl"] == "/media?tab=inbox"
+    # Контракт 1.5.0: рукопис без наявної книги — Studio створює книгу сама.
+    assert res["target"]["kind"] == "book" and res["target"]["studioUrl"] == "/"
 
 
 def test_manuscript_book_and_title_blockers_and_patch(api):

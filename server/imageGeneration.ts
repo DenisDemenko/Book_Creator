@@ -623,6 +623,7 @@ async function generateWithFal(
   let res: Response;
   try {
     res = await fetch(`${FAL_BASE_URL}/${modelId}`, {
+      signal: AbortSignal.timeout(240_000),
       method: 'POST',
       headers: {
         Authorization: `Key ${apiKey}`,
@@ -667,7 +668,7 @@ async function generateWithFal(
 
   let fileRes: Response;
   try {
-    fileRes = await fetch(first.url);
+    fileRes = await fetch(first.url, { signal: AbortSignal.timeout(60_000) });
   } catch (err) {
     throw new ImageGenerationError(
       'unknown',
@@ -700,6 +701,7 @@ async function generateWithSeedream(
   let res: Response;
   try {
     res = await fetch(`${seedreamConfig.baseUrl}/images/generations`, {
+      signal: AbortSignal.timeout(240_000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -791,6 +793,7 @@ async function generateWithOpenAI(
   let res: Response;
   try {
     res = await fetch('https://api.openai.com/v1/images/generations', {
+      signal: AbortSignal.timeout(240_000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -936,6 +939,7 @@ async function generateWithLeonardo(
   let submitRes: Response;
   try {
     submitRes = await fetch(`${leonardoConfig.baseUrl}/generations`, {
+      signal: AbortSignal.timeout(60_000),
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -972,6 +976,7 @@ async function generateWithLeonardo(
     let pollRes: Response;
     try {
       pollRes = await fetch(`${leonardoConfig.baseUrl}/generations/${generationId}`, {
+        signal: AbortSignal.timeout(20_000),
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
       });
     } catch (err) {
@@ -1005,7 +1010,7 @@ async function generateWithLeonardo(
 
   let downloadRes: Response;
   try {
-    downloadRes = await fetch(imageUrl);
+    downloadRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
   } catch (err) {
     throw new ImageGenerationError('unknown', `Не вдалося завантажити результат Leonardo.Ai: ${(err as Error).message}`, engine.id, err);
   }

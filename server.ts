@@ -102,9 +102,10 @@ import { registerExternalApiRoutes } from './server/external/externalApiRoutes';
 import { recognizeScanWithCoreVision } from './server/external/scanRecognizer';
 import { registerPhotoDraftRoutes } from './server/external/photoDraftRoutes';
 import { describePhotoWithCoreVision } from './server/external/photoDraftDescriber';
-import { aiUsageForDraft, createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
+import { aiUsageForDraft, createBookFromManuscript, createCourseDraft, createExpressInstruction, createInboxScans } from './server/external/photoDraftSinks';
 import { writeWithCoreText } from './server/external/photoDraftWriter';
 import { passModels } from './server/external/photoDraftAiModels';
+import { startMaintenance } from './server/maintenance';
 import { registerMyWorksRoutes } from './server/myWorksRoutes';
 import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
@@ -607,7 +608,7 @@ async function startServer() {
     checkAiBudget: ({ userId, role }) => checkChatQuota(userId, role, 'GrabFusion (опис кадрів)'),
     writeText: writeWithCoreText,
     passModels,
-    sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans },
+    sinks: { createCourse: createCourseDraft, createExpress: createExpressInstruction, createInboxScans, createManuscriptBook: createBookFromManuscript },
     aiUsage: aiUsageForDraft,
   });
   registerMyWorksRoutes(app);
@@ -6918,6 +6919,7 @@ ${JSON.stringify(bookContext || {}, null, 2)}
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT} with WebSockets enabled on /ws`);
   });
+  startMaintenance();
 
   // Семантичне ядро (Т0.3) — ПІСЛЯ старту: міграції не затримують відкриття
   // Студії, а збій бази ядра не валить решту застосунку (стан — у /api/health).

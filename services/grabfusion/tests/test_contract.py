@@ -14,8 +14,8 @@ def test_every_fixture_matches_schema(name):
 
 
 def test_version_and_fixture_count():
-    assert contract.contract_version() == "1.4.0"
-    assert len(contract.fixture_names()) == 29
+    assert contract.contract_version() == "1.5.0"
+    assert len(contract.fixture_names()) == 30
 
 
 def test_schema_rejects_broken_draft():

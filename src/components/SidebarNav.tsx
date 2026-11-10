@@ -35,6 +35,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
+  ChevronLeft,
   Compass,
   Search,
   UserRound,
@@ -280,6 +281,17 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   const [collapsed, setCollapsed] = useState<boolean>(readInitialCollapsed);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readInitialGroups);
   const focusTabs = focus?.tabs ?? [];
+  // Меню показує ОДИН блок за раз (запит власника 10.11.2026): `null` — перелік блоків, інакше — id відкритого блоку
+  // з кнопкою «Повернутися назад в меню». Стартуємо з блоку активної вкладки, щоб користувач не губився.
+  const groupOfTab = (tab: NavigationTab) => NAV_GROUPS.find((g) => g.tabs.includes(tab))?.id ?? null;
+  const [activeGroup, setActiveGroup] = useState<string | null>(() => groupOfTab(currentTab));
+  // Перехід на вкладку з іншого місця (дашборд, посилання) переносить меню в її блок; вкладки поза блоками
+  // («Підписка», «Адмін») меню не міняють.
+  useEffect(() => {
+    const g = groupOfTab(currentTab);
+    if (g) setActiveGroup(g);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTab]);
   // «Інше» за замовчуванням згорнуте (на відміну від груп): простір ролі — головне.
   const othersOpen = (state: Record<string, boolean>) => state[OTHERS_KEY] === true;
 
@@ -460,55 +472,73 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             {!collapsed && <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">{t('header.group.other')}</span>}
           </button>
         )}
-        {(focusTabs.length === 0 || othersOpen(openGroups)) && NAV_GROUPS.map((group) => {
-          const allowed = group.tabs.filter((tab) => (canAccessTab(currentRole, tab) || extraTabs.includes(tab)) && !focusTabs.includes(tab));
-          if (allowed.length === 0) return null;
-          const isOpen = isGroupOpen(openGroups, group.id);
+        {(focusTabs.length === 0 || othersOpen(openGroups)) && (() => {
+          const groupTabs = (group: NavGroup) =>
+            group.tabs.filter((tab) => (canAccessTab(currentRole, tab) || extraTabs.includes(tab)) && !focusTabs.includes(tab));
+          const available = NAV_GROUPS.filter((group) => groupTabs(group).length > 0);
+          const open = available.find((group) => group.id === activeGroup) ?? null;
 
+          // Перелік блоків: кожен — число + назва за змістом; відкривається окремо.
+          if (!open) {
+            return (
+              <div className="space-y-1" data-nav-blocks="menu">
+                {!collapsed && (
+                  <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 truncate">{t('header.sidebarMenuTitle')}</p>
+                )}
+                {available.map((group) => (
+                  <button
+                    key={group.id}
+                    onClick={() => setActiveGroup(group.id)}
+                    title={t(`header.group.${group.id}`)}
+                    data-nav-block={group.id}
+                    className={`w-full flex items-center gap-2 rounded-lg transition-all ${
+                      collapsed ? 'justify-center py-2' : 'px-3 py-2.5 hover:bg-white/[0.06] border border-white/[0.06]'
+                    }`}
+                  >
+                    <span className="text-[11px] font-extrabold font-mono [color:var(--sun-acc)] leading-none">{group.numeral}</span>
+                    {!collapsed && (
+                      <span className="flex-1 text-left text-xs font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">
+                        {t(`header.group.${group.id}`)}
+                      </span>
+                    )}
+                    {!collapsed && <ChevronDown className="w-3 h-3 text-slate-500 -rotate-90" />}
+                  </button>
+                ))}
+              </div>
+            );
+          }
+
+          // Відкритий блок: назва, його розділи й кнопка повернення до переліку.
           return (
-            <div key={group.id} className="space-y-0.5">
-              {/* Заголовок групи — римська цифра + назва + стрілка розкриття */}
+            <div className="space-y-0.5" data-nav-blocks="group" data-nav-open-block={open.id}>
               <button
-                onClick={() => toggleGroup(group.id)}
-                title={t(`header.group.${group.id}`)}
-                className={`w-full flex items-center gap-1.5 rounded-lg transition-all ${
-                  collapsed ? 'justify-center py-1.5' : 'px-2 py-1.5 hover:bg-white/[0.04]'
+                onClick={() => setActiveGroup(null)}
+                title={t('header.sidebarBackToMenu')}
+                data-nav-back
+                className={`w-full flex items-center gap-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/[0.06] transition-all ${
+                  collapsed ? 'justify-center py-1.5' : 'px-2 py-1.5'
                 }`}
               >
-                {!collapsed && (
-                  <ChevronDown
-                    className={`w-3 h-3 text-slate-500 transition-transform ${isOpen ? '' : '-rotate-90'}`}
-                  />
-                )}
-                {/*
-                  Числа й назви груп (I СТАРТ ТА ЗАДУМ, II ДИЗАЙН, …) —
-                  єдина навігаційна опора у списку з двох десятків
-                  вкладок. Приглушений сірий на тлі приглушеного сірого
-                  тексту губився в загальній масі; тепер номер — на повний
-                  бурштиновий акцент і трохи крупніший, назва — світліша
-                  й теж крупніша, з тим самим бурштиновим кольором, що й
-                  номер, щоб пара читалась одним написом, а не двома.
-                */}
-                <span className="text-[11px] font-extrabold font-mono [color:var(--sun-acc)] leading-none">{group.numeral}</span>
-                {!collapsed && (
-                  <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">
-                    {t(`header.group.${group.id}`)}
-                  </span>
-                )}
+                <ChevronLeft className="w-4 h-4 shrink-0" />
+                {!collapsed && <span className="text-[11px] font-semibold truncate">{t('header.sidebarBackToMenu')}</span>}
               </button>
-
-              {isOpen &&
-                allowed.map((tab) => (
-                  <React.Fragment key={tab}>
-                    {collapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
-                    {group.id === 'start' && tab === 'editor' && currentRole !== 'reader' && (
-                      collapsed ? renderQuickAiCollapsed() : renderQuickAi()
-                    )}
-                  </React.Fragment>
-                ))}
+              <div className={`flex items-center gap-1.5 ${collapsed ? 'justify-center py-1' : 'px-2 py-1'}`} data-nav-block-title>
+                <span className="text-[11px] font-extrabold font-mono [color:var(--sun-acc)] leading-none">{open.numeral}</span>
+                {!collapsed && (
+                  <span className="text-[11px] font-bold uppercase tracking-wider [color:var(--sun-soft)] truncate">{t(`header.group.${open.id}`)}</span>
+                )}
+              </div>
+              {groupTabs(open).map((tab) => (
+                <React.Fragment key={tab}>
+                  {collapsed ? renderTabCollapsed(tab, toNavItem(tab)) : renderTab(tab, toNavItem(tab))}
+                  {open.id === 'start' && tab === 'editor' && currentRole !== 'reader' && (
+                    collapsed ? renderQuickAiCollapsed() : renderQuickAi()
+                  )}
+                </React.Fragment>
+              ))}
             </div>
           );
-        })}
+        })()}
 
         {/* Службові вкладки поза групами */}
         {OTHER_TABS.some((tab) => canAccessTab(currentRole, tab)) && (

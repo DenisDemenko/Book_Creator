@@ -154,9 +154,10 @@ def test_structure_generate_return_running_job(client):
 
 
 def test_submit_follows_draft_kind(client):
-    for kind, target in [("course", "course"), ("instruction", "express"), ("book", "inbox"),
-                         ("manuscript", "inbox")]:
-        fields = {"bookId": "b1"} if kind == "book" else {}
+    # Рукопис без книги (1.5.0) — `book`; з наявною книгою — `inbox`.
+    for kind, target, fields in [("course", "course", {}), ("instruction", "express", {}),
+                                 ("book", "inbox", {"bookId": "b1"}), ("manuscript", "book", {}),
+                                 ("manuscript", "inbox", {"bookId": "b1"})]:
         d = client.create_draft(kind, **fields)
         res = client.submit(d.draftId)
         assert res.target.kind == target and res.target.studioUrl.startswith("/")
@@ -302,3 +303,48 @@ def test_models_ignore_unknown_fields():
     fx["photos"][0]["alsoNew"] = True
     d = Draft.from_dict(fx)
     assert d.draftId == fx["draftId"] and not hasattr(d, "brandNew")
+
+
+# --- код на пошту й адреса телефона (журнал #541) ------------------------------------------------------------------------
+
+def _recording_transport(status: int, body: dict):
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(status, json=body)
+
+    return httpx.MockTransport(handler), seen
+
+
+def test_request_pair_email_posts_email_and_forwards_phone_address():
+    from grabfusion.studio_client import request_pair_email
+    tr, seen = _recording_transport(202, {"ok": True, "message": "Якщо акаунт є — лист надіслано."})
+    out = request_pair_email("https://studio.test/api/external/v1", "a@b.ua", transport=tr, client_ip="203.0.113.7")
+    assert out["ok"] is True
+    req = seen[0]
+    assert req.url.path.endswith("/pair/email") and json.loads(req.content) == {"email": "a@b.ua"}
+    assert req.headers["x-forwarded-for"] == "203.0.113.7"
+
+
+def test_request_pair_email_without_address_sends_no_header():
+    from grabfusion.studio_client import request_pair_email
+    tr, seen = _recording_transport(202, {"ok": True})
+    request_pair_email("https://studio.test/api/external/v1", "a@b.ua", transport=tr)
+    assert "x-forwarded-for" not in seen[0].headers
+
+
+@pytest.mark.parametrize("status,kind", [(429, "too_many_attempts"), (503, "mail_unavailable"), (400, "bad_input")])
+def test_request_pair_email_errors_become_studio_errors(status, kind):
+    from grabfusion.studio_client import request_pair_email
+    tr, _ = _recording_transport(status, {"error": "x", "kind": kind})
+    with pytest.raises(StudioError) as e:
+        request_pair_email("https://studio.test/api/external/v1", "a@b.ua", transport=tr)
+    assert (e.value.kind, e.value.status) == (kind, status)
+
+
+def test_pair_with_code_forwards_phone_address():
+    from grabfusion.studio_client import pair_with_code
+    tr, seen = _recording_transport(201, {"token": "nst_x", "user": {"name": "A"}})
+    pair_with_code("https://studio.test/api/external/v1", "ABCD-EFGH", transport=tr, client_ip="198.51.100.9")
+    assert seen[0].headers["x-forwarded-for"] == "198.51.100.9"

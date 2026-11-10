@@ -58,6 +58,10 @@ import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, getActiveTaxRegime, s
 import { upsertSubscription } from './store';
 import { getDb, isAvailable } from './db';
 import { CreditWallet, WalletError } from './creditWallet';
+import fs from 'node:fs';
+import { createGzip } from 'node:zlib';
+import { pipeline } from 'node:stream';
+import { backupConfig, backupStatus, createBackup, createDownloadSnapshot } from './dbBackup';
 import { jevCreditsPerMillionTokens, syncCredits } from './creditGate';
 import { imageCostTable, videoCostTable } from './creditCatalog';
 import { DEFAULT_PRICING_CONFIG } from './taxPricing';
@@ -496,6 +500,37 @@ export function registerAdminRoutes(app: Express): void {
       walletAvailable: isAvailable(),
     };
   }
+
+  // ── Копії бази (журнал #538) ───────────────────────────────────────────────────────────────────────
+  // Знімок на томі захищає від пошкодження бази; від втрати тому — лише завантаження поза нього.
+
+  app.get('/api/admin/db-backups', requireAdmin, (_req, res) => {
+    res.json(backupStatus());
+  });
+
+  app.post('/api/admin/db-backups', requireAdmin, (req, res) => {
+    const r = createBackup(backupConfig());
+    if (!r.ok) {
+      console.warn(`[dbBackup] ручна копія не вдалась (${r.reason}) — ${String((req.principal as any)?.email ?? '')}`);
+      return res.status(r.reason === 'no_space' ? 507 : r.reason === 'no_db' ? 503 : 500).json({ error: r.message, reason: r.reason });
+    }
+    console.log(`[dbBackup] ручна копія ${r.file!.name} — ${String((req.principal as any)?.email ?? '')}`);
+    res.status(201).json({ file: r.file, pruned: r.pruned, status: backupStatus() });
+  });
+
+  /** Свіжий знімок бази, стиснутий gzip. Містить усі дані Studio (облікові записи, токени) — лише для адміна. */
+  app.get('/api/admin/db-backup/download', requireAdmin, (req, res) => {
+    const snap = createDownloadSnapshot();
+    if (!snap.ok) return res.status(503).json({ error: snap.message });
+    console.log(`[dbBackup] завантаження знімка ${snap.name} — ${String((req.principal as any)?.email ?? '')}`);
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="${snap.name}.gz"`);
+    res.setHeader('Cache-Control', 'no-store');
+    pipeline(fs.createReadStream(snap.path!), createGzip(), res, (err) => {
+      snap.cleanup!();
+      if (err) console.warn('[dbBackup] завантаження перервано:', String(err.message ?? err).slice(0, 200));
+    });
+  });
 
   const adminWallet = () => (isAvailable() ? new CreditWallet(getDb() as any) : null);
 

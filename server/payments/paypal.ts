@@ -44,6 +44,7 @@ async function getAccessToken(): Promise<string> {
   }
   const basic = Buffer.from(`${paypalConfig.clientId}:${paypalConfig.clientSecret}`).toString('base64');
   const res = await fetch(`${apiBase()}/v1/oauth2/token`, {
+    signal: AbortSignal.timeout(30_000),
     method: 'POST',
     headers: {
       Authorization: `Basic ${basic}`,
@@ -78,6 +79,7 @@ export async function createOrder(params: CreateOrderParams): Promise<CreateOrde
   const amountUsd = uahToUsd(params.amountUah);
 
   const res = await fetch(`${apiBase()}/v2/checkout/orders`, {
+    signal: AbortSignal.timeout(30_000),
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -125,6 +127,8 @@ export interface CaptureResult {
 
 export async function captureOrder(orderId: string): Promise<CaptureResult> {
   const token = await getAccessToken();
+  // fetch-timeout: none — запит на списання коштів не обриваємо з нашого боку: обрив після того, як PayPal уже
+  // провів платіж, лишив би гроші списаними, а замовлення — неоплаченим. Межу дає undici (300 с).
   const res = await fetch(`${apiBase()}/v2/checkout/orders/${orderId}/capture`, {
     method: 'POST',
     headers: {

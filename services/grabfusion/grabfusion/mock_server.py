@@ -78,7 +78,7 @@ def fixture_is_image(route: Route) -> bool:
 def fixtures_served_by_routes() -> set[str]:
     """Усі фікстури, які мок може віддати за таблицею (без ручного вибору заголовком)."""
     names = {r.fixture for r in ROUTES if r.fixture}
-    names |= set(SUBMIT_BY_KIND.values())
+    names |= set(SUBMIT_BY_KIND.values()) | {"submit-manuscript-existing-book"}
     names |= {"get-draft-structured", "get-draft-written", "get-draft-job-failed", "get-draft-manuscript"}
     return names
 
@@ -135,12 +135,30 @@ async def _pair(request: Request) -> Response:
                          "user": {"name": "Тестова Викладачка", "email": "teacher@example.com"}}, 201)
 
 
+async def _pair_email(request: Request) -> Response:
+    """Код на пошту. Адреси для тестів: spam@… → 429, down@… → 503, без «@» → 400; інші — 202 (однакова відповідь)."""
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        body = {}
+    email = body.get("email") if isinstance(body, dict) else None
+    if not isinstance(email, str) or "@" not in email:
+        return JSONResponse({"error": "Введіть електронну пошту свого облікового запису.", "kind": "bad_input"}, 400)
+    if email.startswith("spam@"):
+        return JSONResponse({"error": "Забагато запитів коду.", "kind": "too_many_attempts"}, 429)
+    if email.startswith("down@"):
+        return JSONResponse({"error": "Надсилання листів на сервері не налаштовано.", "kind": "mail_unavailable"}, 503)
+    return JSONResponse({"ok": True, "message": "Якщо для цієї пошти є обліковий запис, ми надіслали лист із кодом."}, 202)
+
+
 def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -> FastAPI:
     app = FastAPI(title="GrabFusion mock of Studio photo-drafts API", docs_url=None, redoc_url=None)
     limits = contract.default_limits()
     seen_clients: dict[tuple[str, str], bool] = {}
     kinds: dict[str, str] = {}
+    with_book: set[str] = set()  # рукописи, створені з наявною книгою (їх `submit` лишається `inbox`, контракт 1.5.0)
     app.state.calls = []  # (METHOD path, fixture) — для тестів
+    app.state.pair_headers = []  # X-Forwarded-For, з яким прийшли /pair і /pair/email — для тестів
     sim = Sim() if stateful else None
     app.state.sim = sim
 
@@ -149,7 +167,11 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
         path = "/" + rest
         method = request.method
         if method == "POST" and path == "/pair":
+            app.state.pair_headers.append(request.headers.get("x-forwarded-for"))
             return await _pair(request)
+        if method == "POST" and path == "/pair/email":
+            app.state.pair_headers.append(request.headers.get("x-forwarded-for"))
+            return await _pair_email(request)
         route = params = None
         for r in ROUTES:
             if r.method != method:
@@ -241,6 +263,8 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
                 return _err("bad_input", "Потрібен text (рядок у межах maxPageTextChars).")
         elif route.name == "POST /photo-drafts/:draftId/submit":
             fixture = SUBMIT_BY_KIND.get(kinds.get(params["draftId"], "course"), "submit-course")
+            if fixture == "submit-manuscript" and params["draftId"] in with_book:
+                fixture = "submit-manuscript-existing-book"
 
         app.state.calls.append((route.name, fixture))
         if fixture is None:
@@ -250,6 +274,8 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
             fx["duplicate"] = True
         if route.name == "POST /photo-drafts" and isinstance(body, dict):
             kinds[fx["draft"]["draftId"]] = body["kind"]
+            if body.get("kind") == "manuscript" and body.get("bookId"):
+                with_book.add(fx["draft"]["draftId"])
         return JSONResponse(fx, status_code=route.status)
 
     return app

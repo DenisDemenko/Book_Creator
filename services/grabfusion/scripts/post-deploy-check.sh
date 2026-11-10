@@ -41,7 +41,9 @@ c=$(code -L "$BASE/static/app.js"); [ "$c" = 200 ] && ok "static/app.js (200)" |
 echo "Сервіс:"
 hz=$(curl -s -L -m 30 "$BASE/healthz")
 echo "$hz" | grep -q '"ok":true' && ok "/healthz: $hz" || bad "/healthz не ok: ${hz:0:120}"
-echo "$hz" | grep -q '"contractVersion":"1.3.0"' && ok "контракт 1.3.0" || bad "версія контракту не 1.3.0 (Studio і сервіс мають збігатися)"
+# Очікувана версія контракту; після підвищення контракту (shared/photoDraftContract.ts) змінити тут або передати зовні.
+EXPECTED_CONTRACT="${GRABFUSION_EXPECTED_CONTRACT:-1.5.0}"
+echo "$hz" | grep -q "\"contractVersion\":\"${EXPECTED_CONTRACT}\"" && ok "контракт ${EXPECTED_CONTRACT}" || bad "версія контракту не ${EXPECTED_CONTRACT} (Studio і сервіс мають збігатися)"
 
 echo "Безпека:"
 h=$(hdrs -L "$BASE/api/session")

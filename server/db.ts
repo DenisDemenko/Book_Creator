@@ -1108,6 +1108,20 @@ function migrateUsersColumns(instance: Database): void {
 }
 
 /**
+ * Ролі, які користувач відмітив галочками при реєстрації (журнал #539): `roles` — JSON-масив, `roles_chosen_at` —
+ * коли. Вибір робиться один раз; далі ролі змінює лише адміністратор. У старих базах колонок немає.
+ */
+function migrateUsersRoleChoice(instance: Database): void {
+  try {
+    const cols = instance.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'roles')) instance.exec('ALTER TABLE users ADD COLUMN roles TEXT');
+    if (!cols.some((c) => c.name === 'roles_chosen_at')) instance.exec('ALTER TABLE users ADD COLUMN roles_chosen_at TEXT');
+  } catch (err) {
+    console.warn('[db] Не вдалося додати колонки users.roles / roles_chosen_at:', err);
+  }
+}
+
+/**
  * Паспорт зображення (Т2.3 В1) з'явився пізніше за саму медіатеку: у старих
  * базах колонок немає. Додаємо порожніми — значення для старих рядків
  * виводяться при читанні, тож переливати дані не треба.
@@ -1352,6 +1366,7 @@ export async function initDb(): Promise<boolean> {
     migrateExpressDraftRevision(instance);
     migrateUsageLogColumns(instance);
     migrateUsersColumns(instance);
+    migrateUsersRoleChoice(instance);
     migrateSupportMessageColumns(instance);
     migrateModerationSnapshot(instance);
     migrateMediaAssetColumns(instance);

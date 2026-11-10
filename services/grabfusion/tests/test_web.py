@@ -251,3 +251,32 @@ def test_page_text_proxy_against_sim(sim_url):
     long_ = c.put(f"/api/drafts/{did}/photos/{p['photoId']}/text", json={"text": "я" * 20001})
     assert long_.status_code == 400 and long_.json()["kind"] == "bad_input"
     assert c.put(f"/api/drafts/{did}/photos/{p['photoId']}/text", content=b"nope").json()["kind"] == "bad_input"
+
+
+# --- код підключення на пошту (журнал #541) ---------------------------------------------------------------------------
+
+def test_pair_email_is_accepted_and_message_is_generic(web):
+    r = web.post("/api/pair/email", json={"email": "teacher@example.com"})
+    assert r.status_code == 200 and r.json()["ok"] is True and "лист" in r.json()["message"]
+    # той самий текст для будь-якої пошти: по відповіді акаунт не вгадати
+    assert web.post("/api/pair/email", json={"email": "nobody@example.com"}).json() == r.json()
+    assert web.get("/api/session").json()["paired"] is False  # лише лист; підключення — після введення коду
+
+
+@pytest.mark.parametrize("email,kind,status", [("", "bad_input", 400), ("abc", "bad_input", 400),
+                                               ("spam@example.com", "too_many_attempts", 429),
+                                               ("down@example.com", "mail_unavailable", 503)])
+def test_pair_email_errors(web, email, kind, status):
+    r = web.post("/api/pair/email", json={"email": email})
+    assert (r.status_code, r.json()["kind"]) == (status, kind)
+
+
+def test_pair_email_without_body_is_400(web):
+    r = web.post("/api/pair/email", content=b"not json", headers={"content-type": "application/json"})
+    assert r.status_code == 400 and r.json()["kind"] == "bad_input"
+
+
+def test_delete_draft_route_discards_it(paired):
+    d = paired.post("/api/drafts", json={"kind": "course", "title": "Для видалення"}).json()["draft"]
+    r = paired.delete(f"/api/drafts/{d['draftId']}")
+    assert r.status_code == 200 and r.json()["draft"]["status"] == "discarded"

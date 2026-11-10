@@ -573,6 +573,31 @@ export async function listAssets(
   return (rows as any[]).map(rowToAsset);
 }
 
+/**
+ * Привʼязує вже збережені файли до книги (журнал #540): сторінки рукопису з GrabFusion завантажуються ДО того, як книга
+ * існує, а коли Studio створює її при відправленні, фото мають лягти в медіатеку цієї книги. Чужі файли пропускаються;
+ * повертає, скільки привʼязано.
+ */
+export async function attachAssetsToBook(ids: string[], ownerId: string, bookId: string): Promise<number> {
+  const owner = String(ownerId || '').trim();
+  const book = String(bookId || '').trim();
+  if (!owner || !book) return 0;
+  let moved = 0;
+  for (const raw of ids) {
+    const asset = await getAsset(raw);
+    if (!asset || asset.ownerId !== owner) continue;
+    if (useJson()) {
+      const data = await loadJson();
+      data.assets = data.assets.map((a) => (a.id === asset.id ? { ...a, bookId: book } : a));
+      await persistJson();
+    } else {
+      getDb()!.prepare('UPDATE media_assets SET book_id = ? WHERE id = ? AND owner_id = ?').run(book, asset.id, owner);
+    }
+    moved += 1;
+  }
+  return moved;
+}
+
 /** Байти файлу. `null` — опису немає або файл зник із диска. */
 export async function readAsset(
   id: string

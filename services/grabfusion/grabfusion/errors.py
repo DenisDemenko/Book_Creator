@@ -35,6 +35,7 @@ PAIR_KIND_STATUS: dict[str, int] = {
     "invalid_code": 404,
     "code_expired": 410,
     "too_many_attempts": 429,
+    "mail_unavailable": 503,
 }
 
 

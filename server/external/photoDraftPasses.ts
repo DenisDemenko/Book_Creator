@@ -446,6 +446,22 @@ export function mergeAssumptions(
 // Перевірка якості перед відправкою
 // ---------------------------------------------------------------------------
 
+/**
+ * Скільки кадр може бути в `processing`, перш ніж вважати, що опис загубився (журнал #538). Прохід 1 іде у фоні
+ * в памʼяті процесу: деплой чи падіння Studio посеред опису лишали кадр у `processing` назавжди — автор бачив
+ * вічне «описується», а «Розкласти» і відправка не пускали. Найдовший законний опис — ланцюг моделей зору по 30 с
+ * на спробу, а для рукопису ще й друга спроба порожньої відповіді (≈ 5 хв у найгіршому разі) — з запасом.
+ */
+export const PHOTO_STALE_MS = 8 * 60 * 1000;
+export const PHOTO_STALE_MESSAGE = 'Опис перервано (сервер перезапускався). Натисніть «Повторити».';
+
+/** Кадр, що висить у `processing` довше за PHOTO_STALE_MS: назовні він видимий як невдалий, повтор дозволений. */
+export function photoIsStale(photo: { status: string; updatedAt?: string }, nowMs: number): boolean {
+  if (photo.status !== 'processing' || !photo.updatedAt) return false;
+  const since = Date.parse(photo.updatedAt);
+  return Number.isFinite(since) && nowMs - since > PHOTO_STALE_MS;
+}
+
 export function jobIsStale(job: { status: string; startedAt: string } | null, nowMs: number): boolean {
   if (!job || job.status !== 'running') return false;
   const started = Date.parse(job.startedAt);
@@ -458,13 +474,14 @@ const short = (text: string, max = 60) => (countNoteChars(text) > max ? `${[...t
  * Усе, що заважає відправці. Порожній перелік — можна відправляти.
  * `bookOk` — для `kind: book`: чи книга ще є й належить автору (перевіряє маршрут).
  */
-export function computeSubmitBlockers(draft: PassDraft, options: { bookOk?: boolean; status?: string } = {}): SubmitBlocker[] {
+export function computeSubmitBlockers(draft: PassDraft, options: { bookOk?: boolean; status?: string; nowMs?: number } = {}): SubmitBlocker[] {
   const blockers: SubmitBlocker[] = [];
   if (draft.photos.length === 0) blockers.push({ kind: 'no_photos', message: 'У чернетці немає жодного кадру.' });
   for (const p of draft.photos) {
-    if (p.status === 'processing') {
+    const lost = options.nowMs !== undefined && photoIsStale(p, options.nowMs);
+    if (p.status === 'processing' && !lost) {
       blockers.push({ kind: 'photos_processing', message: `Кадр №${p.order} ще описується — зачекайте.`, photoId: p.photoId });
-    } else if (p.status === 'failed') {
+    } else if (p.status === 'failed' || lost) {
       blockers.push({
         kind: 'photos_failed',
         message: `Кадр №${p.order} не вдалося описати — повторіть опис або приберіть кадр.`,

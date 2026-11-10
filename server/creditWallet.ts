@@ -231,6 +231,35 @@ export class CreditWallet {
     });
   }
 
+  /**
+   * Повертає резерви, що «зависли»: процес упав чи перезапустився між резервом і списанням, і ніхто вже не
+   * викличе settle/release — бали лишались би заблокованими назавжди. `ttlMsByPrefix` — скільки чекати для
+   * ключів з цим префіксом (до першого `:`); ключі з іншим префіксом (чужі потоки, наприклад маркетплейсу,
+   * який сам завершує свої резерви) НЕ чіпаємо. Повернення ідемпотентне: резерв, що встиг завершитись між
+   * вибіркою і поверненням, пропускається.
+   */
+  releaseStale(ttlMsByPrefix: Record<string, number>, nowMs: number, reason: string): { released: number; credits: number } {
+    const rows = this.db
+      .prepare("SELECT job_key, amount, created_at FROM credit_reservations WHERE status = 'reserved'")
+      .all() as Array<{ job_key: string; amount: number; created_at: string }>;
+    let released = 0;
+    let credits = 0;
+    for (const r of rows) {
+      const ttl = ttlMsByPrefix[r.job_key.split(':')[0]];
+      if (ttl === undefined) continue;
+      const created = Date.parse(r.created_at);
+      if (!Number.isFinite(created) || nowMs - created < ttl) continue;
+      try {
+        this.release(r.job_key, reason);
+        released += 1;
+        credits += r.amount;
+      } catch (err) {
+        if (!(err instanceof WalletError)) throw err; // уже списано чи повернено — не наша справа
+      }
+    }
+    return { released, credits };
+  }
+
   /** Адмін-коригування: лише проводкою, з причиною й оператором; баланс не йде нижче нуля. */
   adjust(userId: string, delta: number, reason: string, operator: string): CreditBalance {
     if (!Number.isInteger(delta) || delta === 0) {

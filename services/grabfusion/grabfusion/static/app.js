@@ -120,8 +120,17 @@ document.getElementById('btn-back').addEventListener('click', () => openList());
 document.getElementById('btn-logout').addEventListener('click', async () => { await api('POST', '/logout').catch(() => {}); state.user = null; go('pair'); });
 
 /* ---------- підключення ---------- */
+/* Код з посилання QR: `#pair=ABCD-EFGH`. Фрагмент браузер нікуди не надсилає, тож код не потрапляє ні в проксі, ні в журнали, ні в Referer.
+   Лише літери, цифри й дефіс (так його видає Studio); усе інше — не наш код. */
+function pairCodeFromHash(hash) {
+  const m = /^#pair=([A-Za-z0-9-]{4,32})$/.exec(hash || '');
+  return m ? m[1] : null;
+}
+
 function viewPair() {
   const err = h('p', { class: 'err', id: 'pair-err' });
+  // Невдалий вхід за QR (прострочений, уже використаний): пояснюємо тут, а ручний ввід лишається запасним шляхом.
+  err.textContent = state.pairNotice || ''; state.pairNotice = '';
   const input = h('input', { id: 'code', placeholder: 'Код підключення', autocomplete: 'off', autocapitalize: 'characters' });
   const form = h('form', { class: 'card hero', onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
@@ -131,10 +140,37 @@ function viewPair() {
     } catch (e2) { err.textContent = e2.message; }
   } },
     h('h2', { text: 'Підключіть застосунок' }),
-    h('p', { class: 'muted', text: 'У Studio: Медіатека → Скани з телефону → Підключення застосунку → «Код підключення GrabFusion». Код діє 5 хвилин.' }),
+    h('p', { class: 'muted', text: 'Введіть код підключення нижче. Його видає сторінка fusionlab.in.ua/grabfusion (кнопка «Отримати код») на комп’ютері. Або в Studio: Медіатека → Скани з телефону → «QR-код для входу в GrabFusion» — наведіть камеру, і застосунок підключиться сам. Код діє 5 хвилин.' }),
     h('label', { for: 'code', text: 'Код' }), input, err,
     h('p', null, h('button', { class: 'primary', type: 'submit', text: 'Підключити' })));
-  return form;
+  return h('div', null, form, viewPairByEmail(input, err));
+}
+
+/* Не біля комп'ютера: код надсилається на пошту облікового запису (журнал #541). Відповідь Studio однакова, чи є такий обліковий запис. */
+function viewPairByEmail(codeInput, codeErr) {
+  let saved = '';
+  try { saved = localStorage.getItem('gf_email') || ''; } catch (e) { /* приватний режим */ }
+  const email = h('input', { id: 'pair-email', type: 'email', inputmode: 'email', autocomplete: 'email', autocapitalize: 'off', placeholder: 'пошта вашого облікового запису' });
+  email.value = saved;
+  const note = h('p', { class: 'muted', id: 'pair-email-note' });
+  const err = h('p', { class: 'err', id: 'pair-email-err' });
+  const btn = h('button', { class: 'small', type: 'submit', id: 'btn-pair-email', text: 'Надіслати код на пошту' });
+  return h('form', { class: 'card', id: 'pair-email-form', onsubmit: async (e) => {
+    e.preventDefault(); err.textContent = ''; note.textContent = '';
+    const value = email.value.trim();
+    if (!value) { err.textContent = 'Введіть пошту, з якою ви входите у Fusion Lab.'; return; }
+    btn.disabled = true;
+    try {
+      const r = await api('POST', '/pair/email', { email: value });
+      try { localStorage.setItem('gf_email', value); } catch (e2) { /* не критично */ }
+      note.textContent = r.message + ' Відкрийте лист на цьому телефоні: натисніть кнопку в листі або введіть код у поле вище.';
+      codeInput.focus();
+    } catch (e2) { err.textContent = e2.message; } finally { btn.disabled = false; }
+  } },
+    h('h3', { text: 'Немає комп’ютера поруч?' }),
+    h('p', { class: 'muted', text: 'Введіть пошту свого облікового запису — ми надішлемо код підключення листом. Код діє 15 хвилин.' }),
+    h('label', { for: 'pair-email', text: 'Пошта' }), email, err, note,
+    h('p', null, btn));
 }
 
 /* ---------- список чернеток ---------- */
@@ -154,9 +190,28 @@ function viewList() {
     box.append(h('div', { class: 'card row', 'data-draft': d.draftId },
       h('div', { class: 'grow' }, h('strong', { text: d.title || 'Без назви' }),
         h('div', { class: 'muted', text: `${KIND[d.kind] || d.kind} · ${STATUS[d.status] || d.status} · кадрів: ${d.photoCount}` })),
-      h('button', { text: 'Відкрити', onclick: () => openDraft(d.draftId) })));
+      h('div', { class: 'row' },
+        h('button', { text: 'Відкрити', onclick: () => openDraft(d.draftId) }),
+        h('button', { class: 'small danger', 'data-delete-draft': d.draftId, text: 'Видалити', onclick: () => deleteDraft(d) }))));
   }
   return box;
+}
+
+/* Видалення чернетки з системи (запит власника 10.11.2026): прибирає її зі списку, у тому числі відправлену. Те, що вже в Studio
+   (книга, курс, інструкція, «Вхідні») і фото в медіатеці, лишається — про це й попереджаємо. */
+async function deleteDraft(d) {
+  const name = d.title || 'Без назви';
+  const sent = d.status === 'submitted';
+  const msg = `Видалити чернетку «${name}»?\n\n` + (sent
+    ? 'Вона зникне зі списку. Те, що вже відправлено в Studio (книга, курс чи інструкція), і фото в медіатеці лишаться там.'
+    : 'Кадри й текст цієї чернетки буде прибрано зі списку. Дію не можна скасувати.');
+  if (!window.confirm(msg)) return;
+  try {
+    await api('DELETE', `/drafts/${d.draftId}`);
+    state.drafts = state.drafts.filter((x) => x.draftId !== d.draftId);
+    toast('Чернетку видалено.');
+  } catch (e) { toast(e.message); }
+  render();
 }
 
 function viewCreate() {
@@ -574,9 +629,26 @@ async function doSubmit() {
   render();
 }
 
+/* Куди потрапляє «Набір книги» без наявної книги (контракт 1.5.0): Studio створює книгу сама й кладе розпізнане в три місця. */
+function manuscriptPlaces() {
+  return h('ul', { class: 'places', id: 'places' },
+    h('li', null, h('strong', { text: 'Дашборд' }), document.createTextNode(' — нова книга зʼявиться в переліку ваших книг.')),
+    h('li', null, h('strong', { text: 'Книга & Текст' }), document.createTextNode(' — розпізнаний текст у главі, його можна редагувати; він приїжджає чернеткою ШІ — прийміть або виправте.')),
+    h('li', null, h('strong', { text: 'Медіатека' }), document.createTextNode(' — фото всіх сторінок цієї книги.')));
+}
+
 function viewSubmitted(d) {
   const t = d.submitted || state.target;
   const href = t ? state.studioOrigin + t.studioUrl : '#';
+  if (t && t.kind === 'book') {
+    const name = d.newBookTitle || d.title || 'Нова книга';
+    return h('div', { class: 'card', id: 'submitted' },
+      h('h2', { text: 'Книгу створено в Studio' }),
+      h('p', { id: 'submitted-text', text: `Studio створила нову книгу «${name}» і поклала розпізнане в три місця:` }),
+      manuscriptPlaces(),
+      h('p', { class: 'muted', text: 'Відкрийте Studio — книга вже чекає на дашборді; натисніть «Відкрити книгу».' }),
+      h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити Studio' })));
+  }
   return h('div', { class: 'card', id: 'submitted' },
     h('h2', { text: 'Відправлено в Studio' }),
     h('p', { text: t && t.kind === 'course' ? 'Чернетку курсу створено — ціну, категорію й відео додасте в Studio.' : t && t.kind === 'express' ? 'Експрес-чернетку створено. Відкрийте її в Studio протягом 24 годин — потім вона зникне.' : t && t.kind === 'inbox' ? (d.bookId ? 'Сторінки лежать у «Вхідних» книги одним пакетом — вставте главу звідти.' : 'Сторінки лежать у «Вхідних» одним пакетом. Створіть книгу в Studio й натисніть «Вставити главу» — текст приїде чернеткою ШІ.') : 'Готово.' }),
@@ -724,6 +796,12 @@ function viewMsActions(d, mine) {
   if (!d.photos.length) box.append(h('p', { class: 'muted', text: 'Спершу зніміть хоч одну сторінку.' }));
   else if (mine.length) box.append(h('p', { class: 'muted', text: 'Дочекайтесь, поки всі сторінки надішлються.' }));
   else if (processing) box.append(h('p', { class: 'muted', id: 'ocr-banner', text: 'Сторінки розпізнаються…' }));
+  // Що станеться після натискання — одразу над кнопкою (запит власника 10.11.2026).
+  if (!d.bookId) {
+    box.append(h('p', { id: 'submit-explain', text: `Після «Відправити» Studio сама створить нову книгу «${d.newBookTitle || d.title || 'Нова книга'}» і покладе розпізнане в три місця:` }), manuscriptPlaces());
+  } else {
+    box.append(h('p', { class: 'muted', id: 'submit-explain', text: 'Після «Відправити» сторінки потраплять у «Вхідні» вибраної книги одним пакетом — вставте главу звідти.' }));
+  }
   box.append(h('div', { class: 'row' }, h('button', { class: 'primary', id: 'btn-submit', text: 'Відправити главу у Studio', disabled: lock, onclick: doSubmit })));
   if (state.blockers) box.append(h('div', { class: 'err', id: 'blockers' }, h('strong', { text: 'Ще не готово до відправки:' }),
     h('ul', null, state.blockers.map((b) => h('li', { 'data-blocker': b.kind, text: b.message })))));
@@ -877,6 +955,20 @@ async function start() {
 }
 (async function boot() {
   setNet();
+  const qrCode = pairCodeFromHash(location.hash);
+  if (qrCode) {
+    // Код одноразовий: з адреси його прибираємо ще до обміну, щоб він не лишився в історії й закладках.
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      const r = await api('POST', '/pair', { code: qrCode });
+      state.user = r.user; await start(); return;
+    } catch (e) {
+      state.pairNotice = e.kind === 'network'
+        ? 'Немає звʼязку з сервісом. Відскануйте QR ще раз, коли звʼязок зʼявиться.'
+        : (e.message || 'Не вдалося підключитись за QR.') + ' Створіть новий QR у Studio або введіть код вручну.';
+      go('pair'); return;
+    }
+  }
   try {
     const s = await api('GET', '/session');
     if (s.paired) { state.user = s.user; await start(); } else go('pair');

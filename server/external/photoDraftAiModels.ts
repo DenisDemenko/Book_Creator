@@ -31,6 +31,7 @@ import type { PassModelStatus } from '../../shared/photoDraftContract';
 import type { PassCharge, PassModelProbe, PassModels, PassQuote } from './photoDraftRoutes';
 import { passUsd, type PassTokenEstimate } from './photoDraftEstimate';
 import { visionFallbackModels } from './visionFailover';
+import { visionCreditsBlock } from './visionBilling';
 
 /** Скільки живе результат перевірки: робоча модель — довго, відмова ключа — коротше, перевантаження — хвилину. */
 export const PROBE_TTL_OK_MS = 5 * 60_000;
@@ -256,6 +257,7 @@ export const passModels: PassModels = {
       ? { unlimited: true, balance: null }
       : { unlimited: false, balance: status.balance.available };
   },
+  visionBlock: (req, kind) => visionCreditsBlock(req, kind),
   async begin(req: Request, quote: PassQuote): Promise<PassCharge | null> {
     const job = await beginTextCharge(req, quote.maxUsd);
     return job
