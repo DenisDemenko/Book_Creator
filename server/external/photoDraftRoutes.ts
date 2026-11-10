@@ -77,6 +77,8 @@ import {
   generateSystemInstruction,
   INSTRUCTION_MAX_STEPS,
   jobIsStale,
+  PHOTO_STALE_MESSAGE,
+  photoIsStale,
   mergeAssumptions,
   parseGenerateResult,
   parseStructureResult,
@@ -160,6 +162,12 @@ export interface PassModels {
   balance: (req: Request) => Promise<{ unlimited: boolean; balance: number | null }>;
   /** Резервує бали ДО запуску. Бракує — кидає помилку з `kind: 'credits'`; `null` — гейт не діє. */
   begin: (req: Request, quote: PassQuote) => Promise<PassCharge | null>;
+  /**
+   * Прохід 1 (опис кадру, розпізнавання сторінки) теж в балах (#538): швидка перевірка балансу БЕЗ резерву
+   * при завантаженні кадру. `billed: false` — бали не діють, лишається грошовий ліміт тексту. Сам резерв і
+   * списання робить photoDescriber/scanRecognizer (visionBilling.ts) — вони й так мають `req`.
+   */
+  visionBlock?: (req: Request, kind: 'describe' | 'recognize') => Promise<{ billed: boolean; reason: string | null }>;
 }
 
 /** Куди лягає відправлена чернетка (у продукті — photoDraftSinks.ts). */
@@ -219,16 +227,18 @@ function fail(res: Response, status: number, kind: string, error: string): void 
 }
 
 export function publicPhoto(draftId: string, p: StoredPhoto): DraftPhoto {
+  // Опис, що загубився разом із процесом (деплой посеред роботи), назовні — невдалий, з повтором (журнал #538).
+  const lost = photoIsStale(p, clockNow().getTime());
   return {
     photoId: p.photoId,
     clientId: p.clientId,
-    status: p.status,
+    status: lost ? 'failed' : p.status,
     order: p.order,
     takenAt: p.takenAt,
     imageUrl: `${BASE}/${draftId}/photos/${p.photoId}/image`,
     description: p.description,
     tags: p.tags,
-    error: p.error,
+    error: lost ? PHOTO_STALE_MESSAGE : p.error,
     // Лише рукопис (1.3.0): в інших видів поля немає зовсім.
     ...(p.text !== undefined ? { text: p.text, textEdited: !!p.textEdited } : {}),
     createdAt: p.createdAt,
@@ -452,6 +462,16 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     const p = req.principal as any;
     const verdict = await deps.checkAiBudget({ userId: String(p.id), role: String(p.role || 'writer') });
     return verdict.allowed ? null : verdict.reasonUk || 'Вичерпано ліміт ШІ-витрат вашого тарифу.';
+  };
+
+  /**
+   * Чи можна запускати прохід 1 для цього автора: бали (якщо діють) або грошовий ліміт тексту. Балансу з балами
+   * вистачає — грошовий ліміт НЕ питаємо (інакше автор платив би двічі, як застерігає creditBilledContext.ts).
+   */
+  const pass1Block = async (req: Request, draftKind: PhotoDraftKind): Promise<string | null> => {
+    const v = await deps.passModels?.visionBlock?.(req, draftKind === 'manuscript' ? 'recognize' : 'describe');
+    if (v?.billed) return v.reason;
+    return budgetBlock(req);
   };
 
   /** Прохід 1 у фоні: результат або причина відмови лягають у сам кадр. Ревізію не змінює. */
@@ -812,7 +832,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           return fail(res, 400, 'note_too_long', `Опис задовгий (максимум ${PHOTO_DRAFT_LIMITS.maxNoteChars} символів).`);
         }
       }
-      const budget = await budgetBlock(req);
+      const budget = await pass1Block(req, draft.kind);
       if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
 
       const stamp = now().toISOString().replace(/[:.]/g, '-');
@@ -912,10 +932,12 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       const photo = draft.photos.find((p) => p.photoId === photoId);
       if (!photo) return fail(res, 404, 'photo_not_found', 'Кадру немає в цій чернетці.');
       if (!isEditable(draft)) return fail(res, 409, 'wrong_status', 'Чернетку вже відправлено або відкинуто.');
-      if (photo.status !== 'failed') return fail(res, 409, 'wrong_status', 'Повторити можна лише невдалий опис кадру.');
+      if (photo.status !== 'failed' && !photoIsStale(photo, now().getTime())) {
+        return fail(res, 409, 'wrong_status', 'Повторити можна лише невдалий опис кадру.');
+      }
       const file = await readAsset(photo.assetId);
       if (!file || file.record.ownerId !== ownerId) return fail(res, 404, 'photo_not_found', 'Фото кадру не знайдено в медіатеці.');
-      const budget = await budgetBlock(req);
+      const budget = await pass1Block(req, draft.kind);
       if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
 
       const changed = await mutateDraft(
@@ -923,7 +945,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         ownerId,
         (d) => {
           const p = d.photos.find((x) => x.photoId === photoId);
-          if (!p || p.status !== 'failed') throw new DraftChangeError(409, 'wrong_status', 'Опис кадру вже перезапущено.');
+          if (!p || (p.status !== 'failed' && !photoIsStale(p, now().getTime()))) throw new DraftChangeError(409, 'wrong_status', 'Опис кадру вже перезапущено.');
           Object.assign(p, { status: 'processing', error: null, updatedAt: now().toISOString() });
           return p;
         },
@@ -955,7 +977,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           if (d.kind !== 'manuscript') throw new DraftChangeError(409, 'wrong_status', 'Текст сторінки є лише в чернетки-рукопису.');
           const photo = d.photos.find((p) => p.photoId === photoId);
           if (!photo) throw new DraftChangeError(404, 'photo_not_found', 'Сторінки немає в цій чернетці.');
-          if (photo.status === 'processing') throw new DraftChangeError(409, 'wrong_status', 'Сторінка ще розпізнається — зачекайте.');
+          if (photo.status === 'processing' && !photoIsStale(photo, now().getTime())) throw new DraftChangeError(409, 'wrong_status', 'Сторінка ще розпізнається — зачекайте.');
           Object.assign(photo, { status: 'described', text, textEdited: true, error: null, updatedAt: now().toISOString() });
           return photo;
         },
@@ -1234,7 +1256,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       const replace = req.body?.replace === true;
       const begun = await startJob(req, res, 'structure', null, (d) => {
         if (d.photos.length === 0) throw new DraftChangeError(409, 'wrong_status', 'У чернетці ще немає кадрів.');
-        if (d.photos.some((p) => p.status === 'processing')) {
+        if (d.photos.some((p) => p.status === 'processing' && !photoIsStale(p, now().getTime()))) {
           throw new DraftChangeError(409, 'wrong_status', 'Кадри ще описуються — зачекайте, поки опис закінчиться.');
         }
         if (d.structure && !replace) {
@@ -1367,7 +1389,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           if (d.job?.status === 'running' && !jobIsStale(d.job, now().getTime())) {
             throw new DraftChangeError(409, 'job_running', 'Зачекайте: ШІ ще працює над цією чернеткою.');
           }
-          const blockers = computeSubmitBlockers(d, { bookOk, status: d.status });
+          const blockers = computeSubmitBlockers(d, { bookOk, status: d.status, nowMs: now().getTime() });
           if (blockers.length > 0) {
             throw new DraftChangeError(400, 'submit_blocked', `${RESULT_WORD[d.kind]} ще не готов${d.kind === 'course' || d.kind === 'manuscript' ? 'ий' : 'а'} до відправки.`, { blockers });
           }

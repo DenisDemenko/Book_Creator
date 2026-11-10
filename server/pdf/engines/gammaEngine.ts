@@ -154,7 +154,7 @@ export const gammaEngine: PdfEngine = {
         );
       }
 
-      const res = await fetch(status.exportUrl);
+      const res = await fetch(status.exportUrl, { signal: AbortSignal.timeout(120_000) });
       if (!res.ok) {
         throw new PdfEngineError(
           'gamma',

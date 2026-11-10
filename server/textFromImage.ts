@@ -272,6 +272,7 @@ async function generateWithGpt(opts: GenerateTextFromImageOptions): Promise<{ te
   let res: Response;
   try {
     res = await fetch('https://api.openai.com/v1/chat/completions', {
+      signal: AbortSignal.timeout(90_000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

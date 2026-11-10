@@ -129,6 +129,7 @@ export async function geocodePlace(place: string): Promise<GeoResult> {
   let res: Response;
   try {
     res = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
       headers: {
         'User-Agent': 'NovaStudio/1.0 (writer character natal-chart lookup)',
         Accept: 'application/json',

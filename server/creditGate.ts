@@ -117,7 +117,7 @@ function lowBalanceError(credits: number, have: number): ImageCreditsError {
 }
 
 /** Резервує бали під одну генерацію. Кидає ImageCreditsError, якщо запускати не можна (провайдера не викликано). */
-async function beginCharge(req: any, costUsd: number, kind: 'img' | 'vid' | 'txt'): Promise<ImageCreditJob | null> {
+async function beginCharge(req: any, costUsd: number, kind: 'img' | 'vid' | 'txt' | 'vis'): Promise<ImageCreditJob | null> {
   const userId = gatedUserId(req);
   if (!userId) return null;
   const credits = creditsOrThrow(costUsd);
@@ -176,6 +176,15 @@ export async function beginTextCharge(req: any, maxCostUsd: number): Promise<Ima
   return beginCharge(req, maxCostUsd, 'txt');
 }
 
+/**
+ * Те саме для проходу 1 чернеток за фото (опис кадру, розпізнавання сторінки; журнал #538). Окремий
+ * префікс ключа `vis:` лише для того, щоб у журналі гаманця дрібні виклики по кадрах не змішувались
+ * із проходами 2–3 (`txt:`).
+ */
+export async function beginVisionCharge(req: any, maxCostUsd: number): Promise<ImageCreditJob | null> {
+  return beginCharge(req, maxCostUsd, 'vis');
+}
+
 export function videoCostUsd(engineId?: string, resolution?: string, durationSec?: number): { costUsd: number; params: ReturnType<typeof resolveVideoParams> } {
   const params = resolveVideoParams(engineId, resolution, durationSec);
   return { costUsd: priceForVideo(params.engine.id, params.modelId, params.resolution, params.durationSec), params };
@@ -201,6 +210,33 @@ export async function assertVideoAffordable(req: any, engineId?: string, resolut
   } catch (err) {
     if (err instanceof ImageCreditsError) throw err;
     console.warn('[creditGate] гаманець недоступний, перевірку відео пропускаємо:', err);
+  }
+}
+
+/**
+ * Скільки резерв може бути «в роботі», перш ніж вважати його покинутим (процес упав між резервом і списанням,
+ * журнал #538). Найдовша законна робота — відео: опитування до 6 хв + завантаження; решта — хвилини (текстовий
+ * прохід: 75 + 75 + 170 с у найгіршому разі). Запас у кілька разів: помилково повернути живий резерв гірше,
+ * ніж потримати покинутий ще пів години. Лише власні префікси гейта — чужі резерви (маркетплейс) не чіпаємо.
+ */
+export const STALE_RESERVATION_TTL_MS: Record<string, number> = {
+  img: 30 * 60_000,
+  txt: 30 * 60_000,
+  vis: 30 * 60_000,
+  jev: 30 * 60_000,
+  vid: 2 * 60 * 60_000,
+};
+
+/** Повертає авторам бали з покинутих резервів. Безпечно викликати будь-коли; без гаманця — нічого не робить. */
+export function sweepStaleReservations(nowMs: number = Date.now()): { released: number; credits: number } {
+  if (!creditsEnabled()) return { released: 0, credits: 0 };
+  try {
+    const out = wallet().releaseStale(STALE_RESERVATION_TTL_MS, nowMs, 'прохід перервано (сервер перезапускався або завис)');
+    if (out.released > 0) console.warn(`[creditGate] повернено ${out.credits} балів із ${out.released} покинутих резервів`);
+    return out;
+  } catch (err) {
+    console.warn('[creditGate] не вдалося перевірити покинуті резерви:', String((err as Error)?.message ?? err).slice(0, 200));
+    return { released: 0, credits: 0 };
   }
 }
 

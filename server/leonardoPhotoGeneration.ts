@@ -281,7 +281,7 @@ function extFromContentType(ct: string | null): 'png' | 'jpg' | 'jpeg' | 'webp' 
 export async function uploadReferenceImage(apiKey: string, imageUrl: string): Promise<string> {
   let sourceRes: Response;
   try {
-    sourceRes = await fetch(imageUrl);
+    sourceRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
   } catch (err) {
     throw new LeonardoV2PhotoError(
       'unknown',
@@ -298,6 +298,7 @@ export async function uploadReferenceImage(apiKey: string, imageUrl: string): Pr
   let initRes: Response;
   try {
     initRes = await fetch(`${LEONARDO_V1_BASE_URL}/init-image`, {
+      signal: AbortSignal.timeout(30_000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -336,7 +337,7 @@ export async function uploadReferenceImage(apiKey: string, imageUrl: string): Pr
 
   let uploadRes: Response;
   try {
-    uploadRes = await fetch(uploadInit.url, { method: 'POST', body: form });
+    uploadRes = await fetch(uploadInit.url, { signal: AbortSignal.timeout(120_000), method: 'POST', body: form });
   } catch (err) {
     throw new LeonardoV2PhotoError('unknown', `Не вдалося передати референсне зображення в Leonardo.Ai: ${(err as Error).message}`, err);
   }
@@ -464,6 +465,7 @@ export async function generateLeonardoV2Photo(
   let submitRes: Response;
   try {
     submitRes = await fetch(`${LEONARDO_V2_BASE_URL}/generations`, {
+      signal: AbortSignal.timeout(60_000),
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -552,6 +554,7 @@ export async function generateLeonardoV2Photo(
       // йде на v1-хост незалежно від того, якою версією (`v1`/`v2`) було
       // відправлено саму генерацію.
       pollRes = await fetch(`${LEONARDO_V1_BASE_URL}/generations/${generationId}`, {
+        signal: AbortSignal.timeout(20_000),
         headers: { Authorization: `Bearer ${options.apiKey}`, Accept: 'application/json' },
       });
     } catch (err) {
@@ -589,7 +592,7 @@ export async function generateLeonardoV2Photo(
 
   let downloadRes: Response;
   try {
-    downloadRes = await fetch(imageUrl);
+    downloadRes = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
   } catch (err) {
     throw new LeonardoV2PhotoError('unknown', `Не вдалося завантажити результат Leonardo.Ai: ${(err as Error).message}`, err);
   }
