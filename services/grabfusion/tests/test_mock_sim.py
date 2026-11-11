@@ -303,3 +303,72 @@ def test_structure_and_generate_validate_model_id(api):
     mid = d["structure"]["modules"][0]["moduleId"]
     assert api.call("POST", f"/photo-drafts/{did}/modules/{mid}/generate", {"modelId": "nope"}, expect=400)["kind"] == "bad_input"
     api.call("POST", f"/photo-drafts/{did}/modules/{mid}/generate", {"modelId": "claude-sonnet-5"}, expect=202, schema="DraftResponse")
+
+
+# --- курс зі скану документа (контракт 1.6.0) -------------------------------------------------------------------
+
+def test_course_document_create_rules_and_summary(api):
+    d = api.call("POST", "/photo-drafts", {"kind": "course", "courseSource": "document", "title": "Безпека"},
+                 expect=201, schema="DraftResponse")["draft"]
+    assert d["courseSource"] == "document"
+    plain = api.call("POST", "/photo-drafts", {"kind": "course"}, expect=201, schema="DraftResponse")["draft"]
+    assert plain["courseSource"] == "photos"
+    instr = api.call("POST", "/photo-drafts", {"kind": "instruction"}, expect=201, schema="DraftResponse")["draft"]
+    assert "courseSource" not in instr
+    assert api.call("POST", "/photo-drafts", {"kind": "instruction", "courseSource": "document"}, expect=400)["kind"] == "bad_input"
+    assert api.call("POST", "/photo-drafts", {"kind": "course", "courseSource": "video"}, expect=400)["kind"] == "bad_input"
+    listed = api.call("GET", "/photo-drafts", expect=200, schema="DraftListResponse")["drafts"]
+    by_id = {x["draftId"]: x for x in listed}
+    assert by_id[d["draftId"]]["courseSource"] == "document"
+    assert by_id[plain["draftId"]]["courseSource"] == "photos"
+    assert "courseSource" not in by_id[instr["draftId"]]
+
+
+def test_course_document_pages_are_recognized_not_described(api):
+    did = _new(api, courseSource="document", title="Безпека", photos=2)
+    d = api.draft(did)
+    assert d["courseSource"] == "document"
+    assert all(p["status"] == "described" and p["text"] and p["description"] is None and p["textEdited"] is False
+               for p in d["photos"])
+    photo = d["photos"][0]["photoId"]
+    r = api.call("PUT", f"/photo-drafts/{did}/photos/{photo}/text", {"text": "Виправлений текст"}, expect=200, schema="PhotoResponse")
+    assert r["photo"]["textEdited"] is True and r["photo"]["text"] == "Виправлений текст"
+    # курс з кадрів текст сторінки не має
+    plain = _new(api, kind="course", photos=1)
+    pid = api.draft(plain)["photos"][0]["photoId"]
+    assert api.call("PUT", f"/photo-drafts/{plain}/photos/{pid}/text", {"text": "X"}, expect=409)["kind"] == "wrong_status"
+
+
+def test_course_document_flow_structure_has_summary_and_outcomes_and_submit(api):
+    did = _new(api, courseSource="document", title="Безпека", photos=3)
+    api.call("POST", f"/photo-drafts/{did}/structure", expect=202, schema="DraftResponse")
+    for _ in range(6):
+        d = api.draft(did)
+        if not d["job"]:
+            break
+    assert d["status"] == "structured"
+    assert d["structure"]["summary"] and len(d["structure"]["outcomes"]) >= 2
+    # правка структури без summary/outcomes їх не стирає (так робить застосунок: шле лише модулі)
+    r = api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "structure": {"modules": d["structure"]["modules"]}},
+                 expect=200, schema="DraftResponse")
+    assert r["draft"]["structure"]["summary"] == d["structure"]["summary"]
+    for m in d["structure"]["modules"]:
+        api.call("POST", f"/photo-drafts/{did}/modules/{m['moduleId']}/generate", expect=202)
+        for _ in range(6):
+            d = api.draft(did)
+            if not d["job"]:
+                break
+    for a in d["assumptions"]:
+        api.call("PATCH", f"/photo-drafts/{did}", {"ifRevision": d["revision"], "assumptions": [{"assumptionId": a["assumptionId"], "status": "confirmed"}]}, expect=200)
+        d = api.draft(did)
+    sub = api.call("POST", f"/photo-drafts/{did}/submit", expect=201, schema="SubmitResponse")
+    assert sub["target"]["kind"] == "course"
+
+
+def test_course_document_empty_page_blocks_submit(api):
+    did = _new(api, courseSource="document", title="Порожній", photos=0)
+    api.call("POST", f"/photo-drafts/{did}/photos", {"clientId": "e1", "image": IMG, "note": "порожня"}, expect=202)
+    d = api.draft(did)
+    assert d["photos"][0]["text"] == ""
+    e = api.call("POST", f"/photo-drafts/{did}/submit", expect=400)
+    assert any(b["kind"] == "empty_page" for b in e["blockers"])

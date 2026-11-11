@@ -589,3 +589,7 @@ Live /bed-builder: 7 asset hashes, власна галерея PNG, 42/52 лам
 Продовження 11.11.2026 (#546, код d9dbb03, запушено й розгорнуто): лист із кодом підключення з проду не йшов — Railway не пропускає SMTP. У `server/mail.ts` канал HTTPS-API Brevo (`BREVO_API_KEY`, порт 443) із запасним SMTP;
 `test:mail-brevo` 30. У Brevo вимкнено «Authorised IPs» для API і автентифіковано домен fusionlab.in.ua (DNS у cPanel hostiq: `brevo-code`, DKIM `brevo1/2._domainkey`, `_dmarc` з `rua`). Живий лист дійшов, телефон підключено.
 Наступний крок (за бажанням): перевірити доставку не лише на Gmail. Успішну відправку Studio пише в лог (`[mail] Brevo API: лист прийнято (messageId …)`). Діагностика: GET /api/admin/mail/status (`brevoApi`), /api/admin/mail/test (`api.brevo.com:443`), логи `[mail]` / `[pairEmail]`, журнал Transactional у Brevo.
+
+Продовження 11.11.2026 (#548, не закомічено): у GrabFusion курс зі скану документа (контракт 1.6.0: `courseSource: document`, дослівне розпізнавання сторінок, модулі й уроки з тексту, `summary`/`outcomes` курсу) і екран «Інструкція / Курс» одразу
+після підключення. `test:course-document` 65, контракт 283, pytest 156. Справжній ШІ й Playwright не запускались.
+Наступний крок: за словом власника — коміт, пуш і деплой Studio, потім `railway up` GrabFusion (`post-deploy-check.sh`, очікуваний контракт 1.6.0); один справжній скан документа (друкований і рукописний) для перевірки якості.

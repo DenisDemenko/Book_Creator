@@ -109,7 +109,7 @@ function render(force) {
   if (state.editing && state.view === 'draft') { state.needsRender = true; return; }
   state.needsRender = false;
   app.replaceChildren();
-  const v = { pair: viewPair, list: viewList, create: viewCreate, draft: viewDraft, boot: () => h('p', { class: 'muted', text: 'Завантаження…' }) }[state.view];
+  const v = { pair: viewPair, choose: viewChoose, 'choose-course': viewChooseCourse, list: viewList, create: viewCreate, draft: viewDraft, boot: () => h('p', { class: 'muted', text: 'Завантаження…' }) }[state.view];
   titleEl.textContent = state.view === 'draft' && state.draft ? (state.draft.title || 'Чернетка без назви') : 'GrabFusion';
   app.append(v());
 }
@@ -136,7 +136,7 @@ function viewPair() {
     e.preventDefault(); err.textContent = '';
     try {
       const r = await api('POST', '/pair', { code: input.value.trim() });
-      state.user = r.user; await start();
+      state.user = r.user; await start({ chooseFirst: true });
     } catch (e2) { err.textContent = e2.message; }
   } },
     h('h2', { text: 'Підключіть застосунок' }),
@@ -180,16 +180,19 @@ async function openList() {
   go('list');
 }
 const KIND = { course: 'Курс', instruction: 'Інструкція', book: 'Глава книги', manuscript: 'Набір книги' };
+/* Кадри — сторінки тексту (рукопис і курс зі скану документа, контракт 1.6.0): їх розпізнають дослівно, а не описують. Працює і з чернеткою, і з рядком переліку. */
+const textPages = (d) => !!d && (d.kind === 'manuscript' || (d.kind === 'course' && d.courseSource === 'document'));
+const kindLabel = (d) => (KIND[d.kind] || d.kind) + (d.kind === 'course' && d.courseSource === 'document' ? ' · скан документа' : '');
 const STATUS = { collecting: 'збір кадрів', structured: 'є структура', written: 'текст написано', submitted: 'відправлено' };
 function viewList() {
   const box = h('div');
   box.append(h('div', { class: 'row', style: 'margin-bottom:12px' }, h('h2', { class: 'grow', text: 'Чернетки' }),
-    h('button', { class: 'primary', id: 'btn-new', text: 'Нова чернетка', onclick: () => go('create') })));
-  if (!state.drafts.length) box.append(h('p', { class: 'muted', text: 'Поки порожньо. Створіть чернетку й починайте знімати.' }));
+    h('button', { class: 'primary', id: 'btn-new', text: 'Нова чернетка', onclick: () => go('choose') })));
+  if (!state.drafts.length) box.append(h('p', { class: 'muted', text: 'Поки порожньо. Натисніть «Нова чернетка» й оберіть, що створюєте: інструкцію чи курс.' }));
   for (const d of state.drafts) {
     box.append(h('div', { class: 'card row', 'data-draft': d.draftId },
       h('div', { class: 'grow' }, h('strong', { text: d.title || 'Без назви' }),
-        h('div', { class: 'muted', text: `${KIND[d.kind] || d.kind} · ${STATUS[d.status] || d.status} · кадрів: ${d.photoCount}` })),
+        h('div', { class: 'muted', text: `${kindLabel(d)} · ${STATUS[d.status] || d.status} · ${textPages(d) ? 'сторінок' : 'кадрів'}: ${d.photoCount}` })),
       h('div', { class: 'row' },
         h('button', { text: 'Відкрити', onclick: () => openDraft(d.draftId) }),
         h('button', { class: 'small danger', 'data-delete-draft': d.draftId, text: 'Видалити', onclick: () => deleteDraft(d) }))));
@@ -214,39 +217,75 @@ async function deleteDraft(d) {
   render();
 }
 
+/* ---------- що створюємо (запит власника 11.11.2026) ----------
+   Перший екран після підключення телефону й за кнопкою «Нова чернетка»: користувач сам вирішує, що вийде зі знімків —
+   інструкція чи курс (тренінг). Далі шлях той самий: зняли чи відсканували, ШІ розпізнав, людина перевірила, Studio отримала. */
+function startNew(preset) { state.newDraft = preset; go('create'); }
+
+function choiceCard(id, icon, title, text, onclick) {
+  return h('button', { class: 'choice', type: 'button', id, onclick },
+    h('span', { class: 'choice-icon', text: icon }),
+    h('span', { class: 'choice-body' }, h('strong', { text: title }), h('span', { class: 'muted', text })));
+}
+
+function viewChoose() {
+  return h('div', { id: 'choose' },
+    h('h2', { text: 'Що створюємо?' }),
+    h('p', { class: 'muted', text: 'Оберіть, що вийде зі знімків. Далі все так само: знімаєте або скануєте, ШІ розпізнає, ви перевіряєте, і результат лягає в потрібний розділ Studio.' }),
+    choiceCard('choose-instruction', '🔧', 'Інструкція', 'Кроки складання чи користування виробом за кадрами й технічною документацією. Результат — експрес-чернетка в майстрі інструкцій Studio.', () => startNew({ kind: 'instruction' })),
+    choiceCard('choose-course', '🎓', 'Курс (тренінг)', 'Навчальний курс за фото майстер-класу або за сканом документа з друкованим чи рукописним текстом. Результат — чернетка в розділі «Курси» Studio: назва, опис, результати, модулі й уроки.', () => go('choose-course')),
+    h('p', { class: 'muted' }, 'Потрібна книга? ',
+      h('button', { class: 'link', id: 'choose-manuscript', type: 'button', text: 'Набір книги зі сторінок рукопису', onclick: () => startNew({ kind: 'manuscript' }) })),
+    h('p', null, h('button', { class: 'link', id: 'choose-to-list', type: 'button', text: state.drafts.length ? `Мої чернетки (${state.drafts.length})` : 'Мої чернетки', onclick: () => go('list') })));
+}
+
+function viewChooseCourse() {
+  return h('div', { id: 'choose-course-view' },
+    h('h2', { text: 'Курс: з чого складаємо?' }),
+    choiceCard('choose-course-document', '📄', 'Скан документа', 'Друкований чи рукописний текст: ШІ розпізнає сторінки дослівно й розкладе їх на модулі та уроки, нічого не вигадуючи.', () => startNew({ kind: 'course', courseSource: 'document' })),
+    choiceCard('choose-course-photos', '📷', 'Фото майстер-класу', 'Кадри процесу: ШІ опише, що на них видно, і складе уроки за порядком зйомки.', () => startNew({ kind: 'course', courseSource: 'photos' })),
+    h('p', null, h('button', { class: 'link', id: 'choose-back', type: 'button', text: '← Назад', onclick: () => go('choose') })));
+}
+
+const NEW_TITLE = { instruction: 'Нова інструкція', manuscript: 'Новий набір книги' };
 function viewCreate() {
+  const preset = state.newDraft || { kind: 'course', courseSource: 'photos' };
+  const kind = preset.kind;
+  const heading = kind === 'course' ? (preset.courseSource === 'document' ? 'Новий курс зі скану документа' : 'Новий курс із фото майстер-класу') : NEW_TITLE[kind] || 'Нова чернетка';
   const f = {
-    kind: h('select', { id: 'f-kind' }, h('option', { value: 'course', text: 'Курс' }), h('option', { value: 'instruction', text: 'Інструкція' }), h('option', { value: 'manuscript', text: 'Набір книги (сторінки рукопису)' })),
-    title: h('input', { id: 'f-title', maxlength: 160, placeholder: 'Наприклад: Ложка з вишні за один вечір' }),
-    craft: h('input', { id: 'f-craft', maxlength: 200, placeholder: 'Ремесло (необовʼязково)' }),
+    title: h('input', { id: 'f-title', maxlength: 160, placeholder: kind === 'course' && preset.courseSource === 'document' ? 'Назва курсу (можна залишити порожньою — ШІ запропонує)' : 'Наприклад: Ложка з вишні за один вечір' }),
+    craft: h('input', { id: 'f-craft', maxlength: 200, placeholder: kind === 'course' && preset.courseSource === 'document' ? 'Тема (необовʼязково)' : 'Ремесло (необовʼязково)' }),
     audience: h('input', { id: 'f-audience', maxlength: 200, placeholder: 'Для кого (необовʼязково)' }),
     mode: h('select', { id: 'f-mode' }, h('option', { value: 'assembly', text: 'Складання' }), h('option', { value: 'operation', text: 'Користування' })),
     model: h('input', { id: 'f-model', maxlength: 200, placeholder: 'Код або модель виробу' }),
   };
-  const extra = h('div', { hidden: true }, h('label', { text: 'Режим інструкції' }), f.mode, h('label', { text: 'Код або модель виробу' }), f.model);
+  const extra = h('div', { hidden: kind !== 'instruction' }, h('label', { text: 'Режим інструкції' }), f.mode, h('label', { text: 'Код або модель виробу' }), f.model);
   f.booktype = h('select', { id: 'f-booktype' }, h('option', { value: 'new', text: 'Нова книга' }), h('option', { value: 'existing', text: 'Існуюча книга (за ID)' }));
   f.newbook = h('input', { id: 'f-newbook', maxlength: 160, placeholder: 'Назва нової книги' });
   f.bookid = h('input', { id: 'f-bookid', placeholder: 'ID книги в Studio', hidden: true });
   f.booktype.addEventListener('change', () => { f.newbook.hidden = f.booktype.value !== 'new'; f.bookid.hidden = f.booktype.value !== 'existing'; });
-  const msExtra = h('div', { hidden: true }, h('label', { text: 'Книга' }), f.booktype, f.newbook, f.bookid,
+  const msExtra = h('div', { hidden: kind !== 'manuscript' }, h('label', { text: 'Книга' }), f.booktype, f.newbook, f.bookid,
     h('p', { class: 'muted', text: 'Сторінки розпізнаються дослівно, без переписування. Назва вище — це назва глави.' }));
-  f.kind.addEventListener('change', () => { extra.hidden = f.kind.value !== 'instruction'; msExtra.hidden = f.kind.value !== 'manuscript'; });
+  const docNote = kind === 'course' && preset.courseSource === 'document'
+    ? h('p', { class: 'muted', id: 'doc-note', text: 'Скануйте або фотографуйте сторінки документа по порядку. Студія збере з розпізнаного тексту чернетку курсу: опис, результати навчання, модулі й уроки.' })
+    : null;
   const err = h('p', { class: 'err' });
-  return h('form', { class: 'card', onsubmit: async (e) => {
+  return h('form', { class: 'card', id: 'create-form', 'data-kind': kind, onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
-    const body = { kind: f.kind.value };
+    const body = { kind };
+    if (kind === 'course') body.courseSource = preset.courseSource || 'photos';
     for (const k of ['title', 'craft', 'audience']) if (f[k].value.trim()) body[k] = f[k].value.trim();
-    if (body.kind === 'manuscript') {
+    if (kind === 'manuscript') {
       if (f.booktype.value === 'new' && f.newbook.value.trim()) body.newBookTitle = f.newbook.value.trim();
       if (f.booktype.value === 'existing' && f.bookid.value.trim()) body.bookId = f.bookid.value.trim();
     }
-    if (body.kind === 'instruction') { body.instructionMode = f.mode.value; if (f.model.value.trim()) body.modelCode = f.model.value.trim(); }
+    if (kind === 'instruction') { body.instructionMode = f.mode.value; if (f.model.value.trim()) body.modelCode = f.model.value.trim(); }
     try { const r = await api('POST', '/drafts', body); await openDraft(r.draft.draftId); } catch (e2) { err.textContent = e2.message; }
   } },
-    h('h2', { text: 'Нова чернетка' }),
-    h('label', { text: 'Що робимо' }), f.kind, extra, msExtra,
-    h('label', { text: 'Назва' }), f.title, h('label', { text: 'Ремесло' }), f.craft, h('label', { text: 'Аудиторія' }), f.audience, err,
-    h('p', { class: 'row' }, h('button', { class: 'primary', type: 'submit', text: 'Створити' }), h('button', { type: 'button', text: 'Скасувати', onclick: () => go('list') })));
+    h('h2', { id: 'create-title', text: heading }),
+    docNote, extra, msExtra,
+    h('label', { text: 'Назва' }), f.title, h('label', { text: f.craft.placeholder.startsWith('Тема') ? 'Тема' : 'Ремесло' }), f.craft, h('label', { text: 'Аудиторія' }), f.audience, err,
+    h('p', { class: 'row' }, h('button', { class: 'primary', type: 'submit', text: 'Створити' }), h('button', { type: 'button', id: 'create-back', text: 'Назад', onclick: () => go('choose') })));
 }
 
 /* ---------- чернетка ---------- */
@@ -278,7 +317,7 @@ const maxNote = () => (state.limits ? state.limits.maxNoteChars : 500);
 
 function noteBox(initial, onSave, id) {
   const tech = state.draft && state.draft.kind === 'instruction';
-  const hint = state.draft && state.draft.kind === 'manuscript';
+  const hint = textPages(state.draft);
   const ta = h('textarea', { rows: 2, placeholder: (hint ? 'Підказка для розпізнавання: імена, мова, почерк… (до ' : tech ? 'Деталь, інструмент, момент складання… (до ' : 'Що на кадрі? (до ') + maxNote() + ' символів)', id });
   ta.value = initial || '';
   const cnt = h('div', { class: 'counter' });
@@ -350,14 +389,14 @@ function viewDraft() {
   const d = state.draft;
   const box = h('div');
   const mine = state.queue.filter((q) => q.draftId === d.draftId);
-  const meta = [KIND[d.kind], d.kind === 'manuscript' && d.status === 'collecting' ? 'збір сторінок' : STATUS[d.status], d.craft, d.audience].filter(Boolean).join(' · ');
-  const unit = d.kind === 'manuscript' ? 'сторінок' : 'кадрів';
-  const cap = d.kind === 'manuscript' && state.limits ? ` / ${state.limits.maxManuscriptPages}` : '';
+  const meta = [kindLabel(d), textPages(d) && d.status === 'collecting' ? 'збір сторінок' : STATUS[d.status], d.craft, d.audience].filter(Boolean).join(' · ');
+  const unit = textPages(d) ? 'сторінок' : 'кадрів';
+  const cap = textPages(d) && state.limits ? ` / ${state.limits.maxManuscriptPages}` : '';
   box.append(h('p', { class: 'muted', text: meta + ` · ${unit}: ${d.photos.length}${cap}` + (mine.length ? ` (+${mine.length} у черзі)` : '') }));
   if (d.status !== 'submitted') box.append(h('div', { class: 'row', id: 'save-row' },
     h('button', { class: 'small', id: 'btn-save', text: '💾 Зберегти чернетку', onclick: saveDraft }),
     h('span', { class: 'muted', text: 'Зміни зберігаються й самі; кнопка — щоб відкласти роботу на потім.' })));
-  if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(d.kind === 'manuscript' ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
+  if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(textPages(d) ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
   const onFiles = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
   box.append(h('div', { class: 'shoot' },
     h('label', { class: 'btn primary', for: 'file-cam', id: 'lbl-cam', text: '📷 Зняти' }),
@@ -365,6 +404,13 @@ function viewDraft() {
     h('input', { type: 'file', id: 'file-cam', accept: 'image/*', capture: 'environment', onchange: onFiles }),
     h('input', { type: 'file', id: 'file-gal', accept: 'image/*', multiple: true, onchange: onFiles })));
   if (d.kind === 'manuscript') { box.append(viewMsMeta(d), viewMsActions(d, mine), pagesSection(d, mine, false)); return box; }
+  if (textPages(d)) {
+    // Курс зі скану документа: сторінки розпізнаються дослівно, а структуру й текст уроків ШІ складає з них (контракт 1.6.0).
+    box.append(viewDocMeta(d), viewActions(d, mine));
+    if (d.structure) box.append(viewStructure(d));
+    box.append(pagesSection(d, mine, false));
+    return box;
+  }
   if (d.kind === 'instruction') box.append(viewInstructionMeta(d));
   if (d.kind === 'course' || d.kind === 'instruction') box.append(viewActions(d, mine));
   if (d.structure) box.append(viewStructure(d));
@@ -550,13 +596,14 @@ function viewActions(d, mine) {
   const running = !!(job && job.status === 'running');
   const photosBusy = d.photos.some((p) => p.status === 'processing');
   const unsent = mine.length > 0;
+  const unit = textPages(d) ? { a: 'сторінки', b: 'Сторінки', done: 'розпізнаються' } : { a: 'кадри', b: 'Кадри', done: 'описуються' };
   ensureAi(d);
   const aiWhy = !running && d.photos.length ? aiBlock(d) : '';
   const lock = running || state.writing || photosBusy || unsent || !d.photos.length || !!aiWhy;
   if (running) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
   if (job && job.status === 'failed') box.append(h('p', { class: 'err', id: 'job-error', text: job.error || 'Фонова робота не вдалася. Спробуйте ще раз.' }));
-  if (!d.photos.length) box.append(h('p', { class: 'muted', text: 'Спершу додайте кадри.' }));
-  else if (photosBusy || unsent) box.append(h('p', { class: 'muted', text: unsent ? 'Дочекайтесь, поки всі кадри надішлються.' : 'Кадри ще описуються…' }));
+  if (!d.photos.length) box.append(h('p', { class: 'muted', text: `Спершу додайте ${unit.a}.` }));
+  else if (photosBusy || unsent) box.append(h('p', { class: 'muted', id: textPages(d) ? 'ocr-banner' : null, text: unsent ? `Дочекайтесь, поки всі ${unit.a} надішлються.` : `${unit.b} ще ${unit.done}…` }));
   if (!running && d.photos.length) { const pick = viewAiPicker(d); if (pick) box.append(pick); }
   const row = h('div', { class: 'row' });
   const mods = d.structure ? d.structure.modules : [];
@@ -567,6 +614,7 @@ function viewActions(d, mine) {
     row.append(confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure', class: 'primary' }));
   } else {
     if (d.status !== 'written') row.append(h('button', { class: 'primary', id: 'btn-write', text: (d.kind === 'instruction' ? left.length === mods.length ? 'Написати кроки' : 'Дописати кроки' : left.length === mods.length ? 'Написати курс' : 'Дописати курс'), disabled: lock || !left.length, onclick: () => writeModules(left.map((m) => m.moduleId)) }));
+    if (d.kind === 'course' && (left.length === 0 || d.status === 'written')) box.append(h('p', { id: 'submit-explain', text: 'Після «Відправити» Studio створить чернетку курсу й заповнить у розділі «Курси»:' }), coursePlaces(d));
     if (left.length === 0 || d.status === 'written') row.append(h('button', { class: 'primary', id: 'btn-submit', text: d.kind === 'course' ? 'Відправити курс у Studio' : 'Відправити в Studio', disabled: lock, onclick: doSubmit }));
     const again = confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure' });
     row.append(again);
@@ -637,6 +685,14 @@ function manuscriptPlaces() {
     h('li', null, h('strong', { text: 'Медіатека' }), document.createTextNode(' — фото всіх сторінок цієї книги.')));
 }
 
+function coursePlaces(d) {
+  const doc = d.courseSource === 'document';
+  return h('ul', { class: 'places', id: 'places' },
+    h('li', null, h('strong', { text: 'Курси' }), document.createTextNode(' — нова чернетка курсу: назва, короткий опис, результати навчання й аудиторія.')),
+    h('li', null, h('strong', { text: 'Модулі й уроки' }), document.createTextNode(doc ? ' — назви, мета, теми й текст кожного уроку з вашого документа; усе можна редагувати.' : ' — назви, мета, теми й текст кожного уроку; кадри стають фото уроків, перший — обкладинкою.')),
+    h('li', null, h('strong', { text: 'Що додасте самі' }), document.createTextNode(' — ціну, категорію й відео. Чернетка нікуди не публікується.')));
+}
+
 function viewSubmitted(d) {
   const t = d.submitted || state.target;
   const href = t ? state.studioOrigin + t.studioUrl : '#';
@@ -648,6 +704,14 @@ function viewSubmitted(d) {
       manuscriptPlaces(),
       h('p', { class: 'muted', text: 'Відкрийте Studio — книга вже чекає на дашборді; натисніть «Відкрити книгу».' }),
       h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити Studio' })));
+  }
+  if (t && t.kind === 'course') {
+    return h('div', { class: 'card', id: 'submitted' },
+      h('h2', { text: 'Курс створено в Studio' }),
+      h('p', { id: 'submitted-text', text: `Studio створила чернетку курсу «${d.title || 'Курс'}» у розділі «Курси» й заповнила:` }),
+      coursePlaces(d),
+      h('p', { class: 'muted', text: 'Відкрийте Studio → «Курси»: перевірте текст уроків, додайте ціну, категорію й відео.' }),
+      h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити курс у Studio' })));
   }
   return h('div', { class: 'card', id: 'submitted' },
     h('h2', { text: 'Відправлено в Studio' }),
@@ -760,6 +824,16 @@ function stepLineChips(ta, body) {
 }
 
 /* ---------- етап 6: «Набір книги» (рукопис із фото сторінок) ---------- */
+function viewDocMeta(d) {
+  const hint = h('input', { id: 'ms-hint', maxlength: 500, placeholder: 'Імена, терміни, мова, почерк — для всіх наступних сторінок', value: state.hint });
+  hint.addEventListener('focus', () => { state.editing = true; });
+  hint.addEventListener('input', () => { state.hint = hint.value; });
+  hint.addEventListener('blur', endEditing);
+  return h('div', { class: 'card', id: 'doc-meta' },
+    h('label', { text: 'Підказка розпізнаванню' }), hint,
+    h('p', { class: 'muted', text: 'Скануйте або фотографуйте сторінки документа по порядку. Текст розпізнається дослівно — його можна виправити нижче; з нього ШІ складе опис, результати, модулі й уроки курсу.' }));
+}
+
 function viewMsMeta(d) {
   const title = h('input', { id: 'ms-title', maxlength: 160, placeholder: 'Назва глави, напр. «Розділ 1. Млин»', value: d.title || '' });
   const existing = !!d.bookId;
@@ -858,6 +932,12 @@ function pagesSection(d, mine, readOnly) {
   pages.forEach((p, i) => list.append(pageCard(p, i, pages.length, readOnly)));
   if (!readOnly) mine.forEach((q) => list.append(queuedCard(q)));
   if (!pages.length && !mine.length) list.append(h('p', { class: 'muted', text: 'Сторінок ще немає.' }));
+  if (d.kind === 'course' && d.structure) {
+    const det = h('details', { id: 'pages-section' }, h('summary', { text: `Сторінки (${pages.length})` }), list);
+    if (state.photosOpen) det.setAttribute('open', '');
+    det.addEventListener('toggle', () => { state.photosOpen = det.open; });
+    return det;
+  }
   return h('div', null, h('h3', { text: 'Сторінки' }), list);
 }
 
@@ -865,6 +945,12 @@ function viewStructure(d) {
   const box = h('div', { id: 'structure' });
   const T = termsFor(d);
   box.append(h('h3', { text: T.structure }));
+  if (d.kind === 'course' && (d.structure.summary || (d.structure.outcomes || []).length)) {
+    box.append(h('div', { class: 'card', id: 'course-about' }, h('strong', { text: 'Про курс (запропонував ШІ)' }),
+      d.structure.summary && h('p', { id: 'course-summary', text: d.structure.summary }),
+      (d.structure.outcomes || []).length ? h('div', null, h('span', { class: 'muted', text: 'Після курсу учень зможе:' }), h('ul', { id: 'course-outcomes' }, d.structure.outcomes.map((o) => h('li', { text: o })))) : null,
+      h('p', { class: 'muted', text: 'Ці поля потрапляють у курс у Studio; там їх можна змінити.' })));
+  }
   const stepCount = d.structure.modules.reduce((n, m) => n + m.lessons.length, 0);
   if (d.kind === 'instruction' && stepCount > MAX_SOURCE_STEPS) box.append(h('p', { class: 'muted', id: 'steps-over', text: `Кроків ${stepCount}: Studio зробить джерелами перші ${MAX_SOURCE_STEPS}, решту допише до останнього.` }));
   const open = d.assumptions.filter((a) => a.status === 'open');
@@ -904,7 +990,7 @@ async function addFiles(files) {
     const blob = await downscale(f, side);
     const it = {
       clientId: 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-      draftId: state.draft.draftId, blob, note: state.draft.kind === 'manuscript' ? (state.hint || '') : '', state: 'queued', error: '',
+      draftId: state.draft.draftId, blob, note: textPages(state.draft) ? (state.hint || '') : '', state: 'queued', error: '',
       takenAt: f.lastModified ? new Date(f.lastModified).toISOString() : null, order: Date.now() + Math.random(),
     };
     await qPut(it); state.queue.push(it);
@@ -944,13 +1030,14 @@ async function flushQueue() {
 }
 
 /* ---------- старт ---------- */
-async function start() {
+async function start(opts) {
   try { state.limits = (await api('GET', '/limits')).limits; } catch (e) { /* дефолти */ }
   // Посилання на Студію ведемо на справжню адресу (studioPublicUrl, напр. https://www.fusionlab.in.ua/studio); без неї — на походження API.
   try { const cfg = await api('GET', '/config'); state.studioOrigin = (cfg.studioPublicUrl || new URL(cfg.studioUrl).origin).replace(/\/$/, ''); } catch (e) { /* без посилання */ }
   state.queue = await qAll();
   document.getElementById('btn-logout').hidden = false;
   await openList();
+  if (opts && opts.chooseFirst) go('choose'); // щойно підключили телефон: спершу «що створюємо?»
   if (state.queue.length) flushQueue();
 }
 (async function boot() {
@@ -961,7 +1048,7 @@ async function start() {
     history.replaceState(null, '', location.pathname + location.search);
     try {
       const r = await api('POST', '/pair', { code: qrCode });
-      state.user = r.user; await start(); return;
+      state.user = r.user; await start({ chooseFirst: true }); return;
     } catch (e) {
       state.pairNotice = e.kind === 'network'
         ? 'Немає звʼязку з сервісом. Відскануйте QR ще раз, коли звʼязок зʼявиться.'

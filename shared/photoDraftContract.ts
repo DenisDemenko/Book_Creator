@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.5.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.6.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -92,6 +92,20 @@ export function noteFits(text: string): boolean {
  */
 export const PHOTO_DRAFT_KINDS = ['course', 'instruction', 'book', 'manuscript'] as const;
 export type PhotoDraftKind = (typeof PHOTO_DRAFT_KINDS)[number];
+
+/**
+ * Звідки береться зміст курсу (лише `kind: course`, з 1.6.0):
+ *   photos   — кадри майстер-класу: ШІ описує, що видно (так було до 1.6.0; значення за замовчуванням);
+ *   document — скани чи фото документа з друкованим або рукописним текстом: кожна сторінка розпізнається
+ *              дослівно в `text`, а модулі й уроки складаються з цього тексту, без вигадок.
+ */
+export const PHOTO_DRAFT_COURSE_SOURCES = ['photos', 'document'] as const;
+export type PhotoDraftCourseSource = (typeof PHOTO_DRAFT_COURSE_SOURCES)[number];
+
+/** Чи кадри чернетки — сторінки тексту: вони розпізнаються дослівно (`text`), а не описуються. */
+export function hasPageText(d: { kind: PhotoDraftKind; courseSource?: PhotoDraftCourseSource | null }): boolean {
+  return d.kind === 'manuscript' || (d.kind === 'course' && d.courseSource === 'document');
+}
 
 /**
  * Життєвий цикл чернетки:
@@ -224,12 +238,12 @@ export interface DraftPhoto {
   tags: string[];
   error: string | null;
   /**
-   * Лише для `kind: manuscript` (з 1.3.0): текст сторінки, розпізнаний дослівно
+   * Лише для `kind: manuscript` (з 1.3.0) і `kind: course` з `courseSource: document` (з 1.6.0): текст сторінки, розпізнаний дослівно
    * (прохід 1) або виправлений викладачем через `PUT …/photos/:photoId/text`.
    * `null` — ще не розпізнано або розпізнати не вдалося. Для інших видів поля немає.
    */
   text?: string | null;
-  /** Лише `manuscript`: true, якщо текст правив викладач (тоді повторне розпізнавання його не затре). */
+  /** Лише там, де є `text`: true, якщо текст правив викладач (тоді повторне розпізнавання його не затре). */
   textEdited?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -267,6 +281,10 @@ export interface DraftModule {
 
 export interface DraftStructure {
   modules: DraftModule[];
+  /** Лише курс (з 1.6.0): про що курс і для кого, 1–2 речення, пише ШІ в проході «Розкласти». У Studio це `summary` курсу. */
+  summary?: string | null;
+  /** Лише курс (з 1.6.0): 2–5 результатів навчання, пише ШІ в проході «Розкласти». У Studio це `outcomes` курсу. */
+  outcomes?: string[];
 }
 
 export interface DraftAssumption {
@@ -322,6 +340,8 @@ export interface PhotoDraft {
   instructionMode?: PhotoDraftInstructionMode | null;
   /** Код або модель виробу для інструкції (з 1.2.0). */
   modelCode?: string | null;
+  /** Лише для `kind: course` (з 1.6.0): що є джерелом — кадри майстер-класу чи скан документа. Задається при створенні й не змінюється. */
+  courseSource?: PhotoDraftCourseSource | null;
   photos: DraftPhoto[];
   notes: DraftNote[];
   structure: DraftStructure | null;
@@ -339,6 +359,8 @@ export interface PhotoDraftSummary {
   status: PhotoDraftStatus;
   title: string | null;
   photoCount: number;
+  /** Лише для `kind: course` (з 1.6.0). */
+  courseSource?: PhotoDraftCourseSource | null;
   updatedAt: string;
 }
 
@@ -430,6 +452,8 @@ export interface CreatePhotoDraftRequest {
   /** Лише для `kind: instruction`; без нього — `assembly`. */
   instructionMode?: PhotoDraftInstructionMode;
   modelCode?: string;
+  /** Лише для `kind: course` (з 1.6.0); без нього — `photos`. */
+  courseSource?: PhotoDraftCourseSource;
 }
 
 export interface AddPhotoRequest {
@@ -556,6 +580,7 @@ export const PHOTO_DRAFT_EXTRA_FIXTURES: Readonly<Record<string, string>> = {
   'submit-manuscript': 'SubmitResponse',
   'submit-manuscript-existing-book': 'SubmitResponse',
   'get-draft-manuscript': 'DraftResponse',
+  'get-draft-course-document': 'DraftResponse',
   'error-note-too-long': 'Error',
   'error-revision-conflict': 'Error',
   'error-scope-denied': 'Error',

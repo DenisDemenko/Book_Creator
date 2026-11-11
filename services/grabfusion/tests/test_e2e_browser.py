@@ -115,12 +115,16 @@ def test_full_flow(stack, browser_page, tmp_path):
     assert "невірний" in page.inner_text("#pair-err")
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
+    page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
+    page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
     _shot(page, "2-list")
     assert page.locator("[data-draft]").count() >= 1
 
-    # 2. нова чернетка
+    # 2. нова чернетка: курс із фото майстер-класу
     page.click("#btn-new")
+    page.click("#choose-course")
+    page.click("#choose-course-photos")
     page.fill("#f-title", "Ложка з вишні")
     page.click("button[type=submit]")
     page.wait_for_selector("#lbl-cam")
@@ -185,8 +189,12 @@ def test_stage3_structure_write_validate_submit(stack3, browser_page, tmp_path):
     page.wait_for_selector("#code")
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
+    page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
+    page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
     page.click("#btn-new")
+    page.click("#choose-course")
+    page.click("#choose-course-photos")
     page.fill("#f-title", "Ложка з вишні")
     page.click("button[type=submit]")
     page.wait_for_selector("#lbl-cam")
@@ -256,9 +264,11 @@ def test_stage5_instruction_mode(stack3, browser_page, tmp_path):
     page.wait_for_selector("#code")
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
+    page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
+    page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
     page.click("#btn-new")
-    page.select_option("#f-kind", "instruction")
+    page.click("#choose-instruction")
     page.select_option("#f-mode", "operation")
     page.fill("#f-model", "TB-100")
     page.fill("#f-title", "Полиця Нордик")
@@ -331,9 +341,11 @@ def test_stage6_manuscript_pages(stack3, browser_page, tmp_path):
     page.wait_for_selector("#code")
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
+    page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
+    page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
     page.click("#btn-new")
-    page.select_option("#f-kind", "manuscript")
+    page.click("#choose-manuscript")
     page.fill("#f-newbook", "Долина тиші")
     page.fill("#f-title", "Розділ 1. Млин")
     page.click("button[type=submit]")
@@ -370,10 +382,12 @@ def test_stage6_manuscript_pages(stack3, browser_page, tmp_path):
     page.locator("[data-page]").first.locator("button[title='Нижче']").click()
     page.wait_for_function("document.querySelector('[data-page] textarea').value.includes('Сторінка 2:')", timeout=10000)
 
-    # відправка: пакет у «Вхідних», книга нова → підказка про «Вставити главу»
+    # відправка: книга нова → з контракту 1.5.0 Studio сама створює книгу й кладе розпізнане в три місця (дашборд, «Книга & Текст», медіатека)
     page.click("#btn-submit")
     page.wait_for_selector("#submitted")
-    assert "Вставити главу" in page.inner_text("#submitted")
-    assert page.get_attribute("#open-studio", "href").endswith("/media?tab=inbox")
+    assert "Книгу створено в Studio" in page.inner_text("#submitted")
+    assert "Долина тиші" in page.inner_text("#submitted-text")
+    assert page.locator("#places li").count() == 3
+    assert page.get_attribute("#open-studio", "href").endswith("/")
     _shot(page, "s6-3-submitted")
     assert not errors, errors

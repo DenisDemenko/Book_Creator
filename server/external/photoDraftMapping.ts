@@ -50,6 +50,8 @@ export interface CourseInputModule {
 export interface CourseInput {
   title: string;
   summary?: string;
+  /** Результати навчання, які ШІ запропонував у проході «Розкласти» (з 1.6.0). */
+  outcomes?: string[];
   audience: string[];
   coverUrl?: string;
   /** Позначка «створено за фото» і поля, що написав ШІ (дивись server/courseOrigin.ts). */
@@ -64,6 +66,8 @@ function aiFieldsOf(lesson: DraftLesson): OriginLessonField[] {
 }
 
 export function toCourseInput(draft: StoredDraft, opts: { at: string; ai?: { calls: number; costUsd: number } | null }): CourseInput {
+  // Курс зі скану документа: сторінки тексту ні на обкладинку, ні в уроки не йдуть (вони лишаються в медіатеці автора).
+  const fromDocument = draft.courseSource === 'document';
   const aiFields: Record<string, OriginLessonField[]> = {};
   for (const m of draft.structure?.modules ?? []) {
     for (const l of m.lessons) {
@@ -84,18 +88,21 @@ export function toCourseInput(draft: StoredDraft, opts: { at: string; ai?: { cal
           ...(l.goal ? { goal: l.goal } : {}),
           ...(l.body ? { description: l.body } : {}),
           topics: l.topics,
-          photoUrls: l.photoIds.map((id) => assetOf(draft, id)).filter((a): a is string => !!a).map(libraryUrl),
+          photoUrls: fromDocument ? [] : l.photoIds.map((id) => assetOf(draft, id)).filter((a): a is string => !!a).map(libraryUrl),
         })
       ),
     })
   );
   const firstPhoto = [...draft.photos].sort((a, b) => a.order - b.order)[0];
-  const summary = [draft.craft, draft.level ? `Рівень: ${LEVEL_UK[draft.level]}` : null].filter(Boolean).join('. ');
+  const own = [draft.craft, draft.level ? `Рівень: ${LEVEL_UK[draft.level]}` : null].filter(Boolean).join('. ');
+  const summary = draft.structure?.summary || own;
+  const outcomes = draft.structure?.outcomes ?? [];
   return {
     title: (draft.title || '').trim(),
     ...(summary ? { summary } : {}),
+    ...(outcomes.length ? { outcomes } : {}),
     audience: draft.audience ? [draft.audience] : [],
-    ...(firstPhoto ? { coverUrl: libraryUrl(firstPhoto.assetId) } : {}),
+    ...(firstPhoto && !fromDocument ? { coverUrl: libraryUrl(firstPhoto.assetId) } : {}),
     origin: {
       kind: 'photo-draft',
       draftId: draft.id,

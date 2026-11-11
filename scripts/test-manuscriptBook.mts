@@ -173,7 +173,7 @@ async function makeManuscript(body: Record<string, unknown>, pages = 2) {
   const sub = await call('POST', `${PD}/${id}/submit`, { token: tok });
   t('наявна книга: ціль inbox із bookId, нової книги не створено', sub.status === 201 && sub.data.target.kind === 'inbox' && /bookId=BK-EXIST/.test(sub.data.target.studioUrl) && (await bookStore.listBooks('u-a')).length === before);
 }
-t('вид `book` є в контракті 1.5.0', (contract.SUBMIT_TARGET_KINDS as readonly string[]).includes('book') && contract.PHOTO_DRAFT_CONTRACT_VERSION === '1.5.0');
+t('вид `book` є в контракті з 1.5.0', (contract.SUBMIT_TARGET_KINDS as readonly string[]).includes('book') && contract.PHOTO_DRAFT_CONTRACT_VERSION >= '1.5.0');
 
 (server as any).closeAllConnections?.();
 await new Promise((r) => server.close(r));

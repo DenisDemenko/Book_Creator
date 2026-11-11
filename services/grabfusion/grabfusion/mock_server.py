@@ -79,7 +79,8 @@ def fixtures_served_by_routes() -> set[str]:
     """Усі фікстури, які мок може віддати за таблицею (без ручного вибору заголовком)."""
     names = {r.fixture for r in ROUTES if r.fixture}
     names |= set(SUBMIT_BY_KIND.values()) | {"submit-manuscript-existing-book"}
-    names |= {"get-draft-structured", "get-draft-written", "get-draft-job-failed", "get-draft-manuscript"}
+    names |= {"get-draft-structured", "get-draft-written", "get-draft-job-failed", "get-draft-manuscript",
+              "get-draft-course-document"}
     return names
 
 

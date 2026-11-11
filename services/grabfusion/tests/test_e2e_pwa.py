@@ -83,6 +83,8 @@ def test_service_worker_manifest_and_offline_shell(stack, browser):
     # підключаємось, потім «пропадає звʼязок» і сторінку перезавантажують
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
+    page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
+    page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
     ctx.set_offline(True)
     page.reload()

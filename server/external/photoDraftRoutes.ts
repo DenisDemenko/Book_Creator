@@ -48,11 +48,13 @@ import {
 import {
   ASSUMPTION_STATUSES,
   PHOTO_DRAFT_CONTRACT_VERSION,
+  PHOTO_DRAFT_COURSE_SOURCES,
   PHOTO_DRAFT_INSTRUCTION_MODES,
   PHOTO_DRAFT_KINDS,
   PHOTO_DRAFT_LEVELS,
   PHOTO_DRAFT_LIMITS,
   countNoteChars,
+  hasPageText,
   type DraftLesson,
   type DraftModule,
   type DraftPhoto,
@@ -62,6 +64,7 @@ import {
   type PassModelOption,
   type PassModelStatus,
   type PhotoDraft,
+  type PhotoDraftCourseSource,
   type PhotoDraftInstructionMode,
   type PhotoDraftKind,
   type PhotoDraftLevel,
@@ -288,6 +291,7 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
     ...(d.kind === 'manuscript' ? { newBookTitle: d.newBookTitle ?? null } : {}),
     instructionMode: d.kind === 'instruction' ? (d.instructionMode ?? 'assembly') : null,
     modelCode: d.modelCode ?? null,
+    ...(d.kind === 'course' ? { courseSource: d.courseSource ?? 'photos' } : {}),
     photos: [...d.photos].sort((a, b) => a.order - b.order).map((p) => publicPhoto(d.id, p)),
     notes: d.notes,
     structure: d.structure,
@@ -300,7 +304,15 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
 }
 
 function summary(d: StoredDraft): PhotoDraftSummary {
-  return { draftId: d.id, kind: d.kind, status: d.status, title: d.title, photoCount: d.photos.length, updatedAt: d.updatedAt };
+  return {
+    draftId: d.id,
+    kind: d.kind,
+    status: d.status,
+    title: d.title,
+    photoCount: d.photos.length,
+    ...(d.kind === 'course' ? { courseSource: d.courseSource ?? 'photos' } : {}),
+    updatedAt: d.updatedAt,
+  };
 }
 
 /**
@@ -431,7 +443,10 @@ function validateStructure(input: unknown, d: StoredDraft): DraftStructure {
       written: oldModules.get(m.moduleId)?.written === true && lessons.every((l) => !!l.body),
     };
   });
-  return { modules };
+  const rawIn = input as { summary?: unknown; outcomes?: unknown };
+  const summary = rawIn.summary !== undefined ? nullableText(rawIn.summary, 600, 'Опис курсу') : (d.structure?.summary ?? null);
+  const outcomes = rawIn.outcomes !== undefined ? strings(rawIn.outcomes, 'outcomes', 200).slice(0, 8) : (d.structure?.outcomes ?? []);
+  return { modules, ...(summary ? { summary } : {}), ...(outcomes.length ? { outcomes } : {}) };
 }
 
 function statusAfterStructure(structure: DraftStructure): 'structured' | 'written' {
@@ -482,8 +497,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
    * Чи можна запускати прохід 1 для цього автора: бали (якщо діють) або грошовий ліміт тексту. Балансу з балами
    * вистачає — грошовий ліміт НЕ питаємо (інакше автор платив би двічі, як застерігає creditBilledContext.ts).
    */
-  const pass1Block = async (req: Request, draftKind: PhotoDraftKind): Promise<string | null> => {
-    const v = await deps.passModels?.visionBlock?.(req, draftKind === 'manuscript' ? 'recognize' : 'describe');
+  const pass1Block = async (req: Request, target: { kind: PhotoDraftKind; courseSource?: PhotoDraftCourseSource | null }): Promise<string | null> => {
+    const v = await deps.passModels?.visionBlock?.(req, hasPageText(target) ? 'recognize' : 'describe');
     if (v?.billed) return v.reason;
     return budgetBlock(req);
   };
@@ -503,8 +518,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       };
       let patch: Partial<StoredPhoto>;
       try {
-        if (current.kind === 'manuscript') {
-          // Рукопис: не опис сцени, а дослівний текст сторінки; нотатка — підказка до розбору почерку.
+        if (hasPageText(current)) {
+          // Рукопис і курс зі скану документа: не опис сцени, а дослівний текст сторінки; нотатка — підказка до розбору почерку.
           if (!deps.recognize) throw new Error('Розпізнавання сторінок не налаштовано на сервері.');
           const hint = (context.notes ?? []).map((n) => n.trim()).filter(Boolean).join('\n');
           const recognizeOnce = async () => {
@@ -582,6 +597,15 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       } catch (err) {
         return sendChangeError(res, err, 'create');
       }
+      let courseSource: PhotoDraftCourseSource | null = null;
+      if (body.courseSource !== undefined && body.courseSource !== null) {
+        if (kind !== 'course') return fail(res, 400, 'bad_input', 'Джерело курсу (courseSource) є лише в чернеток-курсів.');
+        if (!(PHOTO_DRAFT_COURSE_SOURCES as readonly unknown[]).includes(body.courseSource)) {
+          return fail(res, 400, 'bad_input', `courseSource має бути одним із: ${PHOTO_DRAFT_COURSE_SOURCES.join(', ')}.`);
+        }
+        courseSource = body.courseSource as PhotoDraftCourseSource;
+      }
+      if (kind === 'course' && !courseSource) courseSource = 'photos';
       let bookId: string | null = null;
       let newBookTitle: string | null = null;
       if (kind === 'book' || kind === 'manuscript') {
@@ -623,6 +647,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         level,
         instructionMode,
         modelCode,
+        ...(kind === 'course' ? { courseSource } : {}),
         bookId,
         ...(kind === 'manuscript' ? { newBookTitle } : {}),
         photos: [],
@@ -821,7 +846,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       if (decoded.bytes.length > PHOTO_DRAFT_LIMITS.maxImageBytes) {
         return fail(res, 413, 'image_too_large', 'Фото завелике (максимум 10 МБ). Застосунок має стиснути його до 2048 px.');
       }
-      const isManuscript = draft.kind === 'manuscript';
+      // «Сторінки тексту»: рукопис і курс зі скану документа мають спільні межі й розпізнавання.
+      const isManuscript = hasPageText(draft);
       const photoCap = isManuscript ? PHOTO_DRAFT_LIMITS.maxManuscriptPages : PHOTO_DRAFT_LIMITS.maxPhotosPerDraft;
       if (draft.photos.length >= photoCap) {
         return fail(res, 409, 'too_many_photos', `У чернетці вже ${photoCap} ${isManuscript ? 'сторінок' : 'кадрів'} — це межа.`);
@@ -833,7 +859,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           res,
           429,
           'rate_limited',
-          `Не більше ${hourCap} ${isManuscript ? 'сторінок рукопису' : 'фото'} на годину. Черга продовжить надсилання трохи пізніше.`
+          `Не більше ${hourCap} ${isManuscript ? 'сторінок' : 'фото'} на годину. Черга продовжить надсилання трохи пізніше.`
         );
       }
       // Підказка до кадру одразу з фото (A5): прохід 1 стартує в цій же відповіді, тож окремий PUT нотатки не встиг би.
@@ -845,7 +871,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           return fail(res, 400, 'note_too_long', `Опис задовгий (максимум ${PHOTO_DRAFT_LIMITS.maxNoteChars} символів).`);
         }
       }
-      const budget = await pass1Block(req, draft.kind);
+      const budget = await pass1Block(req, draft);
       if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
 
       const stamp = now().toISOString().replace(/[:.]/g, '-');
@@ -950,7 +976,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       }
       const file = await readAsset(photo.assetId);
       if (!file || file.record.ownerId !== ownerId) return fail(res, 404, 'photo_not_found', 'Фото кадру не знайдено в медіатеці.');
-      const budget = await pass1Block(req, draft.kind);
+      const budget = await pass1Block(req, draft);
       if (budget) return fail(res, 402, 'ai_budget_exceeded', budget);
 
       const changed = await mutateDraft(
@@ -972,7 +998,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     }
   });
 
-  /** Рукопис: викладач виправив (або ввів вручну) текст сторінки. */
+  /** Рукопис і курс зі скану документа: викладач виправив (або ввів вручну) текст сторінки. */
   app.put(`${BASE}/:draftId/photos/:photoId/text`, auth, async (req, res) => {
     try {
       const photoId = String(req.params.photoId);
@@ -987,7 +1013,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         owner(req),
         (d) => {
           assertEditable(d);
-          if (d.kind !== 'manuscript') throw new DraftChangeError(409, 'wrong_status', 'Текст сторінки є лише в чернетки-рукопису.');
+          if (!hasPageText(d)) throw new DraftChangeError(409, 'wrong_status', 'Текст сторінки є лише в чернетки-рукопису чи курсу зі скану документа.');
           const photo = d.photos.find((p) => p.photoId === photoId);
           if (!photo) throw new DraftChangeError(404, 'photo_not_found', 'Сторінки немає в цій чернетці.');
           if (photo.status === 'processing' && !photoIsStale(photo, now().getTime())) throw new DraftChangeError(409, 'wrong_status', 'Сторінка ще розпізнається — зачекайте.');
@@ -1234,12 +1260,12 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       let moduleId: string | null = null;
       let est: PassTokenEstimate;
       if (pass === 'structure') {
-        est = estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS);
+        est = estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS);
       } else {
         moduleId = String(req.query.moduleId ?? '');
         const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
         if (!m) return fail(res, 404, 'module_not_found', 'Модуля немає в структурі.');
-        est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
+        est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
       }
       const [listing, bal] = await Promise.all([deps.passModels.list(ownerId), deps.passModels.balance(req)]);
       const models: PassModelOption[] = listing.models.map((m) => {
@@ -1279,7 +1305,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             'Структура вже є. Щоб розкласти заново, передайте { "replace": true } — правки викладача в ній буде втрачено.'
           );
         }
-      }, (d) => estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS));
+      }, (d) => estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS));
       if (!begun) return;
       const { ownerId, draftId, startedAt, snapshot, draft, charge, modelId } = begun;
       finishJob(ownerId, draftId, startedAt, 'structure', async () => {
@@ -1288,7 +1314,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           const out = await deps.writeText!({
             ownerId,
             draftId,
-            system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode),
+            system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource),
             prompt: buildStructurePrompt(snapshot),
             maxTokens: PASS_MAX_TOKENS,
             label: passLabel('Структура за фото (GrabFusion)', !!charge),
@@ -1306,7 +1332,11 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         return (d) => {
           const modules = parsed.modules;
           placePhotos(modules, d.photos);
-          d.structure = { modules };
+          d.structure = {
+            modules,
+            ...(d.kind === 'course' && parsed.summary ? { summary: parsed.summary } : {}),
+            ...(d.kind === 'course' && parsed.outcomes.length ? { outcomes: parsed.outcomes } : {}),
+          };
           d.assumptions = parsed.assumptions.map((a) => (a.photoId && !d.photos.some((p) => p.photoId === a.photoId) ? { ...a, photoId: null } : a));
           if (!d.title && parsed.title) d.title = parsed.title;
           d.status = 'structured';
@@ -1330,7 +1360,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       }, (d) => {
         const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
         return estimateGeneratePass(
-          generateSystemInstruction(d.kind, d.instructionMode),
+          generateSystemInstruction(d.kind, d.instructionMode, d.courseSource),
           m ? buildGeneratePrompt(d, m) : '',
           m?.lessons.length ?? 1,
           PASS_MAX_TOKENS
@@ -1345,7 +1375,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           const out = await deps.writeText!({
             ownerId,
             draftId,
-            system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode),
+            system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource),
             prompt: buildGeneratePrompt(snapshot, module),
             maxTokens: PASS_MAX_TOKENS,
             label: passLabel('Текст модуля за фото (GrabFusion)', !!charge),

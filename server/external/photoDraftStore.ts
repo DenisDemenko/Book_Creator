@@ -22,12 +22,14 @@ import type {
   DraftNote,
   DraftPhoto,
   DraftStructure,
+  PhotoDraftCourseSource,
   PhotoDraftKind,
   PhotoDraftInstructionMode,
   PhotoDraftLevel,
   PhotoDraftStatus,
   SubmitTarget,
 } from '../../shared/photoDraftContract';
+import { hasPageText } from '../../shared/photoDraftContract';
 
 /** Кадр, як він лежить на сервері: публічні поля + де саме фото в медіатеці. */
 export interface StoredPhoto extends Omit<DraftPhoto, 'imageUrl'> {
@@ -49,6 +51,8 @@ export interface StoredDraft {
   /** Лише для `instruction`; у чернеток, створених до 1.2.0, поля немає. */
   instructionMode?: PhotoDraftInstructionMode | null;
   modelCode?: string | null;
+  /** Лише `course` (з 1.6.0); у чернеток, створених раніше, поля немає — це `photos`. */
+  courseSource?: PhotoDraftCourseSource | null;
   bookId: string | null;
   /** Лише `manuscript`: назва нової книги, коли `bookId` немає. */
   newBookTitle?: string | null;
@@ -169,7 +173,7 @@ export async function countPhotosSince(ownerId: string, sinceIso: string, scope?
       .prepare('SELECT * FROM photo_drafts WHERE owner_id = ? AND updated_at >= ?')
       .all(ownerId, sinceIso) as any[]).map(fromRow);
   }
-  if (scope) drafts = drafts.filter((d) => (d.kind === 'manuscript') === (scope === 'manuscript'));
+  if (scope) drafts = drafts.filter((d) => hasPageText(d) === (scope === 'manuscript'));
   return drafts.reduce((sum, d) => sum + d.photos.filter((p) => p.createdAt >= sinceIso).length, 0);
 }
 

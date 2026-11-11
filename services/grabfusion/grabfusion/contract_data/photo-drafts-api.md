@@ -1,4 +1,4 @@
-# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.5.0
+# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.6.0
 
 Крок A0 плану `docs/proposals/GRABFUSION_PHOTO_COURSE_APP_2026-10-28.md`. Цей опис, типи
 `shared/photoDraftContract.ts`, схема `docs/photo-drafts-api/schema.json` (JSON Schema draft-07) і
@@ -58,6 +58,14 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 - `kind`: `course` → курс у статусі draft; `instruction` → експрес-чернетка інструкції;
   `book` → глава у «Вхідних» книги (потрібен `bookId`); `manuscript` (з 1.3.0) → набір сторінок
   рукопису у «Вхідних» одним пакетом (див. нижче).
+- `courseSource` (лише `kind: course`, з 1.6.0): `photos` (за замовчуванням, як було) — кадри майстер-класу, ШІ
+  описує, що видно; `document` — скан чи фото документа з друкованим або рукописним текстом: кожна сторінка
+  розпізнається дослівно в `photo.text` (як у рукописі: `textEdited`, `PUT …/photos/:photoId/text`, ліміти
+  сторінок і блокер `empty_page`), а проходи «Розкласти» й «Написати» будують модулі й уроки з цього тексту без
+  вигадок. Задається при `POST` створення й далі не змінюється. Прохід «Розкласти» курсу (обох джерел) повертає ще
+  `structure.summary` (про що курс) і `structure.outcomes` (2–5 результатів): у Studio це поля курсу `summary` і
+  `outcomes`. Курс зі скану документа не бере сторінки ні в обкладинку, ні в уроки Studio (вони лишаються в
+  медіатеці автора). Фікстура — `get-draft-course-document`.
 - `status`: `collecting` → `structured` → `written` → `submitted`; будь-який, крім `submitted`,
   може стати `discarded`. Повернення назад дозволене: нові фото в `structured` повертають
   чернетку в `collecting`; нова структура в `written` — у `structured`.
@@ -271,6 +279,7 @@ B просить A коментарем у документі плану.
 
 | Версія | Дата | Зміна |
 |---|---|---|
+| 1.6.0 | 2026-11-11 | «Курс зі скану документа»: `courseSource` (`photos` / `document`) у `POST` створення, у чернетці й у переліку; для `document` сторінки розпізнаються дослівно (`photo.text` — тепер і в курсів), `PUT …/photos/:photoId/text` і блокер `empty_page` діють і для них; прохід «Розкласти» курсу додає `structure.summary` і `structure.outcomes` (поля курсу в Studio). Лише додавання; фікстура `get-draft-course-document` |
 | 1.5.0 | 2026-11-10 | «Набір книги» без наявної книги: `submit` сам створює книгу в Studio — новий вид цілі `book` (адитивно: решта цілей без змін), фікстури `submit-manuscript` (книга) і `submit-manuscript-existing-book` (`inbox`). |
 | 1.4.0 | 2026-11-09 | Вибір моделі й бали за проходи 2–3: новий `GET …/ai-options`, необовʼязкове `modelId` у `POST …/structure` і `…/generate` (нове необовʼязкове тіло), бали резервуються до запуску й списуються за фактичною вартістю; нових `kind` помилок немає (недоступна модель → `bad_input`, бракує балів → `ai_budget_exceeded`) |
 | 1.3.0 | 2026-10-28 | A5: `kind: manuscript` («Набір книги»): сторінки розпізнаються дослівно (`photo.text`, `textEdited`), нові `newBookTitle`, `PUT …/photos/:photoId/text`, `note` у тілі додавання фото, `bookId` у PATCH рукопису, межі `maxManuscriptPages` / `manuscriptPagesPerHour` / `maxPageTextChars`, блокер `empty_page`; відправка — пакетом у «Вхідні» (`batchId` / `batchOrder` / `batchBookTitle`). Лише додавання |

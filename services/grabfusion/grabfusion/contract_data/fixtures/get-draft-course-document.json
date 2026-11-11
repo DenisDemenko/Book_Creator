@@ -1,0 +1,157 @@
+{
+  "draft": {
+    "draftId": "pd_c0d3d0c5a1b2",
+    "kind": "course",
+    "status": "structured",
+    "revision": 8,
+    "title": "Безпечна робота з електроінструментом",
+    "craft": null,
+    "audience": "майстри-початківці",
+    "level": "beginner",
+    "bookId": null,
+    "instructionMode": null,
+    "modelCode": null,
+    "courseSource": "document",
+    "photos": [
+      {
+        "photoId": "ph_d1a1",
+        "clientId": "c-2026-11-11-01",
+        "status": "described",
+        "order": 1,
+        "takenAt": "2026-11-11T09:01:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_c0d3d0c5a1b2/photos/ph_d1a1/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "text": "ПРАВИЛА БЕЗПЕЧНОЇ РОБОТИ З ЕЛЕКТРОІНСТРУМЕНТОМ\n\n1. Перед початком роботи перевірте шнур і вилку. Пошкоджений шнур — привід не вмикати інструмент.\n2. Закріпіть заготовку: тримати її рукою під час різання не можна.",
+        "textEdited": false,
+        "createdAt": "2026-11-11T09:01:05.000Z",
+        "updatedAt": "2026-11-11T09:01:30.000Z"
+      },
+      {
+        "photoId": "ph_d2a1",
+        "clientId": "c-2026-11-11-02",
+        "status": "described",
+        "order": 2,
+        "takenAt": "2026-11-11T09:02:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_c0d3d0c5a1b2/photos/ph_d2a1/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "text": "3. Надягніть захисні окуляри та навушники.\n4. Не носіть вільний одяг, прикраси; довге волосся приберіть.\n5. Вимикайте інструмент з розетки, коли міняєте диск чи свердло.",
+        "textEdited": false,
+        "createdAt": "2026-11-11T09:02:05.000Z",
+        "updatedAt": "2026-11-11T09:02:30.000Z"
+      },
+      {
+        "photoId": "ph_d3a1",
+        "clientId": "c-2026-11-11-03",
+        "status": "described",
+        "order": 3,
+        "takenAt": "2026-11-11T09:03:00.000Z",
+        "imageUrl": "/api/external/v1/photo-drafts/pd_c0d3d0c5a1b2/photos/ph_d3a1/image",
+        "description": null,
+        "tags": [],
+        "error": null,
+        "text": "ПЕРША ДОПОМОГА\n\nПри порізі: зупиніть роботу, притисніть чисту тканину, викличте допомогу, якщо кровотеча не припиняється за 10 хвилин.",
+        "textEdited": false,
+        "createdAt": "2026-11-11T09:03:05.000Z",
+        "updatedAt": "2026-11-11T09:03:30.000Z"
+      }
+    ],
+    "notes": [],
+    "structure": {
+      "summary": "Короткий курс про безпеку під час роботи з електроінструментом і першу допомогу при травмах.",
+      "outcomes": [
+        "Перевіряти інструмент і шнур перед початком роботи",
+        "Правильно закріплювати заготовку й користуватися захисним спорядженням",
+        "Діяти при порізі до приїзду допомоги"
+      ],
+      "modules": [
+        {
+          "moduleId": "m-1",
+          "title": "Безпека під час роботи",
+          "summary": "Підготовка інструмента, заготовки й себе.",
+          "written": false,
+          "lessons": [
+            {
+              "lessonId": "l-1",
+              "title": "Перевірка інструмента й заготовки",
+              "goal": "Знати, що перевірити, перш ніж вмикати інструмент",
+              "photoIds": [
+                "ph_d1a1"
+              ],
+              "body": null,
+              "topics": [
+                "шнур і вилка",
+                "закріплення заготовки"
+              ],
+              "aiFields": [
+                "title",
+                "goal",
+                "topics"
+              ]
+            },
+            {
+              "lessonId": "l-2",
+              "title": "Захист і одяг",
+              "goal": "Підготувати себе до роботи",
+              "photoIds": [
+                "ph_d2a1"
+              ],
+              "body": null,
+              "topics": [
+                "окуляри й навушники",
+                "одяг і волосся"
+              ],
+              "aiFields": [
+                "title",
+                "goal",
+                "topics"
+              ]
+            }
+          ]
+        },
+        {
+          "moduleId": "m-2",
+          "title": "Перша допомога",
+          "summary": "Що робити при порізі.",
+          "written": false,
+          "lessons": [
+            {
+              "lessonId": "l-3",
+              "title": "Поріз: перші дії",
+              "goal": "Знати порядок дій при порізі",
+              "photoIds": [
+                "ph_d3a1"
+              ],
+              "body": null,
+              "topics": [
+                "зупинити кровотечу"
+              ],
+              "aiFields": [
+                "title",
+                "goal",
+                "topics"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "assumptions": [
+      {
+        "assumptionId": "as-1",
+        "text": "У тексті сторінки 3 не вказано, кому телефонувати — це лишено без номера.",
+        "status": "open",
+        "moduleId": "m-2",
+        "lessonId": "l-3",
+        "photoId": "ph_d3a1"
+      }
+    ],
+    "job": null,
+    "submitted": null,
+    "createdAt": "2026-11-11T09:00:00.000Z",
+    "updatedAt": "2026-11-11T09:20:00.000Z"
+  }
+}

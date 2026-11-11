@@ -1,4 +1,4 @@
-"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.5.0).
+"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.6.0).
 
 Синхронний (httpx). Токен тримає сервер GrabFusion. Розгалужуватись слід лише за `StudioError.kind`.
 """
@@ -74,7 +74,7 @@ class StudioClient:
         return [DraftSummary.from_dict(x) for x in self._request("GET", "/photo-drafts")["drafts"]]
 
     def create_draft(self, kind: str, **fields: Any) -> Draft:
-        """fields: title, craft, audience, level, bookId, newBookTitle, instructionMode, modelCode."""
+        """fields: title, craft, audience, level, bookId, newBookTitle, instructionMode, modelCode, courseSource (лише курс)."""
         body = {"kind": kind, **{k: v for k, v in fields.items() if v is not None}}
         return Draft.from_dict(self._request("POST", "/photo-drafts", json=body)["draft"])
 

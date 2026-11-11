@@ -148,6 +148,12 @@ class Draft:
     instructionMode: str | None = None
     modelCode: str | None = None
     newBookTitle: str | None = None
+    courseSource: str | None = None  # лише курс (контракт 1.6.0): photos | document
+
+    @property
+    def textPages(self) -> bool:
+        """Кадри — сторінки тексту: розпізнаються дослівно (`text`), а не описуються."""
+        return self.kind == "manuscript" or (self.kind == "course" and self.courseSource == "document")
 
     @property
     def busy(self) -> bool:
@@ -175,6 +181,7 @@ class DraftSummary:
     title: str | None = None
     photoCount: int = 0
     updatedAt: str = ""
+    courseSource: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "DraftSummary":

@@ -38,6 +38,11 @@ class Sim:
         self.limits = contract.default_limits()
 
     # --- допоміжне ------------------------------------------------------
+    @staticmethod
+    def _text_pages(d: dict[str, Any]) -> bool:
+        """Рукопис і курс зі скану документа: кадри — сторінки тексту (контракт 1.6.0)."""
+        return d["kind"] == "manuscript" or (d["kind"] == "course" and d.get("courseSource") == "document")
+
     def _next(self, prefix: str) -> str:
         self.counter += 1
         return f"{prefix}_sim{self.counter:04d}"
@@ -55,7 +60,7 @@ class Sim:
         for p in d["photos"]:
             if p["status"] == "processing":
                 p["status"] = "described"
-                if d["kind"] == "manuscript":
+                if self._text_pages(d):
                     hint = next((n["text"] for n in d["notes"] if p["photoId"] in n["photoIds"]), "")
                     p["text"] = "" if "порожня" in hint else f"Сторінка {p['order']}: розпізнаний текст (мок). {hint}".strip()
                     p["textEdited"] = False
@@ -80,6 +85,9 @@ class Sim:
                 les["photoIds"] = []
             for i, pid in enumerate(by_order):
                 lessons[min(i * len(lessons) // max(len(by_order), 1), len(lessons) - 1)]["photoIds"].append(pid)
+            if d["kind"] == "course":
+                doc = contract.load_fixture("get-draft-course-document")["draft"]["structure"]
+                structure["summary"], structure["outcomes"] = doc["summary"], list(doc["outcomes"])
             d["structure"] = structure
             d["assumptions"] = copy.deepcopy(ref["assumptions"])
             if not d["title"]:
@@ -114,7 +122,8 @@ class Sim:
         if (method, name) == ("GET", "/") :
             return 200, {"drafts": [
                 {"draftId": d["draftId"], "kind": d["kind"], "status": d["status"], "title": d["title"],
-                 "photoCount": len(d["photos"]), "updatedAt": d["updatedAt"]}
+                 "photoCount": len(d["photos"]), "updatedAt": d["updatedAt"],
+                 **({"courseSource": d.get("courseSource") or "photos"} if d["kind"] == "course" else {})}
                 for d in reversed(list(self.drafts.values())) if d["status"] != "discarded"]}
         if (method, name) == ("POST", "/"):
             return self._create(body)
@@ -192,6 +201,11 @@ class Sim:
         bad = self._check_instruction_fields(body["kind"], body) or self._check_book_fields(body["kind"], body)
         if bad:
             return bad
+        source = body.get("courseSource")
+        if source is not None and body["kind"] != "course":
+            return _err(400, "bad_input", "courseSource — лише для курсу.")
+        if source is not None and source not in {"photos", "document"}:
+            return _err(400, "bad_input", "courseSource: photos або document.")
         base = contract.load_fixture("create-draft")["draft"]
         did = self._next("pd")
         d = copy.deepcopy(base)
@@ -201,6 +215,9 @@ class Sim:
             d[f] = body.get(f)
         if body["kind"] == "instruction":
             d["instructionMode"] = body.get("instructionMode") or "assembly"
+        d.pop("courseSource", None)
+        if body["kind"] == "course":
+            d["courseSource"] = source or "photos"
         self.drafts[did] = d
         return 201, {"draft": copy.deepcopy(d)}
 
@@ -260,7 +277,13 @@ class Sim:
                 lessons.append(new_les)
             out.append({"moduleId": m["moduleId"], "title": m.get("title") or "", "summary": m.get("summary"),
                         "lessons": lessons, "written": bool(lessons) and all(x["body"] for x in lessons)})
-        d["structure"] = {"modules": out}
+        keep = d["structure"] or {}
+        extra = {}
+        for f in ("summary", "outcomes"):
+            val = new.get(f) if f in new else keep.get(f)
+            if val:
+                extra[f] = val
+        d["structure"] = {"modules": out, **extra}
         return None
 
     def _patch(self, d: dict[str, Any], body: Any) -> Result:
@@ -315,7 +338,7 @@ class Sim:
             p = self._photo(d, self.clients[key])
             if p:
                 return 202, {"photo": copy.deepcopy(p), "revision": d["revision"], "duplicate": True}
-        cap = self.limits["maxManuscriptPages"] if d["kind"] == "manuscript" else self.limits["maxPhotosPerDraft"]
+        cap = self.limits["maxManuscriptPages"] if self._text_pages(d) else self.limits["maxPhotosPerDraft"]
         if len(d["photos"]) >= cap:
             return _err(409, "too_many_photos", "Забагато кадрів.")
         pid = self._next("ph")
@@ -323,7 +346,7 @@ class Sim:
         p = {"photoId": pid, "clientId": body["clientId"], "status": "processing", "order": order,
              "takenAt": body.get("takenAt"), "imageUrl": self._image_url(d["draftId"], pid), "description": None,
              "tags": [], "error": None, "createdAt": _now(), "updatedAt": _now()}
-        if d["kind"] == "manuscript":
+        if self._text_pages(d):
             p["text"], p["textEdited"] = None, False
         d["photos"].append(p)
         self.clients[key] = pid
@@ -340,8 +363,8 @@ class Sim:
         return 202, {"photo": copy.deepcopy(p), "revision": d["revision"], "duplicate": False}
 
     def _put_text(self, d: dict[str, Any], photo_id: str, body: Any) -> Result:
-        if d["kind"] != "manuscript":
-            return _err(409, "wrong_status", "Текст сторінки — лише для рукопису.")
+        if not self._text_pages(d):
+            return _err(409, "wrong_status", "Текст сторінки — лише для рукопису чи курсу зі скану документа.")
         p = self._photo(d, photo_id)
         if p is None:
             return _err(404, "photo_not_found", "Кадру немає в цій чернетці.")
@@ -446,6 +469,11 @@ class Sim:
         for p in d["photos"]:
             if p["status"] == "failed":
                 out.append({"kind": "photos_failed", "message": f"Кадр {p['order']} не описано.", "photoId": p["photoId"]})
+        if d["kind"] == "course" and d.get("courseSource") == "document":
+            for p in d["photos"]:
+                if p["status"] == "described" and not (p.get("text") or "").strip():
+                    out.append({"kind": "empty_page", "photoId": p["photoId"],
+                                "message": f"На сторінці {p['order']} немає тексту — введіть вручну або приберіть сторінку."})
         if d["kind"] == "manuscript":
             for p in d["photos"]:
                 if p["status"] == "described" and not (p.get("text") or "").strip():

@@ -101,3 +101,10 @@ details>summary{cursor:pointer;font:600 .95rem var(--font-display);letter-spacin
 .hint[hidden] { display: none; }
 .hint span { flex: 1; }
 @media (display-mode: standalone) { .top { padding-top: max(0px, env(safe-area-inset-top)); } }
+
+/* Вибір «що створюємо» (11.11.2026) */
+.choice{display:flex;gap:14px;align-items:flex-start;width:100%;text-align:left;margin-bottom:12px;padding:16px;border-radius:16px;background:var(--surface);border:1px solid var(--line)}
+.choice:hover{border-color:var(--accent);background:var(--accent-soft)}
+.choice-icon{font-size:1.6rem;line-height:1}
+.choice-body{display:flex;flex-direction:column;gap:4px}
+.choice-body strong{font:600 1rem var(--font-display);color:var(--foreground)}

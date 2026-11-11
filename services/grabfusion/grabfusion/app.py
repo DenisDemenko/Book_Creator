@@ -20,9 +20,9 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 MANIFEST = {
     "id": "./",
-    "name": "GrabFusion — курс із фото",
+    "name": "GrabFusion — інструкції й курси з фото",
     "short_name": "GrabFusion",
-    "description": "Зніміть кадри — отримайте курс, інструкцію чи главу книги для Fusion Lab Studio.",
+    "description": "Зніміть або відскануйте — отримайте інструкцію, курс чи главу книги для Fusion Lab Studio.",
     "lang": "uk",
     # Відносні адреси розв'язуються від адреси маніфесту: працює під будь-яким префіксом.
     "start_url": "./",
