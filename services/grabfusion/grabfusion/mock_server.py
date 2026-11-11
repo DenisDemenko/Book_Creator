@@ -173,6 +173,12 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
         if method == "POST" and path == "/pair/email":
             app.state.pair_headers.append(request.headers.get("x-forwarded-for"))
             return await _pair_email(request)
+        if method == "GET" and path == "/photo-drafts/private-stores":
+            # Не частина контракту чернеток (журнал #549): стан локальних серверів автора, лише читання.
+            if not request.headers.get("authorization", "").lower().startswith("bearer "):
+                return _err("unauthenticated", "Потрібен заголовок Authorization: Bearer.")
+            return JSONResponse({"stores": [{"id": "pstore_mock0001", "name": "Домашній Docker-сервер", "online": True,
+                                              "lastSeen": "2026-11-11T10:00:00.000Z", "kinds": ["book", "course", "instruction"]}]})
         route = params = None
         for r in ROUTES:
             if r.method != method:

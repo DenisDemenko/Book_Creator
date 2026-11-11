@@ -116,6 +116,11 @@ def test_full_flow(stack, browser_page, tmp_path):
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
     page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
+    # Журнал #549: телефон показує стан локального сервера автора й прямо каже, що чернетки з телефона йдуть у хмару.
+    page.wait_for_selector("#private-stores-note")
+    note = page.inner_text("#private-stores-note")
+    assert "Домашній Docker-сервер" in note and "в мережі" in note and "хмарі Studio" in note
+    assert "127.0.0.1" not in note
     page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
     _shot(page, "2-list")

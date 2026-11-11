@@ -1,6 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiPath } from '../utils/basePath';
+import { PrivateBookBadge } from './PrivateBookBadge';
+import { PrivateInstructionsDialog } from './PrivateInstructionsDialog';
+import {
+  PrivateStoreError,
+  emitPrivateSync,
+  fetchMyPrivateStores,
+  getPrivateDoc,
+  probePrivateStore,
+  putPrivateDoc,
+  setActivePrivateMaterial,
+  takePendingPrivateOpen,
+  type PrivateStoreInfo,
+} from '../utils/privateStore';
 import {
   ArrowLeft,
   BookOpen,
@@ -481,10 +494,48 @@ const InstructionArticle: React.FC<{ doc: Instruction; type: InstructionTypeConf
 // чернетки) і за кнопкою «Нова».
 // ---------------------------------------------------------------------------
 
+/** Ідентифікатор приватної інструкції: його видає браузер; сховище приймає латиницю, цифри, `_` і `-`. */
+function privateInstructionId(): string {
+  const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `ins_${random}`;
+}
+
+/** Запис приватної інструкції на локальний сервер: помилка кидається, а значок над редактором дізнається про результат. */
+async function writePrivateInstruction(d: Instruction): Promise<void> {
+  const ps = d.privateStore;
+  if (!ps) return;
+  try {
+    await putPrivateDoc(ps.storeId, {
+      id: ps.docId,
+      kind: 'instruction',
+      meta: {
+        title: (d.title.trim() || 'Інструкція без назви').slice(0, 200),
+        docType: d.docType,
+        steps: d.steps.filter((st) => st.title.trim()).length,
+        updatedAt: d.updatedAt,
+      },
+      payload: d as unknown as Record<string, unknown>,
+    });
+    emitPrivateSync({ storeId: ps.storeId, id: ps.docId, status: 'synced' });
+  } catch (err) {
+    const e = err as PrivateStoreError;
+    emitPrivateSync({ storeId: ps.storeId, id: ps.docId, status: e.kind === 'conflict' ? 'conflict' : e.kind === 'unreachable' ? 'offline' : 'error', message: e.message });
+    throw err;
+  }
+}
+
 const TypeDialog: React.FC<{
-  onPick: (id: InstructionDocType) => void;
+  onPick: (id: InstructionDocType, storeId: string | null) => void;
   onClose?: () => void;
-}> = ({ onPick, onClose }) => (
+  /** Локальні сервери, на які цей автор може писати інструкції зараз; порожньо — галочки немає. */
+  privateStores?: PrivateStoreInfo[];
+}> = ({ onPick, onClose, privateStores = [] }) => {
+  const [privateChecked, setPrivateChecked] = useState(false);
+  const [privateStoreId, setPrivateStoreId] = useState(privateStores[0]?.id ?? '');
+  useEffect(() => {
+    if (!privateStores.some((st) => st.id === privateStoreId)) setPrivateStoreId(privateStores[0]?.id ?? '');
+  }, [privateStores, privateStoreId]);
+  return (
   <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 backdrop-blur-sm p-4">
     <div className="glass-panel w-full max-w-lg rounded-2xl p-6">
       <div className="flex items-center justify-between gap-3">
@@ -498,6 +549,27 @@ const TypeDialog: React.FC<{
       <h2 className="mt-2 text-xl font-bold text-slate-100">Оберіть тип документа</h2>
       <p className="mt-1 text-xs text-slate-400">Структура розділів і підказки автоматично пристосуються до вашого завдання.</p>
 
+      {privateStores.length > 0 && (
+        <label data-private-checkbox className="mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={privateChecked} onChange={(e) => setPrivateChecked(e.target.checked)} />
+          <span className="text-xs text-emerald-100 min-w-0">
+            <b>Приватне збереження на локальному сервері</b>
+            <span className="block text-emerald-200/80 mt-0.5">
+              Інструкція лежатиме лише на вашому сервері, без копії в хмарі. ШІ, верстка PDF через Studio й перенесення в книгу для неї недоступні; швидкий друк у браузері працює.
+            </span>
+            {privateStores.length > 1 ? (
+              <select className="mt-1.5 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs" value={privateStoreId} onChange={(e) => setPrivateStoreId(e.target.value)}>
+                {privateStores.map((st) => (
+                  <option key={st.id} value={st.id}>{st.name}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="block mt-1 text-emerald-300">Сервер: {privateStores[0].name}</span>
+            )}
+          </span>
+        </label>
+      )}
+
       <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
         {INSTRUCTION_TYPES.map((type) => {
           const Icon = TYPE_ICONS[type.id];
@@ -505,7 +577,7 @@ const TypeDialog: React.FC<{
             <button
               key={type.id}
               type="button"
-              onClick={() => onPick(type.id)}
+              onClick={() => onPick(type.id, privateChecked && privateStoreId ? privateStoreId : null)}
               className="flex flex-col items-start gap-1.5 rounded-xl border border-slate-700 bg-slate-950/60 p-3.5 text-left transition-colors hover:border-emerald-400/50 hover:bg-slate-900"
             >
               <Icon className="h-4 w-4 text-emerald-400" />
@@ -517,7 +589,8 @@ const TypeDialog: React.FC<{
       </div>
     </div>
   </div>
-);
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Дрібні редактори повторюваних розділів — список рядків-текстів (для
@@ -599,6 +672,37 @@ export const InstructionBuilderView: React.FC<{
   const [createBookError, setCreateBookError] = useState<string | null>(null);
   const firstRender = useRef(true);
 
+  // Приватні інструкції (журнал #549): лежать лише на локальному сервері автора. Autosave для них іде не в localStorage, а на
+  // сервер (з паузою й повтором, якщо сервер недоступний); документ, що вже лежить на сервері, повторно не пишеться.
+  const [hasPrivateStores, setHasPrivateStores] = useState(false);
+  const [privateStores, setPrivateStores] = useState<PrivateStoreInfo[]>([]);
+  const [showPrivateList, setShowPrivateList] = useState(false);
+  const [privateError, setPrivateError] = useState<string | null>(null);
+  const docRef = useRef(doc);
+  docRef.current = doc;
+  const syncedRef = useRef<Instruction | null>(null);
+  const privateTimer = useRef<number | undefined>(undefined);
+  const privateChain = useRef<Promise<void>>(Promise.resolve());
+
+  const flushPrivate = (d: Instruction) => {
+    privateChain.current = privateChain.current.then(async () => {
+      if (d === syncedRef.current || !d.privateStore) return;
+      try {
+        await writePrivateInstruction(d);
+        syncedRef.current = d;
+        setPrivateError(null);
+      } catch {
+        // Сервер недоступний чи відхилив запис: зміни лишаються в цьому вікні, повтор через 15 с із найновішою версією.
+        window.clearTimeout(privateTimer.current);
+        privateTimer.current = window.setTimeout(() => flushPrivate(docRef.current), 15_000);
+      }
+    });
+  };
+  const schedulePrivateWrite = (d: Instruction) => {
+    window.clearTimeout(privateTimer.current);
+    privateTimer.current = window.setTimeout(() => flushPrivate(d), 1000);
+  };
+
   // Автозбереження — щоразу, коли документ змінюється. Той самий підхід, що
   // й у ExpressStartView.tsx для вибору напряму: localStorage, без сервера.
   useEffect(() => {
@@ -607,8 +711,70 @@ export const InstructionBuilderView: React.FC<{
       return;
     }
     if (kitBinding) kitBinding.onChange(doc);
+    else if (doc.privateStore) schedulePrivateWrite(doc);
     else saveInstructionDraft(doc);
   }, [doc]);
+
+  // Закрили конструктор чи перейшли в інший розділ — останні зміни приватної інструкції йдуть на сервер одразу.
+  useEffect(
+    () => () => {
+      window.clearTimeout(privateTimer.current);
+      const d = docRef.current;
+      if (d.privateStore && d !== syncedRef.current) void writePrivateInstruction(d).catch(() => undefined);
+    },
+    []
+  );
+
+  // Поки відкрито приватну інструкцію, охоронець (utils/privateStore.ts) не пускає в хмару ШІ, PDF і решту, що приймає вміст.
+  const openPrivateDocId = doc.privateStore?.docId ?? null;
+  useEffect(() => {
+    setActivePrivateMaterial('instruction', openPrivateDocId);
+    return () => setActivePrivateMaterial('instruction', null);
+  }, [openPrivateDocId]);
+
+  // Сервери, призначені цьому автору для інструкцій: кнопка «Приватні» є, навіть коли сервер вимкнений (діалог тоді пояснить, чому
+  // інструкції недоступні), а галочка при створенні — лише для досяжних серверів «в мережі».
+  useEffect(() => {
+    if (kitBinding) return;
+    let cancelled = false;
+    void (async () => {
+      const mine = (await fetchMyPrivateStores()).filter((st) => st.kinds.includes('instruction'));
+      if (cancelled) return;
+      setHasPrivateStores(mine.length > 0);
+      const probed = await Promise.all(mine.map(async (st) => ({ st, ok: st.online && (await probePrivateStore(st.endpoint)) })));
+      if (!cancelled) setPrivateStores(probed.filter((x) => x.ok).map((x) => x.st));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kitBinding, showTypeDialog]);
+
+  const flushCurrentPrivate = () => {
+    window.clearTimeout(privateTimer.current);
+    const d = docRef.current;
+    if (d.privateStore && d !== syncedRef.current) flushPrivate(d);
+  };
+
+  const openPrivateInstruction = async (storeId: string, docId: string) => {
+    const stored = await getPrivateDoc(storeId, docId);
+    const restored = stored.payload as unknown as Instruction;
+    if (!restored || typeof restored.docType !== 'string' || !Array.isArray(restored.steps)) {
+      throw new Error('Локальний сервер повернув неповні дані інструкції. Відкриття скасовано.');
+    }
+    flushCurrentPrivate();
+    const opened: Instruction = { ...restored, privateStore: { storeId, docId } };
+    syncedRef.current = opened;
+    setDoc(opened);
+    setShowTypeDialog(false);
+    setSection('overview');
+    setPrivateError(null);
+  };
+
+  // «Відкрити» приватну інструкцію з дашборда: розділ відкривається одразу на ній.
+  useEffect(() => {
+    const pending = takePendingPrivateOpen('instruction');
+    if (pending) void openPrivateInstruction(pending.storeId, pending.id).catch((e) => setPrivateError((e as Error).message));
+  }, []);
 
   const type = useMemo(() => findInstructionType(doc.docType), [doc.docType]);
   const readiness = useMemo(() => instructionCompleteness(doc), [doc]);
@@ -623,9 +789,29 @@ export const InstructionBuilderView: React.FC<{
     return { ...d, ...partial, ...(steps ? { steps } : {}), updatedAt: new Date().toISOString() };
   });
 
-  const pickType = (id: InstructionDocType, resetDocument: boolean) => {
+  const pickType = async (id: InstructionDocType, resetDocument: boolean, privateStoreId: string | null = null) => {
+    if (resetDocument && privateStoreId) {
+      // Приватна інструкція: спершу запис на локальний сервер — лише потім вона з'являється в редакторі.
+      const fresh: Instruction = { ...createEmptyInstruction(id), privateStore: { storeId: privateStoreId, docId: privateInstructionId() } };
+      try {
+        await writePrivateInstruction(fresh);
+      } catch (err) {
+        setPrivateError(err instanceof Error ? err.message : 'Не вдалося створити інструкцію на локальному сервері.');
+        return;
+      }
+      flushCurrentPrivate();
+      syncedRef.current = fresh;
+      setDoc(fresh);
+      setShowTypeDialog(false);
+      setSection('overview');
+      setPrivateError(null);
+      // Значок над редактором з'являється вже після першого запису: нагадуємо йому, що запис відбувся.
+      window.setTimeout(() => emitPrivateSync({ storeId: privateStoreId, id: fresh.privateStore!.docId, status: 'synced' }), 80);
+      return;
+    }
     setShowTypeDialog(false);
     if (resetDocument) {
+      flushCurrentPrivate();
       const fresh = createEmptyInstruction(id);
       setDoc(fresh);
       saveInstructionDraft(fresh);
@@ -636,7 +822,7 @@ export const InstructionBuilderView: React.FC<{
   };
 
   const startNew = () => {
-    if (doc.title.trim() || doc.description.trim() || doc.steps.some((s) => s.title.trim())) {
+    if (!doc.privateStore && (doc.title.trim() || doc.description.trim() || doc.steps.some((s) => s.title.trim()))) {
       const ok = window.confirm('Почати нову інструкцію? Поточний документ буде замінено (він лишиться в експорті, якщо ви його зберегли).');
       if (!ok) return;
     }
@@ -649,7 +835,8 @@ export const InstructionBuilderView: React.FC<{
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+    const { privateStore: _privateStore, ...exportable } = doc;
+    const blob = new Blob([JSON.stringify(exportable, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -679,7 +866,11 @@ export const InstructionBuilderView: React.FC<{
    * Чому верстку за шаблонами зараз не запустити (null — можна). Вимоги «підтвердити кожен крок за джерелами»
    * більше немає (власник, 09.11.2026): текст від ШІ й так лягає в книгу з позначкою [AI-DRAFT], а автор правит його там.
    */
-  const layoutBlockedReason: string | null = !onInstructionBookCreated ? 'У цьому режимі перенесення в книгу недоступне.' : null;
+  const layoutBlockedReason: string | null = doc.privateStore
+    ? 'Приватна інструкція лежить лише на вашому локальному сервері: верстка й перенесення в книгу йдуть через Studio та ШІ, тож для неї вимкнені. Швидкий друк працює в браузері.'
+    : !onInstructionBookCreated
+      ? 'У цьому режимі перенесення в книгу недоступне.'
+      : null;
 
   const kbResults = kbQuery.trim()
     ? doc.knowledgeBase.filter((k) => k.title.toLowerCase().includes(kbQuery.trim().toLowerCase()))
@@ -751,6 +942,11 @@ export const InstructionBuilderView: React.FC<{
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 print:max-w-none print:p-0">
+      {doc.privateStore && (
+        <div className="mb-3 overflow-hidden rounded-xl print:hidden">
+          <PrivateBookBadge storeId={doc.privateStore.storeId} docId={doc.privateStore.docId} kind="instruction" />
+        </div>
+      )}
       <header className="mb-4 flex items-start justify-between gap-3 flex-wrap print:hidden">
         <div>
           <div className="flex items-center gap-2 text-emerald-400">
@@ -778,13 +974,18 @@ export const InstructionBuilderView: React.FC<{
             Нова
           </button>
         )}
+        {!kitBinding && hasPrivateStores && (
+          <button type="button" onClick={() => setShowPrivateList(true)} data-private-instructions-open className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 transition-colors">
+            <Lock className="h-3.5 w-3.5" /> Приватні
+          </button>
+        )}
         <button type="button" onClick={exportJson} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.06] transition-colors">
           <Download className="h-3.5 w-3.5" /> Експорт
         </button>
         <button type="button" onClick={() => setShowPdfChoice(true)} data-instruction-print className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3 py-2 text-xs font-bold text-slate-950 transition-colors">
           <Printer className="h-3.5 w-3.5" /> Друкувати / PDF
         </button>
-        {onInstructionBookCreated && (
+        {onInstructionBookCreated && !doc.privateStore && (
           <button
             type="button"
             onClick={createBook}
@@ -804,10 +1005,13 @@ export const InstructionBuilderView: React.FC<{
           {showPreview ? 'Сховати прев’ю' : 'Попередній перегляд'}
         </button>
         <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-          <Cloud className="h-3.5 w-3.5" /> {kitBinding ? 'Зберігається в картці набору — натисніть «Зберегти» в картці виробу' : 'Збережено локально'}
+          <Cloud className="h-3.5 w-3.5" /> {kitBinding ? 'Зберігається в картці набору — натисніть «Зберегти» в картці виробу' : doc.privateStore ? 'Зберігається на локальному сервері' : 'Збережено локально'}
         </span>
         {createBookError && (
           <span className="w-full text-[11px] font-semibold text-amber-400">{createBookError}</span>
+        )}
+        {privateError && (
+          <span role="alert" data-private-error className="w-full text-[11px] font-semibold text-rose-300">{privateError}</span>
         )}
       </div>
 
@@ -1171,14 +1375,14 @@ export const InstructionBuilderView: React.FC<{
           canLayout={!layoutBlockedReason}
           layoutBlockedReason={layoutBlockedReason}
           busy={isCreatingBook}
-          layoutPanel={
+          layoutPanel={doc.privateStore ? null : (
             <PdfLayoutPanel
               saved={doc.pdfLayout}
               buildBook={buildPdfBook}
               onSaved={(layout) => patch({ pdfLayout: layout })}
               fileName={`${buildInstructionBookTitle(doc, type).replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 60) || 'instruction'}.pdf`}
             />
-          }
+          )}
           onLayout={() => { setShowPdfChoice(false); void createBook(); }}
           onQuickPrint={() => { setShowPdfChoice(false); setTimeout(printDoc, 60); }}
           onClose={() => setShowPdfChoice(false)}
@@ -1187,10 +1391,13 @@ export const InstructionBuilderView: React.FC<{
 
       {showTypeDialog && (
         <TypeDialog
-          onPick={(id) => pickType(id, true)}
-          onClose={loadInstructionDraft() ? () => setShowTypeDialog(false) : undefined}
+          onPick={(id, storeId) => void pickType(id, true, storeId)}
+          onClose={loadInstructionDraft() || doc.privateStore ? () => setShowTypeDialog(false) : undefined}
+          privateStores={privateStores}
         />
       )}
+
+      {showPrivateList && <PrivateInstructionsDialog onOpen={openPrivateInstruction} onClose={() => setShowPrivateList(false)} />}
     </div>
   );
 };

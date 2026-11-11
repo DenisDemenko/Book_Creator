@@ -4,6 +4,7 @@ import App from './App.tsx';
 import {ErrorBoundary} from './components/ErrorBoundary';
 import {LanguageProvider} from './i18n/LanguageContext';
 import {installApiBasePath} from './utils/basePath';
+import {installPrivacyGuard} from './utils/privateStore';
 import './index.css';
 import './styles/tokenModuleTheme.css';
 
@@ -11,6 +12,8 @@ import './styles/tokenModuleTheme.css';
 // домені маркетплейсу — Фаза G3), запити до /api мають нести цей префікс.
 // Без префікса не робить нічого. Деталі — src/utils/basePath.ts.
 installApiBasePath();
+// Приватні матеріали (журнал #549): поки відкрито такий матеріал, запити зі вмістом до Studio блокуються.
+installPrivacyGuard();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

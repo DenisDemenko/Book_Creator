@@ -140,6 +140,17 @@ def build_router(deps: Deps) -> APIRouter:
         deps.remember_limits(Limits.from_dict(data["limits"]))
         return data
 
+    @router.get("/private-stores")
+    def private_stores(s: Session = Depends(current)) -> Any:
+        """Стан локальних серверів приватного сховища автора (журнал #549): лише для показу в застосунку.
+        Старша Studio без цього маршруту (404) — не помилка: просто немає що показувати."""
+        try:
+            return call(s, lambda c: c.raw("GET", "/photo-drafts/private-stores"))
+        except StudioError as e:
+            if e.status == 404:
+                return {"stores": []}
+            raise
+
     @router.get("/drafts")
     def list_drafts(s: Session = Depends(current)) -> Any:
         return call(s, lambda c: c.raw("GET", "/photo-drafts"))

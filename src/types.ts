@@ -560,6 +560,8 @@ export interface CourseV2 {
   free?: boolean;
   /** Завжди UAH (сервер виставляє сам). */
   currency?: string;
+  /** Приватний курс (журнал #549): лежить лише на локальному сервері автора, у хмару не потрапляє й не публікується. */
+  privateStore?: { storeId: string };
   /** Коли студенти можуть продавати власні роботи, зроблені під час курсу. */
   graduateSelling?: 'off' | 'after_completion' | 'anytime';
   /** Створено за фото: показується позначкою в редакторі; змінити з клієнта не можна. */
@@ -670,6 +672,8 @@ export interface Instruction {
    * (вік, попередження); вони оновлюються з неї, решта рядків — ручні й не чіпаються.
    */
   kitSource?: { specWarnings: string[]; syncedAt: string };
+  /** Приватна інструкція (журнал #549): лежить лише на локальному сервері автора (не в localStorage й не в хмарі). */
+  privateStore?: { storeId: string; docId: string };
   sourceBased?: boolean;
   docType: InstructionDocType;
   title: string;
@@ -909,6 +913,11 @@ export interface HeroArcState {
 }
 
 export interface Book {
+  /**
+   * Приватне збереження (журнал #549): книга лежить лише на локальному сервері автора (Docker, services/private-store) і не
+   * дзеркалиться в хмару; ШІ, PDF, медіатека й публікація для неї вимкнені. Немає поля — звичайна книга зі збереженням у хмарі.
+   */
+  privateStore?: { storeId: string };
   wardrobeDocument?: import('./types/wardrobeDocument').WardrobeBookDocument;
   storyWorld?: StoryWorld;
   storyLocations?: StoryLocation[];

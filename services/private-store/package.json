@@ -1,0 +1,13 @@
+{
+  "name": "nova-private-store",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Локальний сервер приватного сховища Nova Studio: книги, курси й інструкції лишаються на вашому комп'ютері.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.mjs"
+  }
+}

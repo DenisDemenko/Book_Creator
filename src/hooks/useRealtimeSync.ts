@@ -31,6 +31,8 @@ interface UseRealtimeSyncProps {
   activeChapterId?: string;
   activeSectionId?: string;
   userName?: string;
+  /** Приватна книга (журнал #549): жодного з'єднання зі Studio, вміст не покидає локальний сервер і цей браузер. */
+  disabled?: boolean;
   /** `authoritative` — книга кімнати є межею доступу учасника (Т6.2): брати як є, без порівняння версій. */
   onRemoteBookUpdate: (updatedBook: Book, logEntry?: AuditLogEntry, opts?: { authoritative?: boolean }) => void;
   onRemoteVersionSnapshot?: (snapshot: BookVersionSnapshot, updatedBook: Book) => void;
@@ -62,6 +64,7 @@ export function useRealtimeSync({
   activeChapterId,
   activeSectionId,
   userName,
+  disabled,
   onRemoteBookUpdate,
   onRemoteVersionSnapshot,
   onRemoteLogEntry,
@@ -159,6 +162,8 @@ export function useRealtimeSync({
   bookRef.current = book;
   // Колбек тримаємо в ref: обробник повідомлень живе всередині ефекту
   // під'єднання і не має перестворюватись через зміну пропса.
+  const disabledRef = useRef(!!disabled);
+  disabledRef.current = !!disabled;
   const onStaleRemoteRejectedRef = useRef(onStaleRemoteRejected);
   onStaleRemoteRejectedRef.current = onStaleRemoteRejected;
   const currentRoleRef = useRef<UserRole>(currentRole);
@@ -194,6 +199,13 @@ export function useRealtimeSync({
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+
+    // Приватна книга: попереднє з'єднання вже закрито вище, нового не відкриваємо.
+    if (disabledRef.current) {
+      wsRef.current = null;
+      setSyncStatus('disconnected');
+      return;
     }
 
     setSyncStatus('connecting');

@@ -29,7 +29,7 @@ import type { AdminTab } from '../AdminPanelView';
  */
 export type NodeAction = { kind: 'panel'; tab: AdminTab } | { kind: 'view'; view: AdminView } | { kind: 'page'; page: 'graph-studio' };
 
-export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement' | 'quality' | 'slab-tables' | 'cabinet-facades' | 'crowdfunding';
+export type AdminView = 'api-keys' | 'core-ai' | 'moderation' | 'products' | 'price-management' | 'procurement' | 'quality' | 'slab-tables' | 'cabinet-facades' | 'crowdfunding' | 'private-stores';
 
 export interface AdminNode {
   id: string;
@@ -233,6 +233,16 @@ export const ADMIN_NODES: AdminNode[] = [
     description:
       'Записи закупівель дешевшого матеріалу (деревина, епоксидка, фурнітура) — стара й нова ціна за одиницю, постачальник, звідки взялась дешевша ціна. Звідси власник вручну застосовує знижку від конкретної закупівлі до обраних товарів: без вигаданих відсотків, лише реальна економія з простежуваністю до запису.',
     action: { kind: 'view', view: 'procurement' },
+    group: 'operations',
+    slot: 'left',
+  },
+  {
+    id: 'private-stores',
+    title: 'Локальні сервери',
+    hint: 'приватне збереження · Docker',
+    description:
+      'Підключення локальних Docker-серверів, на яких автори зберігають книги, курси й інструкції приватно (галочка «Приватне збереження на локальному сервері»). Хмара лишається типовим сховищем. Розгортання — лише за підтвердженням поштою й кодом; сервер сам ходить до Studio, браузер автора працює з ним напряму, дані зашифровані. Тут: підключення, призначення користувачам, стан, відкликання, синхронізація статусу з GrabFusion.',
+    action: { kind: 'view', view: 'private-stores' },
     group: 'operations',
     slot: 'left',
   },

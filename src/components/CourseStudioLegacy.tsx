@@ -15,6 +15,7 @@ import {
   X,
   RefreshCw,
   AlertTriangle,
+  Lock,
 } from 'lucide-react';
 import {
   CourseAssignment,
@@ -35,6 +36,20 @@ import {
 import { parsePriceMinor } from './adminOs/priceInput';
 import CourseGraduateStats from './CourseGraduateStats';
 import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
+import { PrivateBookBadge } from './PrivateBookBadge';
+import {
+  PrivateStoreError,
+  deletePrivateDoc,
+  emitPrivateSync,
+  fetchMyPrivateStores,
+  getPrivateDoc,
+  listPrivateDocs,
+  probePrivateStore,
+  putPrivateDoc,
+  setActivePrivateMaterial,
+  type PrivateDocSummary,
+  type PrivateStoreInfo,
+} from '../utils/privateStore';
 
 /** Останнє рішення модерації щодо курсу — з `GET /api/courses/:id`. */
 interface CourseModerationInfo {
@@ -70,6 +85,45 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(err?.error || `Помилка ${res.status}`);
   }
   return body as T;
+}
+
+/** Ідентифікатор приватного курсу: його видає браузер (сервер Studio про курс не знає); сховище приймає латиницю, цифри, `_` і `-`. */
+function privateCourseId(): string {
+  const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `crs_${random}`;
+}
+
+/** Відкрита частина запису для переліку (сховище не розшифровує вміст без токена, але мета потрібна для списку). */
+function privateCourseMeta(c: CourseV2): Record<string, unknown> {
+  return {
+    title: (c.title || 'Курс без назви').slice(0, 200),
+    status: c.status,
+    modules: c.modules.length,
+    lessons: c.modules.reduce((n, m) => n + m.lessons.length, 0),
+    updatedAt: c.updatedAt,
+  };
+}
+
+/** Запис приватного курсу на локальний сервер: помилка кидається (кнопка «Зберегти» її показує), а значок над редактором дізнається про результат. */
+async function writePrivateCourse(storeId: string, c: CourseV2): Promise<void> {
+  try {
+    await putPrivateDoc(storeId, { id: c.id, kind: 'course', meta: privateCourseMeta(c), payload: c as unknown as Record<string, unknown> });
+    emitPrivateSync({ storeId, id: c.id, status: 'synced' });
+  } catch (err) {
+    const e = err as PrivateStoreError;
+    emitPrivateSync({ storeId, id: c.id, status: e.kind === 'conflict' ? 'conflict' : e.kind === 'unreachable' ? 'offline' : 'error', message: e.message });
+    if (e.kind === 'conflict') {
+      throw new Error('Курс на локальному сервері змінено з іншого місця. Натисніть «Зберегти» ще раз, щоб перезаписати його вашою версією, або відкрийте курс заново.');
+    }
+    throw err;
+  }
+}
+
+interface PrivateCourseList {
+  store: PrivateStoreInfo;
+  docs: PrivateDocSummary[];
+  reachable: boolean;
+  error: string | null;
 }
 
 function emptyAssignment(): CourseAssignment {
@@ -274,7 +328,14 @@ function collectReadiness(course: CourseV2, categoryRequired = false): { blockin
 // Екран
 // ---------------------------------------------------------------------------
 
-export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCourseId?: string | null; lang?: 'uk' | 'en' }> = ({ onOpenWizard, initialCourseId = null, lang = 'uk' }) => {
+export const CourseStudioView: React.FC<{
+  onOpenWizard?: () => void;
+  initialCourseId?: string | null;
+  /** «Відкрити» приватний курс із дашборда: сервер і курс. Один раз, далі студія сама скидає це через `onInitialPrivateConsumed`. */
+  initialPrivateCourse?: { storeId: string; id: string } | null;
+  onInitialPrivateConsumed?: () => void;
+  lang?: 'uk' | 'en';
+}> = ({ onOpenWizard, initialCourseId = null, initialPrivateCourse = null, onInitialPrivateConsumed, lang = 'uk' }) => {
   const [courses, setCourses] = useState<CourseV2[] | null>(null);
   /** Т6.3: чужі курси, де людина — співавтор за наданим доступом. */
   const [shared, setShared] = useState<CourseV2[]>([]);
@@ -326,6 +387,32 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
     void loadCourses();
   }, [loadCourses]);
 
+  // Приватні курси (журнал #549): перелік читається ПРЯМО з локального сервера автора, Studio вмісту не бачить.
+  const [privateLists, setPrivateLists] = useState<PrivateCourseList[]>([]);
+  const [privateChecked, setPrivateChecked] = useState(false);
+  const [privateStoreId, setPrivateStoreId] = useState('');
+  const loadPrivate = useCallback(async () => {
+    const stores = (await fetchMyPrivateStores()).filter((st) => st.kinds.includes('course'));
+    const lists: PrivateCourseList[] = await Promise.all(
+      stores.map(async (store) => {
+        const reachable = await probePrivateStore(store.endpoint);
+        if (!reachable) return { store, docs: [], reachable, error: null };
+        try {
+          return { store, docs: await listPrivateDocs(store.id, 'course'), reachable, error: null };
+        } catch (err) {
+          return { store, docs: [], reachable, error: (err as Error).message };
+        }
+      })
+    );
+    setPrivateLists(lists);
+    const usable = lists.filter((l) => l.reachable && l.store.online).map((l) => l.store.id);
+    setPrivateStoreId((cur) => (usable.includes(cur) ? cur : usable[0] ?? ''));
+  }, []);
+  useEffect(() => {
+    void loadPrivate();
+  }, [loadPrivate]);
+  const usablePrivate = privateLists.filter((l) => l.reachable && l.store.online).map((l) => l.store);
+
   const openCourse = useCallback(
     async (id: string) => {
       setError(null);
@@ -349,6 +436,41 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
   useEffect(() => {
     if (initialCourseId) void openCourse(initialCourseId);
   }, [initialCourseId, openCourse]);
+
+  const openPrivateCourse = useCallback(async (storeId: string, id: string) => {
+    setError(null);
+    try {
+      const doc = await getPrivateDoc(storeId, id);
+      const restored = doc.payload as unknown as CourseV2;
+      if (!restored || restored.id !== id || !Array.isArray(restored.modules)) {
+        throw new Error('Локальний сервер повернув неповні дані курсу. Відкриття скасовано.');
+      }
+      setCourse({ ...restored, privateStore: { storeId } });
+      setModeration(null);
+      setSubmitted(false);
+      setAccess('manage');
+      setActiveId(id);
+      setDirty(false);
+      setSavedAt(null);
+      setSelection({ type: 'course' });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  // «Відкрити» приватний курс із дашборда: студія курсів відкривається одразу на ньому.
+  useEffect(() => {
+    if (!initialPrivateCourse) return;
+    void openPrivateCourse(initialPrivateCourse.storeId, initialPrivateCourse.id);
+    onInitialPrivateConsumed?.();
+  }, [initialPrivateCourse, openPrivateCourse, onInitialPrivateConsumed]);
+
+  // Поки відкрито приватний курс, охоронець (utils/privateStore.ts) не пускає в хмару ШІ, публікацію, медіатеку й решту, що приймає вміст.
+  const openPrivateId = course?.privateStore ? course.id : null;
+  useEffect(() => {
+    setActivePrivateMaterial('course', openPrivateId);
+    return () => setActivePrivateMaterial('course', null);
+  }, [openPrivateId]);
 
   const patch = useCallback((fn: (c: CourseV2) => CourseV2) => {
     setCourse((prev) => {
@@ -378,11 +500,43 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
     }
   }, []);
 
+  const createPrivateCourse = useCallback(
+    async (storeId: string) => {
+      setError(null);
+      const now = new Date().toISOString();
+      const draft: CourseV2 = { ...emptyCourse(), id: privateCourseId(), ownerId: 'local', createdAt: now, updatedAt: now, privateStore: { storeId } };
+      try {
+        await writePrivateCourse(storeId, draft);
+        setCourse(draft);
+        setModeration(null);
+        setSubmitted(false);
+        setAccess('manage');
+        setActiveId(draft.id);
+        setDirty(false);
+        setSavedAt(null);
+        setSelection({ type: 'course' });
+        void loadPrivate();
+        // Значок над редактором з'являється вже після першого запису: нагадуємо йому, що запис відбувся.
+        window.setTimeout(() => emitPrivateSync({ storeId, id: draft.id, status: 'synced' }), 80);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [loadPrivate]
+  );
+
   const saveCourse = useCallback(async () => {
     if (!course) return;
     setSaving(true);
     setError(null);
     try {
+      if (course.privateStore) {
+        // Приватний курс: лише на локальний сервер, у Studio (хмару) нічого не йде.
+        await writePrivateCourse(course.privateStore.storeId, { ...course, updatedAt: new Date().toISOString() });
+        setDirty(false);
+        setSavedAt(new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }));
+        return;
+      }
       const data = await api<{ course: CourseV2 }>(`/api/courses/${course.id}`, {
         method: 'PUT',
         body: JSON.stringify(course),
@@ -399,6 +553,10 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
 
   const publishCourse = useCallback(async () => {
     if (!course) return;
+    if (course.privateStore) {
+      setError('Приватний курс не публікується: він лежить лише на вашому локальному сервері. Щоб опублікувати, створіть окремий хмарний курс.');
+      return;
+    }
     setPublishing(true);
     setError(null);
     setSubmitted(false);
@@ -444,24 +602,32 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
   }, [course]);
 
   const deleteCourse = useCallback(async () => {
-    if (!course || !window.confirm('Видалити курс без можливості відновлення?')) return;
+    if (!course) return;
+    const priv = course.privateStore;
+    const question = priv
+      ? 'Видалити курс з локального сервера без можливості відновлення? Копій у хмарі немає.'
+      : 'Видалити курс без можливості відновлення?';
+    if (!window.confirm(question)) return;
     setError(null);
     try {
-      await api(`/api/courses/${course.id}`, { method: 'DELETE' });
+      if (priv) await deletePrivateDoc(priv.storeId, course.id);
+      else await api(`/api/courses/${course.id}`, { method: 'DELETE' });
       setCourse(null);
       setActiveId(null);
       setDirty(false);
       void loadCourses();
+      void loadPrivate();
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [course, loadCourses]);
+  }, [course, loadCourses, loadPrivate]);
 
   const closeCourse = useCallback(() => {
     setCourse(null);
     setActiveId(null);
     setDirty(false);
-  }, []);
+    void loadPrivate();
+  }, [loadPrivate]);
 
   const readiness = useMemo(
     () => (course ? collectReadiness(course, storefrontCategories.length > 0) : { blocking: [], polish: [] }),
@@ -539,7 +705,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
    * файлами (`courseMediaSync`): обкладинка — публічна, фото модуля й уроку —
    * лише для покупців. Посилання http(s) працюють, як і раніше.
    */
-  const libraryButton = (onPick: (url: string) => void, label = 'З медіатеки') => (
+  const libraryButton = (onPick: (url: string) => void, label = 'З медіатеки') => course?.privateStore ? null : (
     <button
       type="button"
       onClick={() => setPicker({ onPick })}
@@ -580,14 +746,17 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
               </button>
             )}
             {canAuthor && <button
-              onClick={createCourse}
+              onClick={() => (privateChecked && privateStoreId ? void createPrivateCourse(privateStoreId) : void createCourse())}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all"
             >
               <Plus className="w-4 h-4" />
               Новий курс
             </button>}
             <button
-              onClick={() => void loadCourses()}
+              onClick={() => {
+                void loadCourses();
+                void loadPrivate();
+              }}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 transition-all"
               title="Оновити список"
             >
@@ -598,6 +767,69 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
 
         {error && (
           <div className="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-rose-200 text-xs">{error}</div>
+        )}
+
+        {canAuthor && usablePrivate.length > 0 && (
+          <label data-private-checkbox className="mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={privateChecked} onChange={(e) => setPrivateChecked(e.target.checked)} />
+            <span className="text-xs text-emerald-100 min-w-0">
+              <b>Приватне збереження на локальному сервері</b>
+              <span className="block text-emerald-200/80 mt-0.5">
+                Діє для кнопки «Новий курс»: курс лежатиме лише на вашому сервері, без копії в хмарі. ШІ, публікація у вітрину, співавтори й медіатека для нього
+                недоступні. Майстер працює через ШІ в хмарі, тож створює лише хмарні курси.
+              </span>
+              {usablePrivate.length > 1 ? (
+                <select className="mt-1.5 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs" value={privateStoreId} onChange={(e) => setPrivateStoreId(e.target.value)}>
+                  {usablePrivate.map((st) => (
+                    <option key={st.id} value={st.id}>{st.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="block mt-1 text-emerald-300">Сервер: {usablePrivate[0].name}</span>
+              )}
+            </span>
+          </label>
+        )}
+
+        {privateLists.length > 0 && (
+          <section className="mt-5" data-course-private>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-emerald-300 flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" /> Приватні курси — на вашому локальному сервері
+            </h2>
+            {privateLists.map(({ store, docs, reachable, error: storeError }) => (
+              <div key={store.id} className="mt-2" data-private-store-block={store.id}>
+                <div className="text-[11px] text-slate-400 flex items-center gap-2">
+                  <span className="font-semibold text-slate-300">{store.name}</span>
+                  <span className={reachable ? 'text-emerald-300' : 'text-amber-300'}>{reachable ? 'доступний' : 'недоступний'}</span>
+                </div>
+                {!reachable && (
+                  <p className="mt-1.5 text-xs text-amber-200 rounded-lg bg-amber-500/10 border border-amber-500/30 p-2.5" data-private-unreachable>
+                    Сервер зараз недоступний із цього браузера: приватні курси на ньому не відкрити, поки він не повернеться (запустіть контейнер: <code>docker compose up -d</code>). Нічого не копіюється в хмару.
+                  </p>
+                )}
+                {storeError && <p className="mt-1.5 text-xs text-rose-300">{storeError}</p>}
+                {reachable && !storeError && docs.length === 0 && <p className="mt-1.5 text-xs text-slate-500">Приватних курсів поки немає.</p>}
+                {docs.length > 0 && (
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {docs.map((doc) => (
+                      <button
+                        key={doc.id}
+                        onClick={() => void openPrivateCourse(store.id, doc.id)}
+                        className="text-left p-4 rounded-2xl bg-slate-900 border border-emerald-500/30 hover:border-emerald-400/60 transition-all"
+                        data-private-course={doc.id}
+                      >
+                        <span className="text-sm font-bold text-slate-100 truncate block">{doc.meta.title || doc.id}</span>
+                        <div className="mt-1.5 text-[11px] text-slate-500">
+                          {Number(doc.meta.modules ?? 0)} модулів · {Number(doc.meta.lessons ?? 0)} уроків
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-600 font-mono">оновлено {new Date(doc.updatedAt).toLocaleDateString('uk-UA')}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </section>
         )}
 
         {shared.length > 0 && (
@@ -616,7 +848,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           </section>
         )}
 
-        {courses.length === 0 && shared.length > 0 ? null : courses.length === 0 ? (
+        {courses.length === 0 && (shared.length > 0 || privateLists.some((l) => l.docs.length > 0)) ? null : courses.length === 0 ? (
           <div className="mt-10 text-center text-slate-500 text-sm py-16 border border-dashed border-slate-800 rounded-2xl">
             Курсів ще немає. Створіть перший вручну або через майстер.
           </div>
@@ -663,6 +895,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
 
   return (
     <div className="w-full h-full min-h-0 flex flex-col px-4 py-4 gap-3">
+      {course.privateStore && <PrivateBookBadge storeId={course.privateStore.storeId} docId={course.id} kind="course" />}
       {/* Верхня панель */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -717,7 +950,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
           {saving ? 'Збереження…' : dirty ? 'Зберегти' : savedAt ? `Збережено ${savedAt}` : 'Збережено'}
         </button>
         {access === 'manage' && (<>
-        <button
+        {!course.privateStore && (<button
           onClick={() => void publishCourse()}
           disabled={publishing || saving}
           className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -733,7 +966,7 @@ export const CourseStudioView: React.FC<{ onOpenWizard?: () => void; initialCour
             : course.status === 'published'
               ? 'Надіслати оновлення на модерацію'
               : 'Надіслати на модерацію'}
-        </button>
+        </button>)}
         <button
           onClick={() => void deleteCourse()}
           className="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-300 transition-all"

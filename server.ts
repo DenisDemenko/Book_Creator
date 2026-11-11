@@ -107,6 +107,7 @@ import { writeWithCoreText } from './server/external/photoDraftWriter';
 import { passModels } from './server/external/photoDraftAiModels';
 import { startMaintenance } from './server/maintenance';
 import { registerMyWorksRoutes } from './server/myWorksRoutes';
+import { registerPrivateStoreRoutes } from './server/privateStoreRoutes';
 import { checkAndRecordStorageUpload } from './server/mediaStorage';
 import { registerGitHistoryRoutes } from './server/gitHistoryRoutes';
 import { registerGitCommandRoutes } from './server/gitCommandRoutes';
@@ -612,6 +613,7 @@ async function startServer() {
     aiUsage: aiUsageForDraft,
   });
   registerMyWorksRoutes(app);
+  registerPrivateStoreRoutes(app);
   registerKnowledgeRoutes(app);
   registerYoutubeTranscriptRoutes(app, realtimeAccessDeps);
   registerCollaborationRoutes(app);

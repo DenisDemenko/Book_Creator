@@ -1,0 +1,54 @@
+# Локальний сервер приватного сховища Nova Studio (журнал #549).
+# Запуск:  .\scripts\start.ps1   (Windows)   або   ./scripts/start.sh   (Linux/macOS)
+# Порт публікується ЛИШЕ на 127.0.0.1: з інших пристроїв мережі сервер недоступний, а назовні нічого не відкривається —
+# сервер сам ходить до Studio (вихідний HTTPS), тому ні роутер, ні тунель не потрібні.
+name: nova-private-store
+
+services:
+  private-store:
+    build: .
+    image: nova-private-store:0.1.0
+    container_name: nova-private-store
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PRIVATE_STORE_PORT:-8787}:${PRIVATE_STORE_PORT:-8787}"
+    environment:
+      PRIVATE_STORE_PORT: "${PRIVATE_STORE_PORT:-8787}"
+      PRIVATE_STORE_PUBLIC_URL: "${PRIVATE_STORE_PUBLIC_URL:-http://127.0.0.1:8787}"
+      PRIVATE_STORE_NAME: "${PRIVATE_STORE_NAME:-Локальний сервер}"
+      PRIVATE_STORE_MASTER_KEY_FILE: /run/secrets/private_store_master_key
+      STUDIO_URL: "${STUDIO_URL:?Задайте STUDIO_URL у файлі .env (адреса Studio)}"
+      PAIRING_CODE: "${PAIRING_CODE:-}"
+    secrets:
+      - private_store_master_key
+    volumes:
+      - private_store_data:/data
+    # Жорсткий захист контейнера: без прав адміністратора, без зайвих можливостей, файлова система лише для читання.
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1.0
+    # Щоб STUDIO_URL=http://host.docker.internal:3000 працював і на Linux (для локальної перевірки зі Studio на цьому ж комп'ютері).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+secrets:
+  # Головний ключ шифрування. Файл створює scripts/init-secrets, у git його немає. Зберігайте КОПІЮ окремо (менеджер паролів):
+  # без нього зашифровані дані не відновити. Бажано тримати файл не на тому ж диску, що й том із базою.
+  private_store_master_key:
+    file: ./secrets/private_store_master_key
+
+volumes:
+  private_store_data:

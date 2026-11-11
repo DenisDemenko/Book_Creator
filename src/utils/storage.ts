@@ -19,6 +19,7 @@
  */
 
 import type { Book, BookVersionSnapshot } from '../types';
+import { deletePrivateDoc, syncPrivateDoc } from './privateStore';
 
 const DB_NAME = 'nova_studio';
 const DB_VERSION = 1;
@@ -306,6 +307,41 @@ const serverRevisions = new Map<string, number>();
  * знову. Мовчить лише УСПІХ і мережевий збій; конфлікт ревізій пишемо в
  * консоль, бо він означає, що книгу правлять ще десь.
  */
+/**
+ * Приватна книга (журнал #549): пишемо на локальний сервер автора, а не в хмару. Запити до одного запису йдуть по черзі:
+ * кожне збереження несе повну книгу, тож пізніший запис просто перекриває раніший, але ревізії не плутаються.
+ */
+const privateChains = new Map<string, Promise<unknown>>();
+/** Остання версія, яку не вдалося записати (сервер вимкнений чи відмовив): її пробуємо знову, доки не вийде. */
+const privateRetry = new Map<string, { book: Book; timer: ReturnType<typeof setTimeout> }>();
+const PRIVATE_RETRY_MS = 20_000;
+function mirrorBookToPrivateStore(book: Book): Promise<void> {
+  const storeId = book.privateStore!.storeId;
+  const key = `${storeId}:${book.id}`;
+  const run = async () => {
+    const ok = await syncPrivateDoc(storeId, {
+      id: book.id,
+      kind: 'book',
+      meta: { title: book.title || 'Без назви', status: book.status, chapters: book.chapters?.length ?? 0, updatedAt: new Date().toISOString() },
+      payload: book as unknown as Record<string, unknown>,
+    });
+    const pending = privateRetry.get(key);
+    if (pending) clearTimeout(pending.timer);
+    if (ok) {
+      privateRetry.delete(key);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const latest = privateRetry.get(key)?.book;
+      if (latest) void mirrorBookToPrivateStore(latest);
+    }, PRIVATE_RETRY_MS);
+    privateRetry.set(key, { book, timer });
+  };
+  const next = (privateChains.get(key) ?? Promise.resolve()).then(run, run);
+  privateChains.set(key, next.catch(() => undefined));
+  return next;
+}
+
 async function mirrorBookToServer(book: Book): Promise<void> {
   // The technical-document editor explicitly saves with the revision it read.
   // Its local drafts must never enter the legacy retry/adopt-revision path.
@@ -315,6 +351,8 @@ async function mirrorBookToServer(book: Book): Promise<void> {
   // Т6.2: книга з обмеженим доступом — лише частина чужої книги; серверна
   // копія належить власнику, і її не перезаписують.
   if (book.accessRestricted) return;
+  // Приватна книга лишається на локальному сервері й у хмару не дзеркалиться.
+  if (book.privateStore?.storeId) return mirrorBookToPrivateStore(book);
   try {
     const known = serverRevisions.get(id);
     const res = await fetch(`/api/books/${encodeURIComponent(id)}`, {
@@ -382,6 +420,19 @@ export async function cacheBookFromServer(book: Book, revision: number): Promise
   await saveMeta(META_ACTIVE_BOOK, book.id);
 }
 
+/**
+ * Записує книгу лише в це сховище браузера — БЕЗ дзеркала на сервер чи локальний сервер. Для відкриття приватної книги з
+ * локального сервера: вона вже там, повторний PUT був би зайвим.
+ */
+export async function cacheBookLocally(book: Book): Promise<void> {
+  if (!book?.id) throw new Error('Некоректні дані книги.');
+  await ensureBackend();
+  const lean = stripSnapshotPayloads(book);
+  if (usingFallback) lsSet(`nova_book_${book.id}`, lean);
+  else await idbPut(STORE_BOOKS, { id: book.id, data: lean, updatedAt: new Date().toISOString() } as BookRecord);
+  await saveMeta(META_ACTIVE_BOOK, book.id);
+}
+
 /** Завантажує книгу за id; без id — останню активну. */
 export async function loadBook(bookId?: string): Promise<Book | undefined> {
   await ensureBackend();
@@ -444,6 +495,10 @@ export async function listBooks(): Promise<BookSummary[]> {
  */
 export async function deleteBook(id: string): Promise<void> {
   await ensureBackend();
+  // Приватна книга: спершу видаляємо з локального сервера (інакше вона лишилась би там «осиротілою»). Недоступний сервер — помилка,
+  // а не тихе видалення лише локальної копії.
+  const existing = usingFallback ? lsGet<Book>(`nova_book_${id}`) : (await idbGet<BookRecord>(STORE_BOOKS, id))?.data;
+  if (existing?.privateStore?.storeId) await deletePrivateDoc(existing.privateStore.storeId, id);
   if (usingFallback) {
     try {
       localStorage.removeItem(`nova_book_${id}`);

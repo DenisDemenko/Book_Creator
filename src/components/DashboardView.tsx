@@ -30,7 +30,9 @@ import { CoursesBlock, InstructionsBlock, PhoneDraftsBlock, useMyWorks } from '.
 import { GrabfusionConnectModal } from './GrabfusionConnectModal';
 import { loadInstructionDraft } from '../utils/instructionDraft';
 import { apiPath } from '../utils/basePath';
-import { listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
+import { cacheBookLocally, listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
+import { getPrivateDoc, setPendingPrivateStore, usablePrivateStores, type PrivateDocSummary, type PrivateStoreInfo } from '../utils/privateStore';
+import { PrivateMaterialsSection } from './PrivateMaterialsSection';
 import {StudioBookDocuments} from './StudioBookDocuments';
 
 interface DashboardViewProps {
@@ -52,6 +54,10 @@ interface DashboardViewProps {
   onOpenLocalInstruction?: () => void;
   /** «Мої роботи»: відкрити курс у «Створити курс». */
   onOpenCourse?: (courseId: string) => void;
+  /** «Приватні матеріали»: відкрити курс із локального сервера в «Створити курс». */
+  onOpenPrivateCourse?: (storeId: string, courseId: string) => void;
+  /** «Приватні матеріали»: відкрити інструкцію з локального сервера в конструкторі інструкцій. */
+  onOpenPrivateInstruction?: (storeId: string, docId: string) => void;
 }
 
 interface ServerBookSummary {
@@ -93,6 +99,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenExpressInstruction,
   onOpenLocalInstruction,
   onOpenCourse,
+  onOpenPrivateCourse,
+  onOpenPrivateInstruction,
 }) => {
   const { t } = useLanguage();
 
@@ -274,6 +282,52 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Модалка вибору способу створення (візард / з нульової планки) і
   // підтвердження видалення книги.
   const [createChooserOpen, setCreateChooserOpen] = useState(false);
+  // Приватне збереження на локальному сервері (журнал #549): галочка з'являється лише якщо автору призначено сервер, який у мережі й
+  // досяжний із цього браузера. Хмара лишається типовим варіантом.
+  const [privateStores, setPrivateStores] = useState<PrivateStoreInfo[]>([]);
+  const [privateChecked, setPrivateChecked] = useState(false);
+  const [privateStoreId, setPrivateStoreId] = useState('');
+  const [privateRefresh, setPrivateRefresh] = useState(0);
+  useEffect(() => {
+    if (!createChooserOpen) {
+      setPrivateChecked(false);
+      setPendingPrivateStore(null);
+      return;
+    }
+    let cancelled = false;
+    void usablePrivateStores('book').then((list) => {
+      if (cancelled) return;
+      const ok = list.filter((s) => s.reachable);
+      setPrivateStores(ok);
+      setPrivateStoreId(ok[0]?.id ?? '');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [createChooserOpen]);
+  const choosePrivate = () => setPendingPrivateStore(privateChecked && privateStoreId ? privateStoreId : null);
+
+  const handleOpenPrivateMaterial = async (store: PrivateStoreInfo, doc: PrivateDocSummary) => {
+    if (doc.kind === 'course') {
+      if (!onOpenPrivateCourse) throw new Error('Приватні курси відкриваються у розділі «Створити курс».');
+      onOpenPrivateCourse(store.id, doc.id);
+      return;
+    }
+    if (doc.kind === 'instruction') {
+      if (!onOpenPrivateInstruction) throw new Error('Приватні інструкції відкриваються у розділі «Інструкція».');
+      onOpenPrivateInstruction(store.id, doc.id);
+      return;
+    }
+    const full = await getPrivateDoc(store.id, doc.id);
+    const restored = full.payload as unknown as Book;
+    if (!restored || restored.id !== doc.id || !Array.isArray(restored.chapters)) throw new Error('Локальний сервер повернув неповні дані книги. Відкриття скасовано.');
+    const local = await loadBook(doc.id);
+    if (local && !window.confirm('На цьому пристрої вже збережена копія цієї книги. Завантажити версію з локального сервера замість неї?')) return;
+    const privateBook: Book = { ...restored, privateStore: { storeId: store.id } };
+    await cacheBookLocally(privateBook);
+    await onOpenExistingBook(privateBook);
+    setPrivateRefresh((v) => v + 1);
+  };
   const [grabfusionOpen, setGrabfusionOpen] = useState(false);
   const [bookToDelete, setBookToDelete] = useState<BookSummary | null>(null);
 
@@ -395,6 +449,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {serverBooksError && <p role="alert" className="mt-3 text-xs text-amber-300">{serverBooksError}</p>}
         {openBookError && <p role="alert" className="mt-3 text-xs text-rose-300">{openBookError}</p>}
       </section>
+
+      <PrivateMaterialsSection userId={authUser?.id ?? null} onOpen={handleOpenPrivateMaterial} refreshKey={privateRefresh} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 1. Профіль + XP + Рівень */}
@@ -727,8 +783,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
             </div>
             <div className="p-5 space-y-3">
+              {privateStores.length > 0 && (
+                <label data-private-checkbox className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={privateChecked} onChange={(e) => setPrivateChecked(e.target.checked)} />
+                  <span className="text-xs text-emerald-100 min-w-0">
+                    <b>Приватне збереження на локальному сервері</b>
+                    <span className="block text-emerald-200/80 mt-0.5">
+                      Книга лежатиме лише на вашому сервері, без копії в хмарі. ШІ, PDF-експорт, медіатека, публікація й співавтори для неї недоступні. Без галочки книга зберігається в хмарі, як завжди.
+                    </span>
+                    {privateStores.length > 1 && (
+                      <select className="mt-1.5 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs" value={privateStoreId} onChange={(e) => setPrivateStoreId(e.target.value)}>
+                        {privateStores.map((st) => (
+                          <option key={st.id} value={st.id}>{st.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    {privateStores.length === 1 && <span className="block mt-1 text-emerald-300">Сервер: {privateStores[0].name}</span>}
+                  </span>
+                </label>
+              )}
               <button
                 onClick={() => {
+                  choosePrivate();
                   setCreateChooserOpen(false);
                   onOpenCreateWizard();
                 }}
@@ -742,6 +818,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
               <button
                 onClick={() => {
+                  choosePrivate();
                   setCreateChooserOpen(false);
                   onCreateBlankBook();
                 }}
@@ -759,7 +836,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   setGrabfusionOpen(true);
                 }}
                 data-create-book-grabfusion
-                className="w-full text-left p-4 rounded-xl bg-slate-800/60 border border-slate-700 hover:border-violet-500/40 transition-colors"
+                disabled={privateChecked}
+                title={privateChecked ? 'Розпізнавання з телефона потребує хмари, тому для приватного збереження воно недоступне.' : undefined}
+                className="w-full text-left p-4 rounded-xl bg-slate-800/60 border border-slate-700 hover:border-violet-500/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-2 text-violet-300 font-bold text-sm">
                   <Smartphone className="w-4 h-4" />

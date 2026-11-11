@@ -28,6 +28,7 @@
 import type { Express, Request, Response } from 'express';
 import { requirePermission } from '../auth';
 import { getBook } from '../bookStore';
+import { listStoresForUser } from '../privateStore/store';
 import { readAsset, saveAsset } from '../media/mediaLibraryStore';
 import { decodeScanImage, requireExternalToken, type RecognizeParams } from './externalApiRoutes';
 import { cleanOcrText } from './scanOcrPrompt';
@@ -566,6 +567,20 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
 
   app.get(`${BASE}/limits`, auth, (_req, res) => {
     res.json({ contractVersion: PHOTO_DRAFT_CONTRACT_VERSION, limits: PHOTO_DRAFT_LIMITS });
+  });
+
+  // Статус локальних серверів приватного сховища автора (журнал #549): GrabFusion показує, де лежать приватні матеріали Studio.
+  // Лише читання й лише стан (назва, «в мережі», види): адреси сервера телефон не отримує, а вмісту Studio про приватні матеріали не має.
+  // Реєструється до `/:draftId`, як і `/limits`; це не частина контракту чернеток (схема й фікстури його не описують).
+  app.get(`${BASE}/private-stores`, auth, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      res.json({
+        stores: listStoresForUser(owner(req)).map((st) => ({ id: st.id, name: st.name, online: st.online, lastSeen: st.lastSeen, kinds: st.kinds })),
+      });
+    } catch (err) {
+      sendChangeError(res, err, 'private-stores');
+    }
   });
 
   app.get(BASE, auth, async (req, res) => {

@@ -33,3 +33,8 @@ id_ed25519*
 id_rsa*
 *.pem
 *.ppk
+
+# Локальний сервер приватного сховища: ключі, дані й налаштування не потрапляють у git
+services/private-store/secrets/
+services/private-store/data/
+services/private-store/.env

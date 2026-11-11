@@ -280,3 +280,34 @@ def test_delete_draft_route_discards_it(paired):
     d = paired.post("/api/drafts", json={"kind": "course", "title": "Для видалення"}).json()["draft"]
     r = paired.delete(f"/api/drafts/{d['draftId']}")
     assert r.status_code == 200 and r.json()["draft"]["status"] == "discarded"
+
+
+def test_private_stores_status_is_proxied_without_endpoint(paired):
+    """Журнал #549: телефон бачить лише стан локального сервера автора — назву й «в мережі», без адреси."""
+    r = paired.get("/api/private-stores")
+    assert r.status_code == 200
+    stores = r.json()["stores"]
+    assert stores and stores[0]["name"] == "Домашній Docker-сервер" and stores[0]["online"] is True
+    assert "endpoint" not in stores[0] and "nst_" not in r.text
+
+
+def test_private_stores_requires_pairing(web):
+    r = web.get("/api/private-stores")
+    assert r.status_code == 401 and r.json()["kind"] == "unauthenticated"
+
+
+def test_private_stores_missing_route_on_old_studio_is_empty(paired, monkeypatch):
+    """Студія без маршруту (старша версія) відповідає 404 — застосунок просто не має що показувати."""
+    from grabfusion.errors import StudioError
+    from grabfusion.studio_client import StudioClient
+
+    real = StudioClient.raw
+
+    def fake(self, method, path, **kw):
+        if path.endswith("/private-stores"):
+            raise StudioError("bad_input", "Маршруту немає.", 404)
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(StudioClient, "raw", fake)
+    r = paired.get("/api/private-stores")
+    assert r.status_code == 200 and r.json() == {"stores": []}

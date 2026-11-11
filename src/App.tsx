@@ -9,6 +9,8 @@ import { parseCreativeBiblePath, parseCreativeAccessPath, parseCreativeWorkspace
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
 import { buildStarterBook, withoutDemoContent } from './utils/starterBook';
+import { setActivePrivateMaterial, setPendingPrivateOpen, takePendingPrivateStore } from './utils/privateStore';
+import { PrivateBookBadge } from './components/PrivateBookBadge';
 import { loadActiveOntology } from './utils/ontologyClient';
 import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, HeroArcState } from './types';
 import { HeaderNav } from './components/HeaderNav';
@@ -187,6 +189,9 @@ const INITIAL_LOG_ENTRIES: AuditLogEntry[] = [
 ];
 
 const WardrobeBookEntry=React.lazy(()=>import('./components/pdf/WardrobeBookEntry').then(m=>({default:m.WardrobeBookEntry})));
+/** Розділи, де вміст відкритої книги не показується й не надсилається: приватний охоронець у них не потрібен (журнал #549). */
+const TABS_WITHOUT_OPEN_BOOK: ReadonlySet<string> = new Set(['dashboard', 'my-space', 'courses', 'course-studio', 'express', 'subscription', 'api-keys', 'changelog', 'admin']);
+
 export default function App(){
   const initialEntry=useRef(parseAppPath(window.location.pathname,API_BASE)),route=initialEntry.current;
   if(route?.tab==='pdf-editor'&&/^(?:WD|BD)-[a-f0-9-]{36}$/i.test(route.projectId))return <React.Suspense fallback={<p>Завантажуємо документ…</p>}><WardrobeBookEntry documentId={route.projectId}/></React.Suspense>;
@@ -236,6 +241,8 @@ function StudioApp() {
   /** Т6.3: спільні курси (за наданим доступом) — відкривають «Створити курс» і без ролі експерта. */
   const [sharedCourseIds, setSharedCourseIds] = useState<string[]>([]);
   const [initialCourseId, setInitialCourseId] = useState<string | null>(null);
+  // Приватний курс із дашборда (журнал #549): сервер і курс, які студія курсів відкриває один раз.
+  const [initialPrivateCourse, setInitialPrivateCourse] = useState<{ storeId: string; id: string } | null>(null);
   const extraTabs = useMemo<NavigationTab[]>(() => (sharedCourseIds.length ? ['course-studio'] : []), [sharedCourseIds]);
   // Т6.4: простір ролі в цій книзі (учасник чужого проєкту — акцент у меню; власнику й адміну меню повне).
   const [roleSpace, setRoleSpace] = useState<{ projectId: string; workspace: string | null; participantOnly: boolean } | null>(null);
@@ -361,6 +368,7 @@ function StudioApp() {
     book,
     currentRole,
     currentTab,
+    disabled: !!book.privateStore,
     activeChapterId,
     activeSectionId,
     onRemoteBookUpdate: useCallback((remoteBook: Book, remoteLogEntry?: AuditLogEntry, opts?: { authoritative?: boolean }) => {
@@ -952,6 +960,15 @@ function StudioApp() {
    * у 'error', а hasUnsavedChanges НЕ скидається — інакше інтерфейс
    * рапортував би про збереження, якого не було.
    */
+  // Приватна книга (журнал #549): поки вона відкрита, запити зі вмістом до Studio блокує охоронець (utils/privateStore.ts).
+  // Розділи, що вмісту відкритої книги не показують і не надсилають (дашборд, курси, інструкції…), охоронця не вмикають: інакше
+  // «поточна» приватна книга забороняла б створювати хмарні курси чи інструкції в сусідніх розділах.
+  useEffect(() => {
+    const guarded = Boolean(book.privateStore) && !TABS_WITHOUT_OPEN_BOOK.has(currentTab);
+    setActivePrivateMaterial('book', guarded ? book.id : null);
+    return () => setActivePrivateMaterial('book', null);
+  }, [book.id, book.privateStore?.storeId, currentTab]);
+
   const persistBook = useCallback(async (bookToSave: Book): Promise<boolean> => {
     setSaveState('saving');
     try {
@@ -1406,6 +1423,8 @@ function StudioApp() {
       },
       { title, author }
     );
+    const pendingPrivateStore = takePendingPrivateStore();
+    if (pendingPrivateStore) newBook.privateStore = { storeId: pendingPrivateStore };
 
     setBook(newBook);
     setActiveChapterId(newBook.chapters[0]?.id || '');
@@ -1482,7 +1501,10 @@ function StudioApp() {
     // «Нова книга» і стартова книга зареєстрованого автора були однією й тією
     // самою книгою: без демо-персонажів, демо-фото в медіатеці та підписів
     // обкладинки з демо-книги.
-    const newBook = buildStarterBook({ bookId, title, author, role: currentRole, now });
+    const builtBook = buildStarterBook({ bookId, title, author, role: currentRole, now });
+    // Галочка «Приватне збереження на локальному сервері» з вікна вибору способу створення (журнал #549).
+    const privateStoreId = takePendingPrivateStore();
+    const newBook: Book = privateStoreId ? { ...builtBook, privateStore: { storeId: privateStoreId } } : builtBook;
 
     setBook(newBook);
     setActiveChapterId(newBook.chapters[0]?.id || '');
@@ -1540,6 +1562,20 @@ function StudioApp() {
 
   const handleOpenCourseFromDashboard = (courseId: string) => {
     setInitialCourseId(courseId);
+    handleSelectTab('course-studio');
+  };
+
+  /** Дашборд → приватна інструкція з локального сервера: конструктор забирає адресу при монтуванні й відкриває її. */
+  const handleOpenPrivateInstructionFromDashboard = (storeId: string, docId: string) => {
+    setPendingPrivateOpen({ kind: 'instruction', storeId, id: docId });
+    setEntryIdea(null);
+    setEntryTrack('instruction');
+    handleSelectTab('express');
+  };
+
+  const handleOpenPrivateCourseFromDashboard = (storeId: string, courseId: string) => {
+    setInitialCourseId(null);
+    setInitialPrivateCourse({ storeId, id: courseId });
     handleSelectTab('course-studio');
   };
 
@@ -2123,6 +2159,8 @@ function StudioApp() {
         unreadChatCount={chatMessages.length}
       />
 
+      {book.privateStore && !TABS_WITHOUT_OPEN_BOOK.has(currentTab) && <PrivateBookBadge storeId={book.privateStore.storeId} docId={book.id} />}
+
       {/* Стійкий банер помилки сховища — не зникає сам, бо це втрата даних */}
       {storageError && (
         <div
@@ -2319,7 +2357,7 @@ function StudioApp() {
         {/* Створити курс: самостійні навчальні курси (експерт/викладач/адмін) */}
         {currentTab === 'course-studio' && (
           <div className="flex-1 overflow-y-auto">
-            <CourseStudioView onOpenWizard={() => handleSelectTab('express')} initialCourseId={initialCourseId} lang={lang === 'en' ? 'en' : 'uk'} />
+            <CourseStudioView onOpenWizard={() => handleSelectTab('express')} initialCourseId={initialCourseId} initialPrivateCourse={initialPrivateCourse} onInitialPrivateConsumed={() => setInitialPrivateCourse(null)} lang={lang === 'en' ? 'en' : 'uk'} />
           </div>
         )}
 
@@ -2394,6 +2432,8 @@ function StudioApp() {
             onOpenExpressInstruction={handleOpenExpressInstruction}
             onOpenLocalInstruction={handleOpenLocalInstruction}
             onOpenCourse={handleOpenCourseFromDashboard}
+            onOpenPrivateCourse={handleOpenPrivateCourseFromDashboard}
+            onOpenPrivateInstruction={handleOpenPrivateInstructionFromDashboard}
           />
         )}
 

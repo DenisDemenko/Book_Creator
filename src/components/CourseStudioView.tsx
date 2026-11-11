@@ -7,6 +7,9 @@ import { CourseStudioView as LegacyCourseStudioView } from './CourseStudioLegacy
 interface CourseStudioViewProps {
   onOpenWizard?: () => void;
   initialCourseId?: string | null;
+  /** Приватний курс із дашборда (журнал #549): відкривається в редакторі курсів, у «Дизайні» приватних курсів немає. */
+  initialPrivateCourse?: { storeId: string; id: string } | null;
+  onInitialPrivateConsumed?: () => void;
   lang?: 'uk' | 'en';
 }
 
@@ -42,6 +45,8 @@ async function api<T>(path: string): Promise<T> {
 export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
   onOpenWizard,
   initialCourseId = null,
+  initialPrivateCourse = null,
+  onInitialPrivateConsumed,
   lang = 'uk',
 }) => {
   const [mode, setMode] = useState<WorkspaceMode>('course');
@@ -155,7 +160,7 @@ export const CourseStudioView: React.FC<CourseStudioViewProps> = ({
         className={`min-h-0 flex-1 ${mode === 'course' ? '' : 'hidden'}`}
         data-course-content-workspace
       >
-        <LegacyCourseStudioView onOpenWizard={onOpenWizard} initialCourseId={initialCourseId} lang={lang} />
+        <LegacyCourseStudioView onOpenWizard={onOpenWizard} initialCourseId={initialCourseId} initialPrivateCourse={initialPrivateCourse} onInitialPrivateConsumed={onInitialPrivateConsumed} lang={lang} />
       </div>
 
       {mode === 'design' ? (

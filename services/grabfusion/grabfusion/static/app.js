@@ -9,6 +9,7 @@ const state = {
   online: navigator.onLine, urls: new Map(), editing: false, needsRender: false,
   studioOrigin: '', hint: '', writing: false, blockers: null, target: null, photosOpen: true,
   ai: null, // вибір моделі ШІ й бали за прохід (контракт 1.4.0), див. loadAi
+  privateStores: [], // локальні сервери приватного сховища автора (лише стан, журнал #549)
 };
 let pollTimer = null, flushing = false, flushTimer = null;
 
@@ -228,6 +229,16 @@ function choiceCard(id, icon, title, text, onclick) {
     h('span', { class: 'choice-body' }, h('strong', { text: title }), h('span', { class: 'muted', text })));
 }
 
+/* Стан локальних серверів автора: де Studio зберігає його приватні матеріали. Матеріали з телефона туди не йдуть, і про це сказано прямо. */
+function privateStoresNote() {
+  const stores = state.privateStores || [];
+  if (!stores.length) return null;
+  return h('div', { class: 'card', id: 'private-stores-note' },
+    h('strong', { text: 'Ваш локальний сервер у Studio' }),
+    ...stores.map((st) => h('p', { class: 'muted', 'data-private-store': st.id, text: `${st.name}: ${st.online ? 'в мережі' : 'зараз не на звʼязку'}` })),
+    h('p', { class: 'muted', text: 'Чернетки з телефона зберігаються в хмарі Studio: розпізнавання знімків потребує хмари. На локальний сервер потрапляють лише матеріали, створені в самій Studio з галочкою «Приватне збереження».' }));
+}
+
 function viewChoose() {
   return h('div', { id: 'choose' },
     h('h2', { text: 'Що створюємо?' }),
@@ -236,6 +247,7 @@ function viewChoose() {
     choiceCard('choose-course', '🎓', 'Курс (тренінг)', 'Навчальний курс за фото майстер-класу або за сканом документа з друкованим чи рукописним текстом. Результат — чернетка в розділі «Курси» Studio: назва, опис, результати, модулі й уроки.', () => go('choose-course')),
     h('p', { class: 'muted' }, 'Потрібна книга? ',
       h('button', { class: 'link', id: 'choose-manuscript', type: 'button', text: 'Набір книги зі сторінок рукопису', onclick: () => startNew({ kind: 'manuscript' }) })),
+    privateStoresNote(),
     h('p', null, h('button', { class: 'link', id: 'choose-to-list', type: 'button', text: state.drafts.length ? `Мої чернетки (${state.drafts.length})` : 'Мої чернетки', onclick: () => go('list') })));
 }
 
@@ -1034,6 +1046,7 @@ async function start(opts) {
   try { state.limits = (await api('GET', '/limits')).limits; } catch (e) { /* дефолти */ }
   // Посилання на Студію ведемо на справжню адресу (studioPublicUrl, напр. https://www.fusionlab.in.ua/studio); без неї — на походження API.
   try { const cfg = await api('GET', '/config'); state.studioOrigin = (cfg.studioPublicUrl || new URL(cfg.studioUrl).origin).replace(/\/$/, ''); } catch (e) { /* без посилання */ }
+  try { state.privateStores = (await api('GET', '/private-stores')).stores || []; } catch (e) { state.privateStores = []; }
   state.queue = await qAll();
   document.getElementById('btn-logout').hidden = false;
   await openList();
