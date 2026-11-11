@@ -183,7 +183,19 @@ async function sendViaBrevo(input: SendMailInput): Promise<{ ok: boolean; error?
       }),
       signal: AbortSignal.timeout(BREVO_TIMEOUT_MS),
     });
-    if (resp.ok) return { ok: true };
+    if (resp.ok) {
+      // «Прийнято» ще не «доставлено»: далі Brevo перевіряє відправника й домен. Номер листа лишаємо в логу, щоб його
+      // статус можна було знайти в Brevo (Transactional → Logs), а в адресі — лише домен (скринька в логи не йде).
+      let id = '';
+      try {
+        const body = (await resp.json()) as { messageId?: unknown };
+        if (typeof body.messageId === 'string') id = body.messageId.slice(0, 120);
+      } catch {
+        /* тіло не JSON — номера не буде */
+      }
+      console.log(`[mail] Brevo API: лист прийнято${id ? ` (messageId ${id})` : ''}, одержувач @${input.to.split('@').pop()}`);
+      return { ok: true };
+    }
     let detail = '';
     try {
       const body = (await resp.json()) as { message?: unknown };

@@ -174,7 +174,11 @@ console.log('\nУспішна відправка через API');
 {
   mode = 'ok';
   apiCalls.length = 0;
+  const logs: string[] = [];
+  const logWas = console.log;
+  console.log = (...a: unknown[]) => void logs.push(a.join(' '));
   const r = await sendMail(letter);
+  console.log = logWas;
   const call = apiCalls[0];
   t('ok, один запит до API', r.ok === true && apiCalls.length === 1, JSON.stringify(r));
   t('POST на /v3/smtp/email', call?.method === 'POST' && call?.url === '/v3/smtp/email', `${call?.method} ${call?.url}`);
@@ -183,6 +187,9 @@ console.log('\nУспішна відправка через API');
   t('відправник розібрано на поля', JSON.stringify(call?.body?.sender) === JSON.stringify({ name: 'Fusion Lab Studio', email: 'noreply@fusionlab.in.ua' }));
   t('отримувач, тема, html, текст', JSON.stringify(call?.body?.to) === JSON.stringify([{ email: 'author@test.ua' }]) && call?.body?.subject === letter.subject && call?.body?.htmlContent === letter.html && call?.body?.textContent === letter.text);
   t('SMTP не чіпали (листів 0)', inbox.length === 0);
+  const okLog = logs.find((l) => l.includes('Brevo API: лист прийнято')) || '';
+  t('успіх лишає в логу номер листа й домен одержувача', okLog.includes('messageId <test@brevo>') && okLog.includes('@test.ua'), okLog);
+  t('у логу немає ні ключа, ні повної адреси', !logs.some((l) => l.includes(KEY) || l.includes('author@test.ua')));
 }
 
 // ---------------------------------------------------------------------------
