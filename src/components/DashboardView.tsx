@@ -33,6 +33,7 @@ import { apiPath } from '../utils/basePath';
 import { cacheBookLocally, listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
 import { getPrivateDoc, setPendingPrivateStore, usablePrivateStores, type PrivateDocSummary, type PrivateStoreInfo } from '../utils/privateStore';
 import { PrivateMaterialsSection } from './PrivateMaterialsSection';
+import { PrivateScanReview } from './PrivateScanReview';
 import {StudioBookDocuments} from './StudioBookDocuments';
 
 interface DashboardViewProps {
@@ -288,6 +289,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [privateChecked, setPrivateChecked] = useState(false);
   const [privateStoreId, setPrivateStoreId] = useState('');
   const [privateRefresh, setPrivateRefresh] = useState(0);
+  // «Вхідні з телефона» (журнал #550): чернетка зі знімків, що лежить на локальному сервері, відкривається поверх дашборда.
+  const [scanReview, setScanReview] = useState<{ store: PrivateStoreInfo; docId: string } | null>(null);
   useEffect(() => {
     if (!createChooserOpen) {
       setPrivateChecked(false);
@@ -308,6 +311,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const choosePrivate = () => setPendingPrivateStore(privateChecked && privateStoreId ? privateStoreId : null);
 
   const handleOpenPrivateMaterial = async (store: PrivateStoreInfo, doc: PrivateDocSummary) => {
+    if (doc.kind === 'scan') {
+      setScanReview({ store, docId: doc.id });
+      return;
+    }
     if (doc.kind === 'course') {
       if (!onOpenPrivateCourse) throw new Error('Приватні курси відкриваються у розділі «Створити курс».');
       onOpenPrivateCourse(store.id, doc.id);
@@ -451,6 +458,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </section>
 
       <PrivateMaterialsSection userId={authUser?.id ?? null} onOpen={handleOpenPrivateMaterial} refreshKey={privateRefresh} />
+      {scanReview && (
+        <PrivateScanReview
+          store={scanReview.store}
+          docId={scanReview.docId}
+          onClose={() => {
+            setScanReview(null);
+            setPrivateRefresh((v) => v + 1);
+          }}
+          onCreated={async (kind, id) => {
+            const store = scanReview.store;
+            setScanReview(null);
+            setPrivateRefresh((v) => v + 1);
+            await handleOpenPrivateMaterial(store, { id, kind, revision: 1, createdAt: '', updatedAt: '', size: 0, meta: {} });
+          }}
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 1. Профіль + XP + Рівень */}

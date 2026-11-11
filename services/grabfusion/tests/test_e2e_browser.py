@@ -116,10 +116,10 @@ def test_full_flow(stack, browser_page, tmp_path):
     page.fill("#code", "GF-OK")
     page.click("button[type=submit]")
     page.wait_for_selector("#choose")  # після підключення — спершу «що створюємо?»
-    # Журнал #549: телефон показує стан локального сервера автора й прямо каже, що чернетки з телефона йдуть у хмару.
+    # Журнал #549/#550: телефон показує стан локального сервера автора й каже, що є два шляхи (хмара чи «На моєму сервері»).
     page.wait_for_selector("#private-stores-note")
     note = page.inner_text("#private-stores-note")
-    assert "Домашній Docker-сервер" in note and "в мережі" in note and "хмарі Studio" in note
+    assert "Домашній Docker-сервер" in note and "в мережі" in note and "На моєму сервері" in note
     assert "127.0.0.1" not in note
     page.click("#choose-to-list")
     page.wait_for_selector("#btn-new")
@@ -395,4 +395,53 @@ def test_stage6_manuscript_pages(stack3, browser_page, tmp_path):
     assert page.locator("#places li").count() == 3
     assert page.get_attribute("#open-studio", "href").endswith("/")
     _shot(page, "s6-3-submitted")
+    assert not errors, errors
+
+
+def test_private_path_seals_photo_on_the_phone(stack, browser_page, tmp_path):
+    """Журнал #550: вибір «на моєму сервері» → знімок запечатується в браузері → до Studio доходить лише шифротекст."""
+    url, mock = stack
+    ctx, page = browser_page
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    mock.state.inbox.clear()
+    page.goto(url)
+    page.wait_for_selector("#code")
+    page.fill("#code", "GF-OK")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#choose")
+    assert "На моєму сервері" in page.inner_text("#private-stores-note") or "два шляхи" in page.inner_text("#private-stores-note")
+    page.click("#choose-instruction")
+    page.wait_for_selector("#create-form")
+    # курс із фото без тексту приватного шляху не має, а для інструкції вибір «Де обробити» є
+    page.wait_for_selector("#f-where")
+    assert "На моєму сервері" in page.inner_text("#f-where")
+    page.select_option("#f-where", "private")
+    assert page.is_visible("#where-hint")
+    page.fill("#f-title", "Секретна полиця")
+    page.fill("#f-model", "NRD-4")
+    page.click("button[type=submit]")
+    page.wait_for_selector("#private-draft")
+    assert "Знімки шифруються на цьому телефоні" in page.inner_text("#private-note")
+
+    photo = _jpeg(tmp_path / "secret.jpg", (1600, 1100))
+    page.set_input_files("#pfile-gal", [photo])
+    page.wait_for_selector("[data-private-state='sent'], [data-private-state='delivered']", timeout=15000)
+    _wait(lambda: len(mock.state.inbox) == 1)
+    (store_id, item_id), item = next(iter(mock.state.inbox.items()))
+    sealed = item["bytes"]
+    assert store_id == "pstore_mock0001" and len(item_id) == 22
+    assert sealed[:4] == b"NSE1" and len(sealed) > 65 + 16 + 12 + 16 + 1000
+    # у конверті немає ні заголовка JPEG, ні відкритих текстових полів
+    assert bytes([0xFF, 0xD8, 0xFF]) not in sealed[:80] and b"JFIF" not in sealed and "Секретна".encode() not in sealed and b"NRD-4" not in sealed and b"pd_" not in sealed
+
+    # Studio (мок) каже «забрано» — телефон показує це і прибирає знімок із памʼяті
+    mock.state.inbox[(store_id, item_id)]["state"] = "delivered"
+    page.wait_for_selector("[data-private-state='delivered']", timeout=20000)
+    assert "забрано сервером" in page.inner_text("#pframes")
+
+    # чернетка лишається у списку приватних
+    page.click("#private-done")
+    page.wait_for_selector("#private-list")
+    assert "Секретна полиця" in page.inner_text("#private-list")
     assert not errors, errors

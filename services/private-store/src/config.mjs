@@ -30,6 +30,24 @@ export function normalizeStudioUrl(raw) {
   return url.toString().replace(/\/$/, '');
 }
 
+/** Адреса Ollama: ЛИШЕ цей комп'ютер чи локальна мережа — розпізнаний текст не має виходити в інтернет (журнал #550). */
+export function normalizeLocalUrl(raw, label = 'OLLAMA_URL') {
+  if (!raw) return '';
+  let url;
+  try {
+    url = new URL(String(raw));
+  } catch {
+    throw new Error(`${label} має бути адресою, напр. http://host.docker.internal:11434`);
+  }
+  const host = url.hostname.toLowerCase();
+  const privateIpv4 = /^(10\.\d+\.\d+\.\d+|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+)$/.test(host);
+  const local = LOCAL_HOSTS.has(host) || privateIpv4 || host.endsWith('.local') || host === 'ollama';
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !local) {
+    throw new Error(`${label} має вказувати на цей комп'ютер чи локальну мережу (localhost, host.docker.internal, 192.168.x.x…): розпізнавання не повинно виходити в інтернет.`);
+  }
+  return url.origin;
+}
+
 export function loadConfig(env = process.env) {
   const port = toInt(env.PRIVATE_STORE_PORT, 8787, 1, 65535);
   const publicUrl = String(env.PRIVATE_STORE_PUBLIC_URL || `http://127.0.0.1:${port}`).replace(/\/$/, '');
@@ -62,6 +80,15 @@ export function loadConfig(env = process.env) {
     maxBodyBytes: toInt(env.PRIVATE_STORE_MAX_BODY_MB, 64, 1, 512) * 1024 * 1024,
     heartbeatMs: toInt(env.PRIVATE_STORE_HEARTBEAT_SEC, 60, 10, 3600) * 1000,
     rateLimitPerMinute: toInt(env.PRIVATE_STORE_RATE_LIMIT, 1200, 10, 100000),
-    version: '0.1.0',
+    // Розпізнавання знімків із телефона (журнал #550)
+    tessdataDir: env.PRIVATE_STORE_TESSDATA_DIR || '',
+    tessdataGzip: String(env.PRIVATE_STORE_TESSDATA_GZIP ?? 'true').toLowerCase() !== 'false',
+    ollamaUrl: normalizeLocalUrl(env.OLLAMA_URL),
+    ollamaModel: String(env.OLLAMA_MODEL || 'qwen2.5vl:7b').slice(0, 100),
+    ollamaTimeoutMs: toInt(env.OLLAMA_TIMEOUT_SEC, 600, 10, 3600) * 1000,
+    // 0 вимикає опитування Studio (тести викликають pollOnce самі)
+    inboxPollMs: String(env.PRIVATE_STORE_INBOX_POLL_SEC) === '0' ? 0 : toInt(env.PRIVATE_STORE_INBOX_POLL_SEC, 15, 2, 600) * 1000,
+    autoOcr: String(env.PRIVATE_STORE_AUTO_OCR ?? 'true').toLowerCase() !== 'false',
+    version: '0.2.0',
   };
 }

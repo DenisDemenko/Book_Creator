@@ -15,6 +15,9 @@ import { loadConfig } from './config.mjs';
 import { deriveDataKey, generateIdentity, loadMasterKey, sha256Hex } from './crypto.mjs';
 import { Db } from './db.mjs';
 import { PrivateStoreApp } from './app.mjs';
+import { generateInboxKey } from './envelope.mjs';
+import { ScanService } from './inbox.mjs';
+import { OcrEngines } from './ocr.mjs';
 import { pairWithStudio, sendHeartbeat } from './studioLink.mjs';
 
 /**
@@ -30,7 +33,13 @@ export async function createPrivateStore({ env = process.env, fetchImpl = fetch,
     identity = generateIdentity();
     db.setState('identity', identity);
   }
-  const state = { link: db.getState('link'), identity };
+  // Ключ «скриньки» для знімків із телефона (журнал #550): публічний йде у Studio в пульсі, приватний не покидає цей сервер.
+  let inbox = db.getState('inbox');
+  if (!inbox) {
+    inbox = generateInboxKey();
+    db.setState('inbox', inbox);
+  }
+  const state = { link: db.getState('link'), identity, inbox };
 
   const pair = async () => {
     // Новий код (відмінний від останнього використаного) дозволяє перепідключити сервер, не втрачаючи даних.
@@ -56,7 +65,7 @@ export async function createPrivateStore({ env = process.env, fetchImpl = fetch,
       const next = await sendHeartbeat({
         link: state.link,
         identity,
-        info: { version: config.version, docs: totals.docs, assets: totals.assets, bytes: totals.bytes, endpoint: config.publicUrl, uptimeSec: Math.round(process.uptime()) },
+        info: { version: config.version, docs: totals.docs, assets: totals.assets, bytes: totals.bytes, endpoint: config.publicUrl, uptimeSec: Math.round(process.uptime()), inboxKey: inbox.publicKey },
         fetchImpl,
       });
       if (JSON.stringify(next) !== JSON.stringify(state.link)) {
@@ -69,7 +78,9 @@ export async function createPrivateStore({ env = process.env, fetchImpl = fetch,
     }
   };
 
-  const app = new PrivateStoreApp({ config, db, state });
+  const ocr = new OcrEngines({ config, fetchImpl, log });
+  const scans = new ScanService({ config, db, state, ocr, fetchImpl, log });
+  const app = new PrivateStoreApp({ config, db, state, scans });
   const server = http.createServer(app.handle);
   server.headersTimeout = 15_000;
   server.requestTimeout = 120_000;
@@ -80,6 +91,8 @@ export async function createPrivateStore({ env = process.env, fetchImpl = fetch,
     db,
     state,
     app,
+    scans,
+    ocr,
     server,
     async start() {
       await pair();
@@ -90,12 +103,14 @@ export async function createPrivateStore({ env = process.env, fetchImpl = fetch,
       void beat();
       timer = setInterval(() => void beat(), config.heartbeatMs);
       timer.unref();
+      scans.start();
       log.log(`[private-store] слухає ${config.host}:${config.port}; ${state.link ? `підключено (${state.link.status})` : 'НЕ підключено до Studio — задайте STUDIO_URL і PAIRING_CODE'}`);
       return server.address();
     },
     beat,
     async stop() {
       if (timer) clearInterval(timer);
+      await scans.stop();
       await new Promise((resolve) => server.close(resolve));
       server.closeAllConnections?.();
       db.close();

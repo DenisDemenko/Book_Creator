@@ -17,7 +17,7 @@ import {
  * Нічого не копіюється в хмару, тож «резервну копію» тримає сам автор (том Docker і файл ключа).
  */
 
-const KIND_TITLE: Record<PrivateKind, string> = { book: 'Книга', course: 'Курс', instruction: 'Інструкція' };
+const KIND_TITLE: Record<PrivateKind, string> = { book: 'Книга', course: 'Курс', instruction: 'Інструкція', scan: 'З телефона' };
 
 interface StoreState {
   store: PrivateStoreInfo;
@@ -127,7 +127,8 @@ export function PrivateMaterialsSection({
                 <button type="button" onClick={() => void open(store, doc)} disabled={busy !== null} className="min-w-0 text-left flex-1 disabled:opacity-50">
                   <span className="block font-semibold text-sm text-slate-100 truncate">{doc.meta.title || doc.id}</span>
                   <span className="block text-xs text-slate-500 truncate">
-                    {KIND_TITLE[doc.kind]} · {new Date(doc.updatedAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })}
+                    {KIND_TITLE[doc.kind]}
+                    {doc.kind === 'scan' ? ` · ${Number(doc.meta.pages ?? 0)} стор., розпізнано ${Number(doc.meta.recognized ?? 0)}` : ''} · {new Date(doc.updatedAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })}
                   </span>
                 </button>
                 {busy === doc.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4 shrink-0 text-emerald-300" />}

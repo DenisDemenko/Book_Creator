@@ -14,7 +14,7 @@ import { publicKeyFromSpki } from './crypto.mjs';
 export const TOKEN_PREFIX = 'nova-private-store-v1\n';
 export const MAX_TOKEN_LIFETIME_SEC = 15 * 60;
 const SKEW_SEC = 120;
-export const KINDS = ['book', 'course', 'instruction'];
+export const KINDS = ['book', 'course', 'instruction', 'scan'];
 
 /**
  * @param {string} token

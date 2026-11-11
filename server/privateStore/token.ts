@@ -10,8 +10,11 @@ import { createPrivateKey, randomUUID, sign } from 'node:crypto';
 
 export const TOKEN_PREFIX = 'nova-private-store-v1\n';
 export const HEARTBEAT_PREFIX = 'nova-private-store-heartbeat-v1\n';
+/** Підпис запитів сервера до черги конвертів (журнал #550): префікс, id сервера, метод, шлях, час, sha256(тіло). */
+export const REQUEST_PREFIX = 'nova-private-store-request-v1\n';
 export const TOKEN_TTL_SEC = 10 * 60;
-export const PRIVATE_KINDS = ['book', 'course', 'instruction'] as const;
+/** `scan` — вхідні з телефона: знімки, що надіслано на сервер запечатаними, з розпізнаним текстом (журнал #550). */
+export const PRIVATE_KINDS = ['book', 'course', 'instruction', 'scan'] as const;
 export type PrivateKind = (typeof PRIVATE_KINDS)[number];
 
 export interface TokenRequest {

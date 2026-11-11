@@ -311,3 +311,41 @@ def test_private_stores_missing_route_on_old_studio_is_empty(paired, monkeypatch
     monkeypatch.setattr(StudioClient, "raw", fake)
     r = paired.get("/api/private-stores")
     assert r.status_code == 200 and r.json() == {"stores": []}
+
+
+# --- приватний шлях «на мій сервер» (журнал #550): сервіс лише передає шифротекст ---
+ITEM = "A1b2C3d4E5f6G7h8I9j0Kk"
+
+
+def test_private_stores_reports_inbox_key(paired):
+    stores = paired.get("/api/private-stores").json()["stores"]
+    assert stores[0]["inbox"] is True and len(stores[0]["inboxKey"]) >= 86 and "privateKey" not in paired.get("/api/private-stores").text
+
+
+def test_private_inbox_forwards_ciphertext_and_reports_state(paired):
+    sealed = b"NSE1" + bytes(range(256)) * 4
+    r = paired.put(f"/api/private-inbox/pstore_mock0001/{ITEM}", content=sealed, headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 201 and r.json()["state"] == "queued"
+    again = paired.put(f"/api/private-inbox/pstore_mock0001/{ITEM}", content=sealed, headers={"Content-Type": "application/octet-stream"})
+    assert again.status_code == 201 and again.json()["duplicate"] is True
+    assert paired.get(f"/api/private-inbox/pstore_mock0001/{ITEM}").json()["state"] == "queued"
+    assert paired.get("/api/private-inbox/pstore_mock0001/Zz9Yy8Xx7Ww6Vv5Uu4Tt3S").json()["state"] == "unknown"
+
+
+def test_private_inbox_rejects_open_images_and_bad_ids(paired):
+    # відкритий знімок мок (як і справжня Studio) не приймає: у чергу йдуть лише запечатані конверти
+    r = paired.put(f"/api/private-inbox/pstore_mock0001/{ITEM}x", content=bytes([0xFF, 0xD8, 0xFF, 0xE0]) + b" plain jpeg", headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 400
+    assert paired.put("/api/private-inbox/bad/short", content=b"NSE1xx", headers={"Content-Type": "application/octet-stream"}).status_code == 400
+    assert paired.put("/api/private-inbox/pstore_mock0001/../../drafts", content=b"NSE1xx").status_code in (404, 405, 400)
+
+
+def test_private_inbox_is_not_logged_or_stored_by_the_service(paired, caplog):
+    sealed = b"NSE1" + b"SECRET-NOTE-NOT-IN-LOGS" * 20
+    paired.put("/api/private-inbox/pstore_mock0001/Q1w2E3r4T5y6U7i8O9p0Aa", content=sealed, headers={"Content-Type": "application/octet-stream"})
+    assert "SECRET-NOTE" not in caplog.text
+
+
+def test_private_inbox_requires_pairing(web):
+    r = web.put(f"/api/private-inbox/pstore_mock0001/{ITEM}", content=b"NSE1x", headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 401 and r.json()["kind"] == "unauthenticated"

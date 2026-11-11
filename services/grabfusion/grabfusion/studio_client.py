@@ -60,6 +60,11 @@ class StudioClient:
         """Сире тіло відповіді (для проксі: не губить поля, яких ще не знає модель)."""
         return self._request(method, path, json=json, params=params)
 
+    def raw_bytes(self, method: str, path: str, *, content: bytes, content_type: str = "application/octet-stream") -> Any:
+        """Тіло — байти (запечатаний конверт для черги «на мій сервер», журнал #550): сервіс їх не читає й не зберігає."""
+        resp = self._http.request(method, path, content=content, headers={"Content-Type": content_type})
+        return self._parse(resp)
+
     # --- межі -----------------------------------------------------------
     def limits(self, *, refresh: bool = False) -> Limits:
         if self._limits is None or refresh:

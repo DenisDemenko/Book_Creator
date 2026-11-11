@@ -10,6 +10,7 @@
 import { sha256Hex, signBytes } from './crypto.mjs';
 
 export const HEARTBEAT_PREFIX = 'nova-private-store-heartbeat-v1\n';
+export const REQUEST_PREFIX = 'nova-private-store-request-v1\n';
 
 /** Заголовки підпису пульсу. Studio перевіряє той самий рядок: `<id>\n<час>\n<sha256(тіло)>` із префіксом. */
 export function signedHeaders(identity, vaultId, bodyText, now = new Date()) {
@@ -76,4 +77,48 @@ export async function sendHeartbeat({ link, identity, info, fetchImpl = fetch, n
     studioOrigins: Array.isArray(data.studioOrigins) ? data.studioOrigins.filter((o) => typeof o === 'string') : link.studioOrigins,
     heartbeatSeconds: Number.isInteger(data.heartbeatSeconds) ? data.heartbeatSeconds : link.heartbeatSeconds,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Черга запечатаних знімків із телефона (журнал #550): сервер сам забирає їх вихідними запитами
+// ---------------------------------------------------------------------------
+
+const EMPTY_SHA = sha256Hex('');
+
+/** Підпис запиту до черги: `<префікс><id>\n<метод>\n<шлях API>\n<час>\n<sha256 тіла>` — шлях без префікса проксі й без запиту. */
+export function signedRequestHeaders(identity, vaultId, method, apiPath, now = new Date()) {
+  const ts = String(Math.floor(now.getTime() / 1000));
+  const message = `${REQUEST_PREFIX}${vaultId}\n${method.toUpperCase()}\n${apiPath}\n${ts}\n${EMPTY_SHA}`;
+  return {
+    'x-private-store-id': vaultId,
+    'x-private-store-time': ts,
+    'x-private-store-signature': signBytes(identity.privateKey, Buffer.from(message, 'utf8')),
+  };
+}
+
+async function inboxRequest({ link, identity, fetchImpl, method, apiPath, now }) {
+  return fetchImpl(`${link.studioUrl}${apiPath}`, { method, headers: signedRequestHeaders(identity, link.vaultId, method, apiPath, now), signal: AbortSignal.timeout(60_000), redirect: 'error' });
+}
+
+/** Що чекає цей сервер. Повертає масив { id, userId, size, createdAt }. */
+export async function inboxList({ link, identity, fetchImpl = fetch, now = new Date() }) {
+  const res = await inboxRequest({ link, identity, fetchImpl, method: 'GET', apiPath: '/api/private-store/inbox', now });
+  if (res.status === 401 || res.status === 403) return { revoked: true, items: [] };
+  if (!res.ok) throw new Error(`Черга Studio відповіла HTTP ${res.status}.`);
+  const data = await res.json();
+  return { revoked: false, items: Array.isArray(data?.items) ? data.items.filter((i) => i && typeof i.id === 'string' && typeof i.userId === 'string') : [] };
+}
+
+/** Байти конверта; `null`, якщо його вже немає (доставлено, прострочено). */
+export async function inboxFetch({ link, identity, fetchImpl = fetch, itemId, now = new Date() }) {
+  const res = await inboxRequest({ link, identity, fetchImpl, method: 'GET', apiPath: `/api/private-store/inbox/${encodeURIComponent(itemId)}`, now });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Конверт ${itemId}: Studio відповіла HTTP ${res.status}.`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Підтвердження: Studio видаляє байти. 404 (вже підтверджено) — не помилка. */
+export async function inboxAck({ link, identity, fetchImpl = fetch, itemId, now = new Date() }) {
+  const res = await inboxRequest({ link, identity, fetchImpl, method: 'POST', apiPath: `/api/private-store/inbox/${encodeURIComponent(itemId)}/ack`, now });
+  if (!res.ok && res.status !== 404) throw new Error(`Підтвердження ${itemId}: Studio відповіла HTTP ${res.status}.`);
 }

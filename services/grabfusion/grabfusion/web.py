@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import base64
+import re
 import time
 from dataclasses import asdict
 from typing import Any, Callable
@@ -60,6 +61,11 @@ def error_response(e: StudioError) -> JSONResponse:
     if e.blockers:
         body["blockers"] = e.blockers
     return JSONResponse(body, status_code=e.status)
+
+
+_STORE_ID = re.compile(r"[A-Za-z0-9_-]{6,80}")
+_ITEM_ID = re.compile(r"[A-Za-z0-9_-]{16,64}")
+MAX_SEALED_BYTES = 12 * 1024 * 1024 + 1024  # знімок до 10 МБ + заголовок і службові байти конверта
 
 
 def build_router(deps: Deps) -> APIRouter:
@@ -150,6 +156,26 @@ def build_router(deps: Deps) -> APIRouter:
             if e.status == 404:
                 return {"stores": []}
             raise
+
+    # Приватний шлях «на мій сервер» (журнал #550): телефон шифрує знімок ключем сервера автора, цей сервіс лише передає
+    # шифротекст до черги Studio. Він його не читає (ключа немає), не зберігає й не пише в лог.
+    @router.put("/private-inbox/{store_id}/{item_id}", status_code=201)
+    async def put_private_item(store_id: str, item_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        if not _STORE_ID.fullmatch(store_id) or not _ITEM_ID.fullmatch(item_id):
+            raise StudioError("bad_input", "Некоректний номер сервера чи елемента.", 400)
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_SEALED_BYTES:
+            raise StudioError("too_large", "Знімок завеликий.", 413)
+        body = await request.body()
+        if len(body) > MAX_SEALED_BYTES:
+            raise StudioError("too_large", "Знімок завеликий.", 413)
+        return call(s, lambda c: c.raw_bytes("PUT", f"/photo-drafts/private-inbox/{store_id}/{item_id}", content=body))
+
+    @router.get("/private-inbox/{store_id}/{item_id}")
+    def private_item_state(store_id: str, item_id: str, s: Session = Depends(current)) -> Any:
+        if not _STORE_ID.fullmatch(store_id) or not _ITEM_ID.fullmatch(item_id):
+            raise StudioError("bad_input", "Некоректний номер сервера чи елемента.", 400)
+        return call(s, lambda c: c.raw("GET", f"/photo-drafts/private-inbox/{store_id}/{item_id}"))
 
     @router.get("/drafts")
     def list_drafts(s: Session = Depends(current)) -> Any:

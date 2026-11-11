@@ -12,8 +12,8 @@ import { Ban, Check, Copy, HardDrive, Loader2, Mail, RefreshCw, RotateCcw, Shiel
  * його введення показує одноразовий код підключення та команду запуску.
  */
 
-type Kind = 'book' | 'course' | 'instruction';
-const KIND_TITLE: Record<Kind, string> = { book: 'Книги', course: 'Курси', instruction: 'Інструкції' };
+type Kind = 'book' | 'course' | 'instruction' | 'scan';
+const KIND_TITLE: Record<Kind, string> = { book: 'Книги', course: 'Курси', instruction: 'Інструкції', scan: 'Вхідні з телефона (запечатані знімки)' };
 
 interface Store {
   id: string;
@@ -34,6 +34,9 @@ interface Store {
   pairingExpiresAt: string | null;
   revokeTokensBefore: string | null;
   grabfusion?: { assignedUsers: number; connectedUsers: number };
+  /** Черга запечатаних знімків із телефона, що чекають сервер (Studio вмісту не бачить). */
+  inbox?: { pending: number; bytes: number };
+  inboxKey?: string | null;
 }
 interface UserRow {
   id: string;
@@ -197,7 +200,7 @@ function NewServerForm({ data, onCreated }: { data: Listing; onCreated: (storeId
   const [name, setName] = useState('');
   const [endpoint, setEndpoint] = useState('http://127.0.0.1:8787');
   const [origins, setOrigins] = useState(data.suggestedOrigins.join(', ') || window.location.origin);
-  const [kinds, setKinds] = useState<Kind[]>(['book', 'course', 'instruction']);
+  const [kinds, setKinds] = useState<Kind[]>(['book', 'course', 'instruction', 'scan']);
   const [userIds, setUserIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -350,7 +353,11 @@ function StoreCard({
         <div className="sm:col-span-2" data-grabfusion-sync>
           Синхронізація з GrabFusion: <span className="text-slate-200">{store.status === 'active' ? 'телефон бачить статус цього сервера' : 'після підключення'}</span>
           {store.grabfusion && <span> · призначено {store.grabfusion.assignedUsers}, підключили GrabFusion {store.grabfusion.connectedUsers}</span>}
-          <span className="text-slate-500"> (матеріали з телефона не йдуть на локальний сервер: розпізнавання потребує хмари)</span>
+          <span className="text-slate-500"> (приватна чернетка з телефона: знімки запечатуються на телефоні ключем цього сервера, Studio лише переносить шифротекст, розпізнає сам сервер)</span>
+        </div>
+        <div className="sm:col-span-2" data-inbox-status>
+          Знімки з телефона: <span className="text-slate-200">{store.kinds.includes('scan') ? (store.inboxKey ? 'сервер приймає' : 'чекаємо ключ скриньки (оновіть сервер: docker compose up -d --build)') : 'вимкнено для цього сервера'}</span>
+          {store.inbox && store.inbox.pending > 0 && <span> · у черзі {store.inbox.pending} ({mb(store.inbox.bytes)}) — чекають, поки сервер їх забере</span>}
         </div>
       </dl>
 

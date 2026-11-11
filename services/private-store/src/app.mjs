@@ -13,6 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import { KINDS, verifyToken } from './token.mjs';
 import { RevisionConflict } from './db.mjs';
+import { MAX_TEXT_CHARS } from './inbox.mjs';
 
 const ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
 const ASSET_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -30,11 +31,12 @@ class HttpError extends Error {
 
 export class PrivateStoreApp {
   /**
-   * @param {{ config: ReturnType<import('./config.mjs').loadConfig>, db: import('./db.mjs').Db, state: { link: any, identity: any } , now?: () => number }} deps
+   * @param {{ config: ReturnType<import('./config.mjs').loadConfig>, db: import('./db.mjs').Db, state: { link: any, identity: any } , scans?: import('./inbox.mjs').ScanService, now?: () => number }} deps
    */
-  constructor({ config, db, state, now = () => Date.now() }) {
+  constructor({ config, db, state, scans = null, now = () => Date.now() }) {
     this.config = config;
     this.db = db;
+    this.scans = scans; // «Вхідні з телефона» (журнал #550): розпізнавання знімків, правка тексту
     this.state = state; // { link, identity }: змінюється пульсом
     this.now = now;
     this.hits = new Map();
@@ -154,7 +156,7 @@ export class PrivateStoreApp {
       if (req.method === 'OPTIONS') {
         return this.send(res, 204, undefined, {
           ...cors,
-          'access-control-allow-methods': 'GET, PUT, DELETE, OPTIONS',
+          'access-control-allow-methods': 'GET, PUT, POST, DELETE, OPTIONS',
           'access-control-allow-headers': 'authorization, content-type',
           // Chrome: сторінка в інтернеті звертається до локальної мережі лише з цією згодою сервера (Private Network Access).
           ...(req.headers['access-control-request-private-network'] ? { 'access-control-allow-private-network': 'true' } : {}),
@@ -224,6 +226,8 @@ export class PrivateStoreApp {
       if (m === 'PUT') {
         const body = await this.readJson(req);
         const kind = this.kindOf(body.kind, claims);
+        // «Вхідні з телефона» змінює воркер сервера (розпізнавання) — браузер не перезаписує їх цілком, а користується /v1/scans/*.
+        if (kind === 'scan') throw new HttpError(403, 'forbidden', 'Вхідні з телефона змінюються лише через /v1/scans.');
         if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) throw new HttpError(400, 'bad_input', 'payload має бути JSON-обʼєктом.');
         const meta = body.meta ?? {};
         if (typeof meta !== 'object' || Array.isArray(meta) || JSON.stringify(meta).length > MAX_META_BYTES) throw new HttpError(400, 'bad_input', 'meta має бути невеликим JSON-обʼєктом.');
@@ -239,6 +243,50 @@ export class PrivateStoreApp {
         this.db.deleteDoc(claims.sub, id);
         this.db.audit('doc_deleted', { subject: claims.sub, ref: id });
         return { body: { ok: true } };
+      }
+    }
+    if (m === 'GET' && p === '/v1/engines') {
+      this.kindOf('scan', claims);
+      if (!this.scans) throw new HttpError(404, 'not_found', 'Вхідні з телефона не ввімкнено.');
+      return { body: await this.scans.ocr.status() };
+    }
+    match = /^\/v1\/scans\/([^/]+)\/(recognize|edit)$/.exec(p);
+    if (match && m === 'POST') {
+      this.kindOf('scan', claims);
+      if (!this.scans) throw new HttpError(404, 'not_found', 'Вхідні з телефона не ввімкнено.');
+      const docId = this.idOf(decodeURIComponent(match[1]));
+      const body = await this.readJson(req);
+      if (match[2] === 'edit') {
+        const saved = await this.scans.editDoc(claims.sub, docId, body);
+        if (!saved) throw new HttpError(404, 'not_found', 'Чернетки немає.');
+        return { body: { ok: true, revision: saved.revision } };
+      }
+      const pageId = this.idOf(body.pageId);
+      const engine = body.engine;
+      if (engine !== 'tesseract' && engine !== 'ollama') throw new HttpError(400, 'bad_input', 'Рушій: tesseract або ollama.');
+      const status = await this.scans.ocr.status();
+      if (!status[engine].available) throw new HttpError(409, 'engine_unavailable', status[engine].reason || 'Рушій недоступний.');
+      const model = typeof body.model === 'string' && body.model.length <= 100 ? body.model : undefined;
+      if (!this.scans.requestOcr(claims.sub, docId, pageId, engine, model)) throw new HttpError(404, 'not_found', 'Сторінки немає.');
+      return { status: 202, body: { queued: true } };
+    }
+    match = /^\/v1\/scans\/([^/]+)\/pages\/([^/]+)(\/text)?$/.exec(p);
+    if (match) {
+      this.kindOf('scan', claims);
+      if (!this.scans) throw new HttpError(404, 'not_found', 'Вхідні з телефона не ввімкнено.');
+      const docId = this.idOf(decodeURIComponent(match[1]));
+      const pageId = this.idOf(decodeURIComponent(match[2]));
+      if (m === 'PUT' && match[3]) {
+        const body = await this.readJson(req);
+        if (typeof body.text !== 'string' || body.text.length > MAX_TEXT_CHARS) throw new HttpError(400, 'bad_input', `Текст сторінки — рядок до ${MAX_TEXT_CHARS} символів.`);
+        const saved = await this.scans.setPageText(claims.sub, docId, pageId, body.text);
+        if (!saved) throw new HttpError(404, 'not_found', 'Сторінки немає.');
+        return { body: { ok: true, revision: saved.revision } };
+      }
+      if (m === 'DELETE' && !match[3]) {
+        const saved = await this.scans.deletePage(claims.sub, docId, pageId);
+        if (!saved) throw new HttpError(404, 'not_found', 'Сторінки немає.');
+        return { body: { ok: true, revision: saved.revision } };
       }
     }
     match = /^\/v1\/assets\/([^/]+)$/.exec(p);

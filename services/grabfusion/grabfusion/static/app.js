@@ -9,7 +9,8 @@ const state = {
   online: navigator.onLine, urls: new Map(), editing: false, needsRender: false,
   studioOrigin: '', hint: '', writing: false, blockers: null, target: null, photosOpen: true,
   ai: null, // вибір моделі ШІ й бали за прохід (контракт 1.4.0), див. loadAi
-  privateStores: [], // локальні сервери приватного сховища автора (лише стан, журнал #549)
+  privateStores: [], // локальні сервери приватного сховища автора (стан і ключ скриньки, журнал #549/#550)
+  privateDraft: null, privateItems: [], privateDrafts: [], // приватні чернетки цього телефона (private.js)
 };
 let pollTimer = null, flushing = false, flushTimer = null;
 
@@ -101,7 +102,7 @@ async function downscale(file, maxSide) {
 /* ---------- навігація ---------- */
 function go(view) {
   state.view = view; clearTimeout(pollTimer);
-  document.getElementById('btn-back').hidden = view !== 'draft';
+  document.getElementById('btn-back').hidden = view !== 'draft' && view !== 'private-draft';
   document.getElementById('btn-logout').hidden = !state.user;
   render();
 }
@@ -110,14 +111,14 @@ function render(force) {
   if (state.editing && state.view === 'draft') { state.needsRender = true; return; }
   state.needsRender = false;
   app.replaceChildren();
-  const v = { pair: viewPair, choose: viewChoose, 'choose-course': viewChooseCourse, list: viewList, create: viewCreate, draft: viewDraft, boot: () => h('p', { class: 'muted', text: 'Завантаження…' }) }[state.view];
-  titleEl.textContent = state.view === 'draft' && state.draft ? (state.draft.title || 'Чернетка без назви') : 'GrabFusion';
+  const v = { pair: viewPair, choose: viewChoose, 'choose-course': viewChooseCourse, list: viewList, create: viewCreate, draft: viewDraft, 'private-draft': viewPrivateDraft, boot: () => h('p', { class: 'muted', text: 'Завантаження…' }) }[state.view];
+  titleEl.textContent = state.view === 'draft' && state.draft ? (state.draft.title || 'Чернетка без назви') : state.view === 'private-draft' && state.privateDraft ? (state.privateDraft.title || 'Приватна чернетка') : 'GrabFusion';
   app.append(v());
 }
 function setNet() { document.getElementById('net').hidden = state.online; }
 addEventListener('online', () => { state.online = true; setNet(); flushQueue(); });
 addEventListener('offline', () => { state.online = false; setNet(); });
-document.getElementById('btn-back').addEventListener('click', () => openList());
+document.getElementById('btn-back').addEventListener('click', () => (state.view === 'private-draft' ? openPrivateList() : openList()));
 document.getElementById('btn-logout').addEventListener('click', async () => { await api('POST', '/logout').catch(() => {}); state.user = null; go('pair'); });
 
 /* ---------- підключення ---------- */
@@ -178,6 +179,7 @@ function viewPairByEmail(codeInput, codeErr) {
 async function openList() {
   state.draft = null;
   try { state.drafts = (await api('GET', '/drafts')).drafts; } catch (e) { toast(e.message); }
+  state.privateDrafts = await pDrafts();
   go('list');
 }
 const KIND = { course: 'Курс', instruction: 'Інструкція', book: 'Глава книги', manuscript: 'Набір книги' };
@@ -189,7 +191,7 @@ function viewList() {
   const box = h('div');
   box.append(h('div', { class: 'row', style: 'margin-bottom:12px' }, h('h2', { class: 'grow', text: 'Чернетки' }),
     h('button', { class: 'primary', id: 'btn-new', text: 'Нова чернетка', onclick: () => go('choose') })));
-  if (!state.drafts.length) box.append(h('p', { class: 'muted', text: 'Поки порожньо. Натисніть «Нова чернетка» й оберіть, що створюєте: інструкцію чи курс.' }));
+  if (!state.drafts.length && !(state.privateDrafts || []).length) box.append(h('p', { class: 'muted', text: 'Поки порожньо. Натисніть «Нова чернетка» й оберіть, що створюєте: інструкцію чи курс.' }));
   for (const d of state.drafts) {
     box.append(h('div', { class: 'card row', 'data-draft': d.draftId },
       h('div', { class: 'grow' }, h('strong', { text: d.title || 'Без назви' }),
@@ -198,6 +200,8 @@ function viewList() {
         h('button', { text: 'Відкрити', onclick: () => openDraft(d.draftId) }),
         h('button', { class: 'small danger', 'data-delete-draft': d.draftId, text: 'Видалити', onclick: () => deleteDraft(d) }))));
   }
+  const priv = privateListSection();
+  if (priv) box.append(priv);
   return box;
 }
 
@@ -229,14 +233,17 @@ function choiceCard(id, icon, title, text, onclick) {
     h('span', { class: 'choice-body' }, h('strong', { text: title }), h('span', { class: 'muted', text })));
 }
 
-/* Стан локальних серверів автора: де Studio зберігає його приватні матеріали. Матеріали з телефона туди не йдуть, і про це сказано прямо. */
+/* Локальні сервери автора (журнал #549/#550): тут лише стан і підказка. Приватна обробка вмикається при створенні чернетки. */
 function privateStoresNote() {
   const stores = state.privateStores || [];
   if (!stores.length) return null;
+  const ready = privateStoreReady().length > 0;
   return h('div', { class: 'card', id: 'private-stores-note' },
     h('strong', { text: 'Ваш локальний сервер у Studio' }),
     ...stores.map((st) => h('p', { class: 'muted', 'data-private-store': st.id, text: `${st.name}: ${st.online ? 'в мережі' : 'зараз не на звʼязку'}` })),
-    h('p', { class: 'muted', text: 'Чернетки з телефона зберігаються в хмарі Studio: розпізнавання знімків потребує хмари. На локальний сервер потрапляють лише матеріали, створені в самій Studio з галочкою «Приватне збереження».' }));
+    h('p', { class: 'muted', text: ready
+      ? 'Є два шляхи: у хмарі (ШІ розпізнає й складає текст) або «На моєму сервері» (знімки шифруються на телефоні, розпізнає ваш комп\u02bcютер, у хмару нічого не потрапляє). Шлях обирається при створенні чернетки.'
+      : 'Чернетки з телефона зберігаються в хмарі Studio: розпізнавання знімків потребує хмари. Приватну обробку на сервері вмикає адміністратор (вид «Вхідні з телефона»).' }));
 }
 
 function viewChoose() {
@@ -282,6 +289,14 @@ function viewCreate() {
     ? h('p', { class: 'muted', id: 'doc-note', text: 'Скануйте або фотографуйте сторінки документа по порядку. Студія збере з розпізнаного тексту чернетку курсу: опис, результати навчання, модулі й уроки.' })
     : null;
   const err = h('p', { class: 'err' });
+  // Де обробити (журнал #550): у хмарі (ШІ) чи на моєму локальному сервері (приватно). Приватний шлях — лише для знімків із текстом.
+  const canPrivate = privateAvailableFor(kind, preset.courseSource);
+  const stores = privateStoreReady();
+  f.where = h('select', { id: 'f-where' }, h('option', { value: 'cloud', text: '☁ У хмарі: розпізнає ШІ (найвища якість, рукопис, фото)' }), h('option', { value: 'private', text: '🔒 На моєму сервері: приватно, розпізнає мій комп\u02bcютер' }));
+  f.store = h('select', { id: 'f-store', hidden: true }, ...stores.map((st) => h('option', { value: st.id, text: st.name + (st.online ? '' : ' (не на звʼязку)') })));
+  const whereHint = h('p', { class: 'muted', id: 'where-hint', hidden: true, text: 'Знімки шифруються на телефоні й потрапляють лише на ваш сервер: Studio бачить шифротекст, ШІ не залучається. Підходить для друкованого тексту й чітких сканів; рукопис і фото без тексту краще розпізнає хмара.' });
+  f.where.addEventListener('change', () => { const priv = f.where.value === 'private'; whereHint.hidden = !priv; f.store.hidden = !priv || stores.length < 2; });
+  const whereBlock = canPrivate ? h('div', { id: 'where-block' }, h('label', { text: 'Де обробити' }), f.where, f.store, whereHint) : null;
   return h('form', { class: 'card', id: 'create-form', 'data-kind': kind, onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
     const body = { kind };
@@ -292,10 +307,16 @@ function viewCreate() {
       if (f.booktype.value === 'existing' && f.bookid.value.trim()) body.bookId = f.bookid.value.trim();
     }
     if (kind === 'instruction') { body.instructionMode = f.mode.value; if (f.model.value.trim()) body.modelCode = f.model.value.trim(); }
+    if (canPrivate && f.where.value === 'private') {
+      if (kind === 'manuscript' && f.booktype.value === 'existing') { err.textContent = 'Приватна книга створюється нова: додавання до наявної книги Studio доступне лише в хмарі.'; return; }
+      delete body.bookId;
+      try { await startPrivateDraft(body, f.store.value); } catch (e3) { err.textContent = e3.message; }
+      return;
+    }
     try { const r = await api('POST', '/drafts', body); await openDraft(r.draft.draftId); } catch (e2) { err.textContent = e2.message; }
   } },
     h('h2', { id: 'create-title', text: heading }),
-    docNote, extra, msExtra,
+    docNote, extra, msExtra, whereBlock,
     h('label', { text: 'Назва' }), f.title, h('label', { text: f.craft.placeholder.startsWith('Тема') ? 'Тема' : 'Ремесло' }), f.craft, h('label', { text: 'Аудиторія' }), f.audience, err,
     h('p', { class: 'row' }, h('button', { class: 'primary', type: 'submit', text: 'Створити' }), h('button', { type: 'button', id: 'create-back', text: 'Назад', onclick: () => go('choose') })));
 }
@@ -1048,6 +1069,8 @@ async function start(opts) {
   try { const cfg = await api('GET', '/config'); state.studioOrigin = (cfg.studioPublicUrl || new URL(cfg.studioUrl).origin).replace(/\/$/, ''); } catch (e) { /* без посилання */ }
   try { state.privateStores = (await api('GET', '/private-stores')).stores || []; } catch (e) { state.privateStores = []; }
   state.queue = await qAll();
+  state.privateDrafts = await pDrafts();
+  void flushPrivate();
   document.getElementById('btn-logout').hidden = false;
   await openList();
   if (opts && opts.chooseFirst) go('choose'); // щойно підключили телефон: спершу «що створюємо?»

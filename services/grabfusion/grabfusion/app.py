@@ -39,7 +39,7 @@ MANIFEST = {
 }
 
 # Усе, що потрібно, щоб сторінка відкрилась без звʼязку (шлях відносно області SW).
-SHELL_PATHS = ["./", "static/app.css", "static/app.js", "manifest.webmanifest",
+SHELL_PATHS = ["./", "static/app.css", "static/app.js", "static/sealed.js", "static/private.js", "manifest.webmanifest",
                "static/icons/icon-192.png", "static/icons/icon-512.png", "static/icons/apple-touch-icon.png",
                "static/icons/favicon-64.png"]
 

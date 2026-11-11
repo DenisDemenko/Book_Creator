@@ -7,7 +7,7 @@ name: nova-private-store
 services:
   private-store:
     build: .
-    image: nova-private-store:0.1.0
+    image: nova-private-store:0.2.0
     container_name: nova-private-store
     restart: unless-stopped
     ports:
@@ -19,6 +19,11 @@ services:
       PRIVATE_STORE_MASTER_KEY_FILE: /run/secrets/private_store_master_key
       STUDIO_URL: "${STUDIO_URL:?Задайте STUDIO_URL у файлі .env (адреса Studio)}"
       PAIRING_CODE: "${PAIRING_CODE:-}"
+      # Розпізнавання знімків із телефона (журнал #550): Tesseract вбудовано; Ollama — необовʼязково, лише на цьому комп'ютері чи в локальній мережі.
+      OLLAMA_URL: "${OLLAMA_URL:-}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5vl:7b}"
+      # Як часто сервер заглядає у чергу знімків, запечатаних на телефоні (секунди).
+      PRIVATE_STORE_INBOX_POLL_SEC: "${PRIVATE_STORE_INBOX_POLL_SEC:-15}"
     secrets:
       - private_store_master_key
     volumes:
@@ -32,9 +37,10 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    pids_limit: 128
-    mem_limit: 768m
-    cpus: 1.0
+    pids_limit: 256
+    # Розпізнавання (Tesseract у WASM) потребує памʼяті: до 2 ГБ і два ядра.
+    mem_limit: 2g
+    cpus: 2.0
     # Щоб STUDIO_URL=http://host.docker.internal:3000 працював і на Linux (для локальної перевірки зі Studio на цьому ж комп'ютері).
     extra_hosts:
       - "host.docker.internal:host-gateway"

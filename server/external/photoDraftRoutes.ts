@@ -29,6 +29,7 @@ import type { Express, Request, Response } from 'express';
 import { requirePermission } from '../auth';
 import { getBook } from '../bookStore';
 import { listStoresForUser } from '../privateStore/store';
+import { registerInboxPhoneRoutes } from '../privateStore/inboxRoutes';
 import { readAsset, saveAsset } from '../media/mediaLibraryStore';
 import { decodeScanImage, requireExternalToken, type RecognizeParams } from './externalApiRoutes';
 import { cleanOcrText } from './scanOcrPrompt';
@@ -576,12 +577,18 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     res.setHeader('Cache-Control', 'no-store');
     try {
       res.json({
-        stores: listStoresForUser(owner(req)).map((st) => ({ id: st.id, name: st.name, online: st.online, lastSeen: st.lastSeen, kinds: st.kinds })),
+        // `inboxKey` — ВІДКРИТИЙ ключ скриньки сервера: ним телефон запечатує знімки (журнал #550); приватного ключа Studio не має.
+        stores: listStoresForUser(owner(req)).map((st) => {
+          const inbox = st.kinds.includes('scan') && !!st.inboxKey;
+          return { id: st.id, name: st.name, online: st.online, lastSeen: st.lastSeen, kinds: st.kinds, inbox, inboxKey: inbox ? st.inboxKey : null };
+        }),
       });
     } catch (err) {
       sendChangeError(res, err, 'private-stores');
     }
   });
+  // Черга запечатаних знімків «телефон → локальний сервер»: Studio лише переносить шифротекст (журнал #550).
+  registerInboxPhoneRoutes(app, auth, owner, BASE);
 
   app.get(BASE, auth, async (req, res) => {
     try {

@@ -38,6 +38,8 @@ import {
   updateStore,
 } from './privateStore/store';
 import { PRIVATE_KINDS, type PrivateKind } from './privateStore/token';
+import { dropInboxOfStore, inboxStats } from './privateStore/inbox';
+import { registerInboxVaultRoutes } from './privateStore/inboxRoutes';
 
 export interface PrivateStoreRouteDeps {
   sendMail?: (input: { to: string; subject: string; html: string; text: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -159,7 +161,7 @@ export function registerPrivateStoreRoutes(app: Express, deps: PrivateStoreRoute
           connected.set(u.id, false);
         }
       }
-      const stores = listStores().map((s) => ({ ...s, grabfusion: { assignedUsers: s.userIds.length, connectedUsers: s.userIds.filter((id) => connected.get(id)).length } }));
+      const stores = listStores().map((s) => ({ ...s, grabfusion: { assignedUsers: s.userIds.length, connectedUsers: s.userIds.filter((id) => connected.get(id)).length }, inbox: inboxStats(s.id) }));
       res.json({
         stores,
         users,
@@ -263,6 +265,7 @@ export function registerPrivateStoreRoutes(app: Express, deps: PrivateStoreRoute
     app.post(`/api/admin/private-stores/:id/${action}`, requireAdmin, (req, res) => {
       const store = setRevoked(String(req.params.id), revoked);
       if (!store) return void res.status(404).json({ error: 'Сервера не знайдено.', kind: 'not_found' });
+      if (revoked) dropInboxOfStore(store.id); // відкликаний сервер знімків уже не забере: шифротекст у черзі зайвий
       res.json({ store });
     });
   }
@@ -275,6 +278,7 @@ export function registerPrivateStoreRoutes(app: Express, deps: PrivateStoreRoute
 
   app.delete('/api/admin/private-stores/:id', requireAdmin, (req, res) => {
     if (!deleteStore(String(req.params.id))) return void res.status(404).json({ error: 'Сервера не знайдено.', kind: 'not_found' });
+    dropInboxOfStore(String(req.params.id));
     res.json({ ok: true });
   });
 
@@ -294,6 +298,9 @@ export function registerPrivateStoreRoutes(app: Express, deps: PrivateStoreRoute
     }
     res.status(201).json({ vaultId: result.vaultId, studioPublicKey: result.studioPublicKey, studioOrigins: result.studioOrigins, heartbeatSeconds: result.heartbeatSeconds });
   });
+
+  // Підписані запити сервера до черги запечатаних знімків із телефона (журнал #550).
+  registerInboxVaultRoutes(app);
 
   app.post('/api/private-store/heartbeat', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');

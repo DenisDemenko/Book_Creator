@@ -229,7 +229,7 @@ t('сервер підключився кодом: статус active, id зб�
 t('сервер отримав публічний ключ Studio та дозволені сторінки', vault.state.link?.studioPublicKey === studioKey.publicSpki && vault.state.link?.studioOrigins.includes(PAGE_ORIGIN));
 t('код підключення одноразовий: другий сервер із тим самим кодом не підключиться', (await call('POST', '/api/private-store/pair', { body: { code: pairingCode, publicKey: vcrypto.generateIdentity().publicKey } })).status === 404);
 await vault.beat();
-t('пульс прийнято: сервер «в мережі», у стані версія й кількість записів', registry.getStore(storeId)!.online && (registry.getStore(storeId)!.info as any)?.version === '0.1.0');
+t('пульс прийнято: сервер «в мережі», у стані версія й кількість записів', registry.getStore(storeId)!.online && (registry.getStore(storeId)!.info as any)?.version === '0.2.0');
 
 function vcall(method: string, p: string, opts: { token?: string; origin?: string; host?: string; body?: unknown; raw?: Buffer; type?: string } = {}) {
   return new Promise<{ status: number; headers: http.IncomingHttpHeaders; data: any; bytes: Buffer }>((resolve, reject) => {
@@ -268,7 +268,7 @@ t('чужа адреса Host — 421 (захист від DNS-rebinding)', (awa
 
 const tokenRes = await call('POST', `/api/private-store/${storeId}/token`, { session: 'u1' });
 const userToken: string = tokenRes.data.token;
-t('користувач, якому призначено сервер, отримує токен і адресу', tokenRes.status === 200 && !!userToken && tokenRes.data.endpoint === VAULT && tokenRes.data.kinds.length === 3);
+t('користувач, якому призначено сервер, отримує токен і адресу', tokenRes.status === 200 && !!userToken && tokenRes.data.endpoint === VAULT && tokenRes.data.kinds.length === 4 && tokenRes.data.kinds.includes('scan'));
 t('непризначений користувач токена не отримує (403)', (await call('POST', `/api/private-store/${storeId}/token`, { session: 'u2' })).status === 403);
 t('без входу токена немає (401)', (await call('POST', `/api/private-store/${storeId}/token`)).status === 401);
 t('перелік «мої сервери»: лише призначені, без зайвих полів', (await call('GET', '/api/private-store/mine', { session: 'u1' })).data.stores.length === 1 && (await call('GET', '/api/private-store/mine', { session: 'u2' })).data.stores.length === 0);

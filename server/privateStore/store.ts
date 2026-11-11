@@ -12,7 +12,7 @@
  */
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, randomUUID, timingSafeEqual, verify } from 'node:crypto';
 import { getDb } from '../db';
-import { HEARTBEAT_PREFIX, PRIVATE_KINDS, signAccessToken, type PrivateKind } from './token';
+import { HEARTBEAT_PREFIX, PRIVATE_KINDS, REQUEST_PREFIX, signAccessToken, type PrivateKind } from './token';
 
 type Row = Record<string, any>;
 
@@ -46,7 +46,11 @@ export interface PrivateStoreRecord {
   verificationExpiresAt: string | null;
   pairingExpiresAt: string | null;
   revokeTokensBefore: string | null;
+  /** Відкритий ключ «скриньки» сервера (P-256, base64url): ним телефон запечатує знімки (журнал #550). Приватного в Studio немає. */
+  inboxKey: string | null;
 }
+
+let migrated = false;
 
 function database() {
   const db = getDb();
@@ -65,6 +69,12 @@ function database() {
   CREATE TABLE IF NOT EXISTS private_store_signing (
     id INTEGER PRIMARY KEY CHECK (id = 1), public_spki TEXT NOT NULL, private_pkcs8 TEXT NOT NULL, created_at TEXT NOT NULL
   );`);
+  if (!migrated) {
+    // Стовпець ключа скриньки (журнал #550) для баз, створених до нього.
+    const columns = (db.prepare('PRAGMA table_info(private_stores)').all() as Row[]).map((c) => c.name);
+    if (!columns.includes('inbox_public_key')) db.exec('ALTER TABLE private_stores ADD COLUMN inbox_public_key TEXT');
+    migrated = true;
+  }
   return db;
 }
 
@@ -175,6 +185,7 @@ function toRecord(row: Row, userIds: string[], nowMs: number): PrivateStoreRecor
     verificationExpiresAt: verifyLive ? row.verify_expires_at : null,
     pairingExpiresAt: pairingLive ? row.pairing_expires_at : null,
     revokeTokensBefore: row.revoke_tokens_before ?? null,
+    inboxKey: row.inbox_public_key ?? null,
   };
 }
 
@@ -413,6 +424,42 @@ export interface HeartbeatResult {
   heartbeatSeconds?: number;
 }
 
+/** Несжатий публічний ключ P-256: 65 байтів, перший — 0x04. Валідність точки перевіряє той, хто ним шифрує. */
+export function isInboxPublicKey(value: string): boolean {
+  if (!/^[A-Za-z0-9_-]{86,90}$/.test(value)) return false;
+  const raw = Buffer.from(value, 'base64url');
+  return raw.length === 65 && raw[0] === 0x04;
+}
+
+/**
+ * Підписаний запит сервера до черги конвертів (формат — services/private-store/src/studioLink.mjs, `signedRequestHeaders`).
+ * Повторний запит у межах хвилини повертає те саме (перелік номерів чи шифротекст), тож лічильник часу, як у пульсі, не ведемо.
+ */
+export function acceptSignedRequest(
+  input: { vaultId: string; timeSec: number; signature: string; method: string; path: string; bodySha: string },
+  now = new Date()
+): { ok: boolean; store?: PrivateStoreRecord; reason?: 'unknown_store' | 'stale' | 'bad_signature' | 'inactive' } {
+  const db = database();
+  const row = db.prepare('SELECT * FROM private_stores WHERE id = ?').get(input.vaultId) as Row | undefined;
+  if (!row || !row.vault_public_key) return { ok: false, reason: 'unknown_store' };
+  const nowSec = Math.floor(now.getTime() / 1000);
+  if (!Number.isInteger(input.timeSec) || Math.abs(nowSec - input.timeSec) > 60) return { ok: false, reason: 'stale' };
+  let valid = false;
+  try {
+    valid = verify(
+      null,
+      Buffer.from(`${REQUEST_PREFIX}${input.vaultId}\n${input.method.toUpperCase()}\n${input.path}\n${input.timeSec}\n${input.bodySha}`, 'utf8'),
+      createPublicKey({ key: Buffer.from(row.vault_public_key, 'base64'), format: 'der', type: 'spki' }),
+      Buffer.from(input.signature, 'base64url')
+    );
+  } catch {
+    valid = false;
+  }
+  if (!valid) return { ok: false, reason: 'bad_signature' };
+  if (row.status !== 'active') return { ok: false, reason: 'inactive' };
+  return { ok: true, store: toRecord(row, usersOf(db, input.vaultId), now.getTime()) };
+}
+
 /** Перевірка підписаного пульсу (формат — services/private-store/src/studioLink.mjs). */
 export function acceptHeartbeat(input: { vaultId: string; timeSec: number; signature: string; bodyText: string; info: Record<string, unknown> }, now = new Date()): HeartbeatResult {
   const db = database();
@@ -435,6 +482,9 @@ export function acceptHeartbeat(input: { vaultId: string; timeSec: number; signa
   if (!valid) return { ok: false, reason: 'bad_signature' };
   const info = { version: input.info.version, docs: input.info.docs, assets: input.info.assets, bytes: input.info.bytes, endpoint: input.info.endpoint, uptimeSec: input.info.uptimeSec };
   db.prepare('UPDATE private_stores SET last_seen = ?, last_heartbeat_sec = ?, info_json = ? WHERE id = ?').run(now.toISOString(), input.timeSec, JSON.stringify(info), input.vaultId);
+  // Ключ скриньки сервер повідомляє в підписаному пульсі: телефон бере його звідси (журнал #550).
+  const inboxKey = typeof input.info.inboxKey === 'string' ? input.info.inboxKey : null;
+  if (inboxKey && isInboxPublicKey(inboxKey)) db.prepare('UPDATE private_stores SET inbox_public_key = ? WHERE id = ?').run(inboxKey, input.vaultId);
   return {
     ok: true,
     status: row.status === 'revoked' ? 'revoked' : 'active',

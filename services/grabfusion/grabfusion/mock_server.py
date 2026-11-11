@@ -152,6 +152,10 @@ async def _pair_email(request: Request) -> Response:
     return JSONResponse({"ok": True, "message": "Якщо для цієї пошти є обліковий запис, ми надіслали лист із кодом."}, 202)
 
 
+# Відкритий ключ «скриньки» підставного сервера (P-256, несжатий, base64url): дійсна точка, приватного ключа мок не має.
+MOCK_INBOX_KEY = "BEfpdHq5Mmp4dYhToruP7LEgfPKcAhMP4UBl0vM92UMfNskHHkzeEASUAYZ4ew_d2DwRvXRvf8f_RmWKYkb9a64"
+
+
 def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -> FastAPI:
     app = FastAPI(title="GrabFusion mock of Studio photo-drafts API", docs_url=None, redoc_url=None)
     limits = contract.default_limits()
@@ -160,6 +164,7 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
     with_book: set[str] = set()  # рукописи, створені з наявною книгою (їх `submit` лишається `inbox`, контракт 1.5.0)
     app.state.calls = []  # (METHOD path, fixture) — для тестів
     app.state.pair_headers = []  # X-Forwarded-For, з яким прийшли /pair і /pair/email — для тестів
+    app.state.inbox = {}  # (сервер, елемент) → {bytes, state}: запечатані знімки «на мій сервер»; тести міняють state на delivered
     sim = Sim() if stateful else None
     app.state.sim = sim
 
@@ -178,7 +183,29 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
             if not request.headers.get("authorization", "").lower().startswith("bearer "):
                 return _err("unauthenticated", "Потрібен заголовок Authorization: Bearer.")
             return JSONResponse({"stores": [{"id": "pstore_mock0001", "name": "Домашній Docker-сервер", "online": True,
-                                              "lastSeen": "2026-11-11T10:00:00.000Z", "kinds": ["book", "course", "instruction"]}]})
+                                              "lastSeen": "2026-11-11T10:00:00.000Z", "kinds": ["book", "course", "instruction", "scan"],
+                                              "inbox": True, "inboxKey": MOCK_INBOX_KEY}]})
+        inbox_m = re.fullmatch(r"/photo-drafts/private-inbox/([^/]+)/([^/]+)", path)
+        if inbox_m and method in ("PUT", "GET"):
+            # Черга запечатаних знімків «на мій сервер» (журнал #550): мок лише тримає байти й стан, розшифрувати їх не може (ключа немає).
+            if not request.headers.get("authorization", "").lower().startswith("bearer "):
+                return _err("unauthenticated", "Потрібен заголовок Authorization: Bearer.")
+            key = (inbox_m.group(1), inbox_m.group(2))
+            if method == "GET":
+                item = app.state.inbox.get(key)
+                return JSONResponse({"itemId": key[1], "state": item["state"] if item else "unknown"})
+            if request.headers.get("content-type", "").split(";")[0].strip() != "application/octet-stream":
+                return _err("bad_input", "Очікується application/octet-stream.")
+            raw_body = await request.body()
+            if not raw_body.startswith(b"NSE1"):
+                return _err("bad_input", "Це не запечатаний конверт.")
+            old = app.state.inbox.get(key)
+            if old is not None:
+                if old["bytes"] == raw_body:
+                    return JSONResponse({"itemId": key[1], "state": old["state"], "duplicate": True}, status_code=200)
+                return _err("conflict", "Елемент із цим номером уже є з іншим вмістом.")
+            app.state.inbox[key] = {"bytes": raw_body, "state": "queued"}
+            return JSONResponse({"itemId": key[1], "state": "queued", "expiresAt": "2026-11-14T10:00:00.000Z", "duplicate": False}, status_code=201)
         route = params = None
         for r in ROUTES:
             if r.method != method:

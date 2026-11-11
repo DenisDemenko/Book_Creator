@@ -8,7 +8,7 @@
  * Модуль без залежностей від решти застосунку: його викликають сховище книг, дашборд і курси.
  */
 
-export type PrivateKind = 'book' | 'course' | 'instruction';
+export type PrivateKind = 'book' | 'course' | 'instruction' | 'scan';
 
 export interface PrivateStoreInfo {
   id: string;
@@ -187,6 +187,94 @@ export async function deletePrivateDoc(storeId: string, id: string): Promise<voi
   if (res.status === 404) return; // уже немає — мета досягнута
   await expectJson(res);
   revisions.delete(`${storeId}:${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// «Вхідні з телефона» (журнал #550): знімки, запечатані на телефоні й розпечатані лише сервером; розпізнавання теж на сервері
+// ---------------------------------------------------------------------------
+
+export type ScanEngine = 'tesseract' | 'ollama';
+export type ScanQuality = 'good' | 'fair' | 'poor' | 'unknown';
+
+export interface ScanOcr {
+  status: 'idle' | 'queued' | 'running' | 'done' | 'failed';
+  engine?: ScanEngine;
+  model?: string;
+  text?: string;
+  /** Текст, як його розпізнав рушій (до ручної правки). */
+  original?: string;
+  confidence?: number | null;
+  quality?: ScanQuality;
+  /** Слова, у яких рушій не впевнений (для підсвічування). */
+  uncertain?: string[];
+  usedPrep?: boolean;
+  angle?: number | null;
+  ms?: number;
+  error?: string | null;
+  unreadable?: number;
+  at?: string;
+}
+
+export interface ScanPage {
+  pageId: string;
+  order: number;
+  assetId: string;
+  mime: string;
+  bytes: number;
+  width: number;
+  height: number;
+  receivedAt: string;
+  note?: string;
+  textEdited: boolean;
+  ocr: ScanOcr;
+}
+
+export interface ScanDraft {
+  v: 1;
+  draftId: string;
+  kind: 'course' | 'instruction' | 'manuscript';
+  courseSource?: 'photos' | 'document' | null;
+  instructionMode?: 'assembly' | 'operation' | null;
+  modelCode?: string;
+  title?: string;
+  craft?: string;
+  audience?: string;
+  newBookTitle?: string;
+  createdAt: string;
+  updatedAt: string;
+  pages: ScanPage[];
+  consumed?: { kind: 'book' | 'course' | 'instruction'; id: string; at: string };
+}
+
+export interface ScanEngines {
+  tesseract: { available: boolean; reason?: string; langs?: string[] };
+  ollama: { configured: boolean; available: boolean; model: string; models: string[]; modelReady?: boolean; reason?: string };
+}
+
+export async function fetchScanEngines(storeId: string): Promise<ScanEngines> {
+  return expectJson<ScanEngines>(await vaultFetch(storeId, 'GET', '/v1/engines'));
+}
+
+/** Поставити сторінку в чергу розпізнавання на сервері; результат з'явиться в чернетці (опитуйте її). */
+export async function recognizeScanPage(storeId: string, docId: string, pageId: string, engine: ScanEngine, model?: string): Promise<void> {
+  await expectJson(await vaultFetch(storeId, 'POST', `/v1/scans/${encodeURIComponent(docId)}/recognize`, { pageId, engine, ...(model ? { model } : {}) }));
+}
+
+export async function saveScanPageText(storeId: string, docId: string, pageId: string, text: string): Promise<void> {
+  await expectJson(await vaultFetch(storeId, 'PUT', `/v1/scans/${encodeURIComponent(docId)}/pages/${encodeURIComponent(pageId)}/text`, { text }));
+}
+
+export async function deleteScanPage(storeId: string, docId: string, pageId: string): Promise<void> {
+  await expectJson(await vaultFetch(storeId, 'DELETE', `/v1/scans/${encodeURIComponent(docId)}/pages/${encodeURIComponent(pageId)}`));
+}
+
+/** Шапка чернетки: назва, вид, джерело, позначка «створено матеріал». */
+export async function editScanDraft(
+  storeId: string,
+  docId: string,
+  patch: Partial<Pick<ScanDraft, 'title' | 'kind' | 'courseSource' | 'instructionMode' | 'modelCode' | 'craft' | 'audience' | 'newBookTitle'>> & { consumed?: { kind: 'book' | 'course' | 'instruction'; id: string } | null }
+): Promise<void> {
+  await expectJson(await vaultFetch(storeId, 'POST', `/v1/scans/${encodeURIComponent(docId)}/edit`, patch));
 }
 
 export async function putPrivateAsset(storeId: string, id: string, docId: string, blob: Blob): Promise<void> {
