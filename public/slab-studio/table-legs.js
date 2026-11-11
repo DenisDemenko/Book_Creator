@@ -48,10 +48,13 @@
   });
 
   // The buyer sets how far the mounting plate stays from the edge of the top (cm). The plates sit
-  // under the legs, so the legs move with them: input.inset, and input.plateCm = the plate type side.
+  // under the legs, so the legs move with them. insetLength/insetWidth are independent plan clearances;
+  // inset preserves saved legacy layouts, and plateCm is the plate type side.
   const DEFAULT_INSET_CM = 5,
     MAX_INSET_CM = 40;
   const insetOf = (p) => (Number.isFinite(p.inset) ? Math.min(Math.max(p.inset, 0), MAX_INSET_CM) : DEFAULT_INSET_CM);
+  const hasAxisInsets = p => Number.isFinite(p.insetLength) || Number.isFinite(p.insetWidth);
+  const insetsOf = p => ({ length: Number.isFinite(p.insetLength) ? Math.min(MAX_INSET_CM, Math.max(0, p.insetLength)) : insetOf(p), width: Number.isFinite(p.insetWidth) ? Math.min(MAX_INSET_CM, Math.max(0, p.insetWidth)) : insetOf(p) });
   // The buyer can set both ends of the legs by hand (cm): top = the end under the tabletop, foot = the end
   // on the floor, each width x depth, so a leg can be a trapezoid. legDims = { topW, topD, footW, footD }.
   // It applies where one leg is copied to the corners (or posts, bars, a tripod); the end panels, the
@@ -163,6 +166,7 @@
   // round or oval top the corner is pulled along its diagonal until the outer corner of the plate is
   // `inset` inside the curve (a quadratic in the scale k, solved exactly).
   function corners(p, T) {
+    if (hasAxisInsets(p)) return axisCorners(p, T);
     const ins = insetOf(p),
       ext = plateHalf(p, T);
     let hx = Math.max(p.l / 2 - ins - ext, 0),
@@ -199,6 +203,19 @@
   }
   // The x of an end panel centre (panels carry a plate as wide as themselves).
   function panelX(p, T, wid) {
+    if (hasAxisInsets(p)) {
+      const ins = insetsOf(p), ext = plateHalf(p, T, false), halfY = Math.max(p.plateCm || 0, wid + 4) / 2;
+      const a = Math.max(ext + T, p.l / 2 - ins.length), b = Math.max(halfY, p.w / 2 - ins.width);
+      let x = Math.max(0, a - ext);
+      if (p.shape === 'oval' || p.shape === 'round') x = Math.min(x, a * Math.sqrt(Math.max(0, 1 - (halfY / b) ** 2)) - ext);
+      else if (cornerCm(p) > 0) {
+        let lo = 0, hi = x;
+        for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (plateCornerFits(p, mid + ext, halfY, 0)) lo = mid; else hi = mid; }
+        x = lo;
+      }
+      return Math.max(T, x);
+    }
+
     const ins = insetOf(p),
       ext = plateHalf(p, T, false);
     let x = p.l / 2 - ins - ext;
@@ -225,6 +242,24 @@
     return Math.max(x, T);
   }
 
+  function axisCorners(p, T) {
+    const ins = insetsOf(p), ext = plateHalf(p, T);
+    const a = Math.max(ext + .1, p.l / 2 - ins.length), b = Math.max(ext + .1, p.w / 2 - ins.width);
+    let hx = Math.max(0, a - ext), hy = Math.max(0, b - ext);
+    const fits = k => {
+      const x = k * hx + ext, y = k * hy + ext;
+      if (p.shape === 'oval' || p.shape === 'round') return (x / a) ** 2 + (y / b) ** 2 <= 1;
+      return plateCornerFits(p, x, y, 0);
+    };
+    if (!fits(1)) {
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid; }
+      hx *= lo; hy *= lo;
+    }
+    hx = Math.max(hx, T / 2 + 1); hy = Math.max(hy, T / 2 + 1);
+    return { hx, hy, list: [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]] };
+  }
+  const panelWidth = p => hasAxisInsets(p) ? Math.max(10, (p.w - 2 * insetsOf(p).width) * (['oval','round'].includes(p.shape) ? .72 : 1) - 4) : Math.max(10, Math.min(p.w * .72, p.w - 10));
   // The ends a leg of this layout has before the buyer changes them, in cm (what the "by hand" fields start from).
   function defaultDims(id, T) {
     const ends = {
@@ -279,7 +314,7 @@
       Lg = legLength(p),
       parts = [],
       mounts = [];
-    const c = corners(p, T);
+    const c = corners(p, id === "tripod" ? T * 1.1 : T);
     const mount = (x, y, a, b, yaw = 0, kind = "leg") =>
       mounts.push({ x, y, a, b, yaw, kind });
     switch (id) {
@@ -327,20 +362,20 @@
         [-1, 1].forEach((sx, k) => {
           [-1, 1].forEach((sy, j) => {
             const x = sx * px,
-              ty = sy * py * 0.82,
-              by = sy * py;
+              ty = sy * py * (hasAxisInsets(p) ? 1 : .82),
+              by = sy * py * (hasAxisInsets(p) ? 1 / .82 : 1);
             parts.push(part(`post${k}${j}`, "leg", "rect", [x, by, 0], [x, ty, Lg], [T * 0.8, T], [T * 0.8, T]));
             mount(x, ty, T * 0.8, T);
           });
           parts.push(
-            part(`bar${k}`, "rail", "rect", [x0(sx, px), 0, 0.84 * Lg], [x0(sx, px), 0, Lg], [T * 0.8, py * 1.64], [T * 0.8, py * 1.64]),
+            part(`bar${k}`, "rail", "rect", [x0(sx, px), 0, 0.84 * Lg], [x0(sx, px), 0, Lg], [T * 0.8, py * (hasAxisInsets(p) ? 2 : 1.64)], [T * 0.8, py * (hasAxisInsets(p) ? 2 : 1.64)]),
           );
         });
         parts.push(part("stretcher", "rail", "rect", [0, 0, 0.22 * Lg], [0, 0, 0.22 * Lg + T * 0.7], [px * 2, T * 0.7], [px * 2, T * 0.7]));
         break;
       }
       case "slab": {
-        const wid = Math.max(10, Math.min(p.w * 0.72, p.w - 10));
+        const wid = panelWidth(p);
         const px = panelX(p, T, wid);
         [-1, 1].forEach((sx, i) => {
           parts.push(part("panel" + i, "panel", "rect", [sx * px, 0, 0], [sx * px, 0, Lg], [T, wid], [T, wid]));
@@ -349,12 +384,12 @@
         break;
       }
       case "xframe": {
-        const px = c.hx * 0.8,
+        const px = c.hx * (hasAxisInsets(p) ? 1 : .8),
           py = c.hy;
         [-1, 1].forEach((sx, k) =>
           [-1, 1].forEach((sy, j) => {
-            const topY = sy * py * 0.85;
-            parts.push(part(`bar${k}${j}`, "leg", "rect", [sx * px, -sy * py, 0], [sx * px, topY, Lg], [T * 0.7, T], [T * 0.7, T]));
+            const topY = sy * py * (hasAxisInsets(p) ? 1 : .85);
+            parts.push(part(`bar${k}${j}`, "leg", "rect", [sx * px, -sy * py * (hasAxisInsets(p) ? 1 / .85 : 1), 0], [sx * px, topY, Lg], [T * 0.7, T], [T * 0.7, T]));
             mount(sx * px, topY, T * 0.7, T);
           }),
         );
@@ -393,8 +428,10 @@
         [90, 210, 330].forEach((deg, i) => {
           const cx = Math.cos(deg * DEG),
             cy = Math.sin(deg * DEG);
-          parts.push(part("leg" + i, "leg", "round", [rb * cx, rb * cy, 0], [rt * cx, rt * cy, Lg], [T * 0.75, T * 0.75], [T * 1.1, T * 1.1]));
-          mount(rt * cx, rt * cy, T * 1.1, T * 1.1);
+          const topX = hasAxisInsets(p) ? [0, -c.hx, c.hx][i] : rt * cx;
+          const topY = hasAxisInsets(p) ? [c.hy, -c.hy, -c.hy][i] : rt * cy;
+          parts.push(part("leg" + i, "leg", "round", [topX + (rb - rt) * cx, topY + (rb - rt) * cy, 0], [topX, topY, Lg], [T * 0.75, T * 0.75], [T * 1.1, T * 1.1]));
+          mount(topX, topY, T * 1.1, T * 1.1);
         });
         break;
       }
@@ -415,7 +452,7 @@
       mounts = [];
     const c = corners(p, T);
     if (design.placement === "ends") {
-      const wid = Math.max(10, Math.min(p.w * 0.72, p.w - 10));
+      const wid = panelWidth(p);
       const px = panelX(p, T, wid);
       [-1, 1].forEach((sx, i) => {
         parts.push(part("panel" + i, "panel", "rect", [sx * px, 0, 0], [sx * px, 0, Lg], [T, wid], [T, wid], 0, { svg: "side", fill: design.fill }));
@@ -603,5 +640,5 @@
     return withApron(p, input => known ? build(input.scheme, input) : buildFromSvg(design, input));
   }
 
-  root.TableLegs = { APRON_SCHEMES, SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, ringSize, slatsOf, slatCount, SLAT_MIN_CM, SLAT_MAX_CM, SLAT_R_MIN_CM, SLAT_R_MAX_CM, holeInsetMm, HOLE_INSET_MIN_MM, HOLE_INSET_MAX_MM, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
+  root.TableLegs = { APRON_SCHEMES, SCHEMES, build, buildFromSvg, layout, plates, vertices, outline, volume, cost, legLength, hull, PLATE_MIN_CM, PLATE_MAX_CM, plateSide, DEFAULT_INSET_CM, MAX_INSET_CM, insetsOf, DIMS_SCHEMES, LEG_MIN_CM, LEG_MAX_CM, defaultDims, ringSize, slatsOf, slatCount, SLAT_MIN_CM, SLAT_MAX_CM, SLAT_R_MIN_CM, SLAT_R_MAX_CM, holeInsetMm, HOLE_INSET_MIN_MM, HOLE_INSET_MAX_MM, COLUMN_MIN_CM, COLUMN_MAX_CM, columnTopMax, defaultColumn, footprint };
 })(typeof window !== "undefined" ? window : globalThis);

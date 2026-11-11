@@ -589,3 +589,9 @@ Live /bed-builder: 7 asset hashes, власна галерея PNG, 42/52 лам
 Продовження 11.11.2026 (#546, код d9dbb03, запушено й розгорнуто): лист із кодом підключення з проду не йшов — Railway не пропускає SMTP. У `server/mail.ts` канал HTTPS-API Brevo (`BREVO_API_KEY`, порт 443) із запасним SMTP;
 `test:mail-brevo` 30. У Brevo вимкнено «Authorised IPs» для API і автентифіковано домен fusionlab.in.ua (DNS у cPanel hostiq: `brevo-code`, DKIM `brevo1/2._domainkey`, `_dmarc` з `rua`). Живий лист дійшов, телефон підключено.
 Наступний крок (за бажанням): перевірити доставку не лише на Gmail. Успішну відправку Studio пише в лог (`[mail] Brevo API: лист прийнято (messageId …)`). Діагностика: GET /api/admin/mail/status (`brevoApi`), /api/admin/mail/test (`api.brevo.com:443`), логи `[mail]` / `[pairEmail]`, журнал Transactional у Brevo.
+
+
+## Приймання — 11.11.2026 Codex #02, studio-table-axis-insets
+Прийнято чистий Book_Creator/work, fast-forward de47b72 → актуальний origin/master 409f49b; Marketplace/master 40abe1a. Origin, AGENTS, передавання, журнал і відсутність чужого lock звірено. Створено власний tmp/session.lock. Власник доручив першою виправити розбіжність креслень столів; попередні прямі дозволи commit/push/публікації з цієї розмови чинні. Реалізація обмежена збереженими відступами ніжок і PDF Студії. Новий геометричний тест відтворив дефект: 50/50 мм замість збережених 60/20 мм. Серверне приймання в адмінці не виконане.
+
+Локальні результати #547: build, TypeScript (heap 8192), 23 guarded bridge routes, геометрія 10 схем, старі/нульові/часткові осі та 4 справжні PDF DesignCraft 0.9.0 — PASS. Сторінки специфікації й плану переглянуто, pdftotext підтвердив 60/20 мм; journal-check і 80/80 — PASS. Файли runtime байт-у-байт дорівнюють Marketplace 40abe1a. Публікація перевіряється після коміту; live/CI ще не стверджуються.

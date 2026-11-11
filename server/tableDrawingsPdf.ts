@@ -156,7 +156,14 @@ export function specLines(o: DrawingsOrder): string[] {
     if (legs.columnDims) lines.push(`Колона: верхнє коло Ø${num(legs.columnDims.top * 10, 0)} → нижнє Ø${num(legs.columnDims.foot * 10, 0)} мм`);
     if (legs.apron) lines.push(`ЦАРГИ: 4 шт. · висота ${num(legs.apron.height * 10, 0)} мм · товщина ${num(legs.apron.thickness * 10, 0)} мм · дерево ${legs.material?.name || ''}`);
     if (legs.slats) lines.push(`Рейки: товщина ${num(legs.slats.thick * 10, 0)} мм, скруглення ${num(legs.slats.radius * 10, 0)} мм, ${legs.slatCount ?? '—'} на колоні`);
-    lines.push(`Відступ від краю стільниці: ${num(legs.inset * 10, 0)} мм`);
+    if (Number.isFinite(legs.insetLength) || Number.isFinite(legs.insetWidth)) {
+      const fallback = Number.isFinite(legs.inset) ? legs.inset : 5;
+      const along = Number.isFinite(legs.insetLength) ? legs.insetLength : fallback;
+      const across = Number.isFinite(legs.insetWidth) ? legs.insetWidth : fallback;
+      lines.push(`Відступ від краю стільниці: вздовж ${num(along * 10, 0)} мм, впоперек ${num(across * 10, 0)} мм`);
+    } else {
+      lines.push(`Відступ від краю стільниці: ${num(legs.inset * 10, 0)} мм`);
+    }
     if (legs.plate)
       lines.push(`Пластини: ${legs.mounts?.length ?? '—'} × «${legs.plate.name}» ${num(legs.mounts?.[0]?.w * 10, 0)} × ${num(legs.mounts?.[0]?.d * 10, 0)} × ${num(legs.plateThicknessCm * 10, 0)} мм, 4 отвори Ø${num(legs.plate.holeDiameterMm, 1)} мм, відступ ${num(legs.plate.holeInsetMm, 0)} мм від краю`);
   }

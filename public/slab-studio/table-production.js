@@ -90,6 +90,7 @@
       corner: (Number(o.cornerMm) || 0) / 10,
       scheme: set.scheme, height: q.height, thickness: q.thickness,
       plateT: q.plateThicknessCm, inset: q.inset, apron: q.apron || undefined,
+      insetLength: q.insetLength, insetWidth: q.insetWidth,
       legDims: q.legDims || undefined, columnDims: q.columnDims || undefined, slats: q.slats || undefined,
       plateCm: Math.max(TL.plateSide(plateSpec.widthCm), TL.plateSide(plateSpec.depthCm)),
     };

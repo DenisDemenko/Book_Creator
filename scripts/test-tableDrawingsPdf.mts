@@ -113,6 +113,49 @@ assert.ok(/масштаб 1:10/.test(reduced));
 assert.ok(production.svg(sheets[0], o).includes('масштаб 1:1.'));
 assert.equal(drawingsFileName(o), 'stil-T-100-kreslennya.pdf');
 
+// A saved quote is authoritative: the drawing must retain both plate clearances,
+// rather than reverting to the old single inset or a subsequently edited draft.
+function axisOrder(insetLength?: number, insetWidth?: number, inset = 5): DrawingsOrder {
+  const saved = order({ cornerMm: 0 }) as any;
+  saved.legSet = { scheme: 'straight', height: 75, thickness: 6, material: 'oak', inset: 30 };
+  saved.quote.legs = {
+    ...saved.quote.legs, scheme: 'straight', schemeName: 'Прямі квадратні',
+    thickness: 6, inset, insetLength, insetWidth, columnDims: null, slats: null,
+  };
+  const x = 100 - (insetLength ?? inset) - 7.5, y = 50 - (insetWidth ?? inset) - 7.5;
+  saved.quote.legs.mounts = [[-x, -y], [x, -y], [x, y], [-x, y]].map(([x, y]) => ({ x, y, w: 15, d: 15 }));
+  return JSON.parse(JSON.stringify(saved));
+}
+const centers = (saved: DrawingsOrder) => JSON.parse(JSON.stringify(context.TableProduction.legsOf(saved).plates.map((p: any) => [p.x, p.y])));
+const axes = axisOrder(6, 2);
+assert.deepEqual(centers(axes), [[-86.5, -40.5], [86.5, -40.5], [86.5, 40.5], [-86.5, 40.5]], '2000×1000 mm top, 150 mm plates, 60/20 mm edge clearances');
+assert.deepEqual(centers(axisOrder(12, 2)), [[-80.5, -40.5], [80.5, -40.5], [80.5, 40.5], [-80.5, 40.5]], 'length clearance changes only X');
+assert.deepEqual(centers(axisOrder(6, 10)), [[-86.5, -32.5], [86.5, -32.5], [86.5, 32.5], [-86.5, 32.5]], 'width clearance changes only Y');
+assert.deepEqual(centers(axisOrder(undefined, undefined, 7)), [[-85.5, -35.5], [85.5, -35.5], [85.5, 35.5], [-85.5, 35.5]], 'legacy saved orders keep their single inset');
+assert.deepEqual(centers(axisOrder(0, undefined, 7)), [[-92.5, -35.5], [92.5, -35.5], [92.5, 35.5], [-92.5, 35.5]], 'zero is a real clearance; the missing axis falls back to the saved inset');
+const axisSpec = specLines(axes).join('\n');
+assert(axisSpec.includes('Відступ від краю стільниці: вздовж 60 мм, впоперек 20 мм'));
+assert(specLines(axisOrder(0, undefined, 7)).join('\n').includes('вздовж 0 мм, впоперек 70 мм'));
+assert(specLines(axisOrder(undefined, undefined, 7)).includes('Відступ від краю стільниці: 70 мм'));
+const axisScript = buildDrawingsScript(axes);
+assert(axisScript.steps.some(s => s.command === 'frame.create' && String(s.params.text).includes('вздовж 60 мм, впоперек 20 мм')), 'the PDF specification receives both saved axes');
+const plan = production.sheets(axes).find(s => s.id === '03-legs-plan')!;
+assert(plan, 'mounting plan is present');
+assert.notEqual(production.svg(plan, axes), production.svg(production.sheets(axisOrder(12, 2)).find(s => s.id === plan.id)!, axisOrder(12, 2)), 'the actual PDF mounting sheet moves with the length clearance');
+assert.notEqual(production.svg(plan, axes), production.svg(production.sheets(axisOrder(6, 10)).find(s => s.id === plan.id)!, axisOrder(6, 10)), 'the actual PDF mounting sheet moves with the width clearance');
+for (const scheme of TL.SCHEMES) {
+  const saved = axisOrder(6, 2) as any;
+  saved.legSet.scheme = saved.quote.legs.scheme = scheme.id;
+  const before = context.TableProduction.legsOf(saved);
+  saved.quote.legs.insetLength = 12;
+  saved.quote.legs.insetWidth = 10;
+  const after = context.TableProduction.legsOf(saved);
+  assert.equal(before.base.legLength, after.base.legLength, scheme.id + ': clearances do not change the table height');
+  if (scheme.id === 'pedestal') assert.deepEqual(JSON.stringify(before.plates), JSON.stringify(after.plates), 'the central column stays centered');
+  else assert.notEqual(JSON.stringify(before.plates), JSON.stringify(after.plates), scheme.id + ': the saved axis clearances reach the production geometry');
+}
+console.log('✓ saved table quotes: independent axes, zero and legacy fallback, all ten leg schemes, PDF specification and mounting sheets');
+
 // ---- шаблони дизайну: ті самі теми, що й у книг Студії
 const templates = listDrawingsTemplates();
 assert.equal(templates.length, 17, 'усі дизайн-теми книг');
@@ -167,6 +210,9 @@ if (cli) {
   const { width, height } = doc.getPage(0).getSize();
   assert.ok(Math.abs(width - 595.28) < 1 && Math.abs(height - 841.89) < 1 && width < height, 'A4 книжна: вужча, ніж висока');
   if (process.env.KEEP_DRAWINGS_PDF) fs.writeFileSync(process.env.KEEP_DRAWINGS_PDF, pdf);
+  const axesPdf = await renderDrawingsPdf(axes, { cli });
+  assert.equal((await PDFDocument.load(axesPdf)).getPageCount(), axisScript.pages, 'the real engine renders all saved two-axis mounting sheets');
+  if (process.env.KEEP_AXIS_DRAWINGS_PDF) fs.writeFileSync(process.env.KEEP_AXIS_DRAWINGS_PDF, axesPdf);
   for (const id of ['sci-fi', 'children']) {
     const other = await renderDrawingsPdf(o, { cli, template: id });
     assert.equal((await PDFDocument.load(other)).getPageCount(), pages, id + ': шаблон не змінює кількість сторінок');
