@@ -572,7 +572,7 @@ async function startServer() {
     `[auth] Адміністратор: ${ADMIN_EMAIL} | Firebase-вхід: ${firebaseAuthStatus.enabled ? 'налаштовано' : 'НЕ налаштовано — задайте FIREBASE_* у .env'}`
   );
   console.log(
-    `[mail] SMTP: ${mailConfig.enabled ? `увімкнено (${mailConfig.from})` : 'вимкнено — задайте SMTP_HOST/SMTP_USER/SMTP_PASS у .env і перезапустіть сервер'}`
+    `[mail] SMTP: ${mailConfig.enabled ? `увімкнено (${mailConfig.from}; канали: ${[mailConfig.brevoKey ? 'HTTPS-API Brevo' : '', mailConfig.smtpEnabled ? 'SMTP' : ''].filter(Boolean).join(' → ')})` : 'вимкнено — задайте BREVO_API_KEY або SMTP_HOST/SMTP_USER/SMTP_PASS у .env і перезапустіть сервер'}`
   );
 
   registerAuthRoutes(app);

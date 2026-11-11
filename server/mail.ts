@@ -12,6 +12,11 @@
  * SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS — дані поштового сервера.
  * SMTP_FROM — адреса відправника (напр. "NOVA STUDIO <noreply@novastudio.ua>").
  * SMTP_SECURE — "true", якщо порт вимагає TLS одразу (зазвичай 465).
+ *
+ * BREVO_API_KEY — ключ HTTPS-API Brevo (кабінет Brevo → «SMTP & API» → вкладка «API Keys»; це НЕ SMTP-ключ). Лист іде
+ * запитом на api.brevo.com:443, а цей порт Railway не блокує, на відміну від SMTP (25/465/587/2525 — «Connection
+ * timeout», журнал #546). Адреса відправника — SMTP_FROM. Якщо задано обидва канали, спершу пробується API, а за збою —
+ * SMTP. BREVO_API_URL лише для тестів (локальний підставний сервер).
  */
 
 import nodemailer from 'nodemailer';
@@ -24,8 +29,14 @@ export const mailConfig = {
   pass: process.env.SMTP_PASS || '',
   from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
   secure: process.env.SMTP_SECURE === 'true',
-  get enabled() {
+  // Значення з панелей часто приходять у лапках — зайве прибираємо (як і для інших ключів, див. env-value traps).
+  brevoKey: (process.env.BREVO_API_KEY || '').trim().replace(/^["']|["']$/g, ''),
+  brevoUrl: process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email',
+  get smtpEnabled() {
     return !!(this.host && this.user && this.pass);
+  },
+  get enabled() {
+    return this.smtpEnabled || !!this.brevoKey;
   },
 };
 
@@ -136,19 +147,88 @@ export interface SendMailInput {
 }
 
 /**
+ * «Назва <адреса>» → {name, email}: Brevo приймає відправника лише окремими полями, а SMTP_FROM у нас рядком для SMTP.
+ * Повертає null, якщо адреси в рядку немає.
+ */
+export function parseSender(from: string): { name?: string; email: string } | null {
+  const text = from.trim();
+  const m = text.match(/^(?:"?([^"<]*?)"?\s*)?<([^<>\s]+@[^<>\s]+)>$/);
+  if (m) {
+    const name = (m[1] || '').trim();
+    return name ? { name, email: m[2] } : { email: m[2] };
+  }
+  return /^[^<>\s]+@[^<>\s]+$/.test(text) ? { email: text } : null;
+}
+
+const BREVO_TIMEOUT_MS = 10_000;
+
+/**
+ * Лист через HTTPS-API Brevo (POST /v3/smtp/email, заголовок api-key). Без винятків: помилка — у `error`, з текстом
+ * відповіді Brevo (там причина: «Key not found», «sender not valid», «unrecognised IP address»). Сам ключ ніколи
+ * не потрапляє ні в помилку, ні в лог.
+ */
+async function sendViaBrevo(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
+  const sender = parseSender(mailConfig.from);
+  if (!sender) return { ok: false, error: 'Brevo API: SMTP_FROM має бути адресою або «Назва <адреса>»' };
+  try {
+    const resp = await fetch(mailConfig.brevoUrl, {
+      method: 'POST',
+      headers: { 'api-key': mailConfig.brevoKey, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        sender,
+        to: [{ email: input.to }],
+        subject: input.subject,
+        htmlContent: input.html,
+        textContent: input.text,
+      }),
+      signal: AbortSignal.timeout(BREVO_TIMEOUT_MS),
+    });
+    if (resp.ok) return { ok: true };
+    let detail = '';
+    try {
+      const body = (await resp.json()) as { message?: unknown };
+      if (typeof body.message === 'string' && body.message) detail = `: ${body.message.slice(0, 300)}`;
+    } catch {
+      /* тіло не JSON — лишається лише код */
+    }
+    return { ok: false, error: `Brevo API ${resp.status}${detail}` };
+  } catch (err) {
+    return { ok: false, error: `Brevo API: ${String((err as Error).message || err)}` };
+  }
+}
+
+/**
  * Надсилає лист і повертає результат з причиною помилки (без винятків).
- * ok === false і коли SMTP не налаштований, і коли відправка провалилась —
+ * ok === false і коли пошту не налаштовано, і коли відправка провалилась —
  * виклик не падає, а мусить запропонувати запасний варіант (посилання).
+ *
+ * Порядок каналів: HTTPS-API Brevo (якщо є BREVO_API_KEY), потім SMTP (якщо налаштований).
  */
 export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
   if (!mailConfig.enabled) {
     console.warn(
-      `[mail] SMTP не налаштовано (SMTP_HOST/SMTP_USER/SMTP_PASS) — лист до ${input.to} не надіслано. ` +
+      `[mail] Пошту не налаштовано (BREVO_API_KEY або SMTP_HOST/SMTP_USER/SMTP_PASS) — лист до ${input.to} не надіслано. ` +
         'Посилання потрібно передати отримувачу вручну.'
     );
     return { ok: false, error: 'SMTP не налаштовано' };
   }
 
+  let apiError: string | undefined;
+  if (mailConfig.brevoKey) {
+    const viaApi = await sendViaBrevo(input);
+    if (viaApi.ok) return viaApi;
+    apiError = viaApi.error;
+    console.error(`[mail] ${apiError}`);
+    if (!mailConfig.smtpEnabled) return { ok: false, error: apiError };
+    console.warn('[mail] HTTPS-API не спрацював — пробую SMTP.');
+  }
+
+  const viaSmtp = await sendViaSmtp(input);
+  if (viaSmtp.ok || !apiError) return viaSmtp;
+  return { ok: false, error: `${apiError}; SMTP: ${viaSmtp.error}` };
+}
+
+async function sendViaSmtp(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
   let hosts: string[];
   try {
     hosts = await resolveSmtpHosts(mailConfig.host);

@@ -210,6 +210,8 @@ export function registerAdminRoutes(app: Express): void {
   app.get('/api/admin/mail/status', requireAdmin, (_req, res) => {
     res.json({
       enabled: mailConfig.enabled,
+      brevoApi: !!mailConfig.brevoKey, // лише факт наявності; значення ключа не віддаємо
+      smtpEnabled: mailConfig.smtpEnabled,
       host: mailConfig.host || null,
       port: mailConfig.port,
       secure: mailConfig.secure,
@@ -229,6 +231,7 @@ export function registerAdminRoutes(app: Express): void {
       { label: `${host}:587`, host, port: 587 },
       { label: `${host}:2525`, host, port: 2525 },
       { label: 'smtp-relay.brevo.com:2525', host: 'smtp-relay.brevo.com', port: 2525 },
+      { label: 'api.brevo.com:443 (HTTPS-API пошти)', host: 'api.brevo.com', port: 443 },
       { label: 'www.google.com:443 (еталон egress)', host: 'www.google.com', port: 443 },
     ];
     const results = [];
