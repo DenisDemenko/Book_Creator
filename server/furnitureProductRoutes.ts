@@ -1,3 +1,4 @@
+import {constructorId,constructorJson,constructorCard,saveConstructorCard,registerConstructorProductRoutes} from './constructorProducts';
 /**
  * Фізичні вироби (меблі / дерево) — адміністраторська половина.
  *
@@ -355,15 +356,18 @@ export async function uploadProductMedia(
 const kitFileStore = createKitFileStore(process.env.KIT_FILES_DIR || path.join(DATA_DIR, 'kit-files'));
 
 export function registerFurnitureProductRoutes(app: Express): void {
+  registerConstructorProductRoutes(app);
   registerKitFileRoutes(app, { auth: requireAdmin, readDrafts, writeDrafts, store: kitFileStore });
 
-  app.get('/api/admin/furniture-products', requireAdmin, async (_req, res) => {
+  app.get('/api/admin/furniture-products', requireAdmin, async (req, res) => {
     const drafts = await readDrafts();
-    res.json({ products: drafts });
+    let constructed=[];let constructorError;try{constructed=(await constructorJson(req,"GET","")).map(constructorCard);}catch(e:any){constructorError=e.message;}
+    res.json({ products: [...constructed,...drafts],constructorError });
   });
 
   app.post('/api/admin/furniture-products', requireAdmin, async (req, res) => {
     const product = req.body?.product as FurnitureProduct | undefined;
+    if(constructorId(product?.id)){try{return res.json({product:await saveConstructorCard(req,product!)});}catch(e:any){return res.status(e.status||400).json({error:e.message});}}
     if (!product || typeof product !== 'object' || !product.id) {
       return res.status(400).json({ error: 'Некоректна картка виробу.' });
     }
@@ -403,6 +407,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
   });
 
   app.delete('/api/admin/furniture-products/:id', requireAdmin, async (req, res) => {
+    if(constructorId(req.params.id)){try{await constructorJson(req,'POST','/'+constructorId(req.params.id)+'/archive');return res.json({ok:true});}catch(e:any){return res.status(e.status||400).json({error:e.message});}}
     const drafts = await readDrafts();
     const next = drafts.filter((d) => d.id !== req.params.id);
     if (next.length === drafts.length) {
@@ -417,6 +422,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
   app.post('/api/admin/furniture-products/:id/publish', requireAdmin, async (req, res) => {
     const id = req.params.id;
     try {
+      if(constructorId(id)){const p=await constructorJson(req,'GET','/'+constructorId(id));const saved=await constructorJson(req,'POST','/'+constructorId(id)+'/publish',{expectedRevision:p.revision});return res.json({product:constructorCard(saved)});}
       const drafts = await readDrafts();
       const product = drafts.find((d) => d.id === id);
       if (!product) return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
