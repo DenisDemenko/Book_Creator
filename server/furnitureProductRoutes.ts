@@ -14,6 +14,7 @@ import {constructorId,constructorJson,constructorCard,saveConstructorCard,regist
 
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
+import { withPublicationJournal } from './storefrontPublications';
 import { DATA_DIR } from './db';
 import { createKitFileStore } from './kitFiles';
 import { registerKitFileRoutes, serialKitFiles } from './kitFileRoutes';
@@ -422,7 +423,15 @@ export function registerFurnitureProductRoutes(app: Express): void {
   app.post('/api/admin/furniture-products/:id/publish', requireAdmin, async (req, res) => {
     const id = req.params.id;
     try {
-      if(constructorId(id)){const p=await constructorJson(req,'GET','/'+constructorId(id));const saved=await constructorJson(req,'POST','/'+constructorId(id)+'/publish',{expectedRevision:p.revision});return res.json({product:constructorCard(saved)});}
+      if(constructorId(id)){
+        const p=await constructorJson(req,'GET','/'+constructorId(id));
+        // Журнал публікацій (#554): у конструктора є ревізія, тож у вітрині видно, яка саме поїхала.
+        const saved=await withPublicationJournal(
+          { kind: 'product', sourceId: String(constructorId(id)), title: String(p?.name || p?.title || ''), sourceRevision: Number(p?.revision) || null, actorId: req.principal?.id ?? null },
+          () => constructorJson(req,'POST','/'+constructorId(id)+'/publish',{expectedRevision:p.revision})
+        );
+        return res.json({product:constructorCard(saved)});
+      }
       const drafts = await readDrafts();
       const product = drafts.find((d) => d.id === id);
       if (!product) return res.status(404).json({ error: 'Чорнетку виробу не знайдено.' });
@@ -439,7 +448,10 @@ export function registerFurnitureProductRoutes(app: Express): void {
       setPublishProgress(id, { status: 'running', done: 0, total, label: 'Публікація картки товару…' });
 
       const sellerSlug = process.env.BRIDGE_SELLER_SLUG || 'fusion-lab';
-      const result = await publishProductToMarketplace({
+      // Журнал публікацій (#554). Власної версії у виробу немає, тож у вітрині він рахується номером публікації.
+      const result = await withPublicationJournal(
+        { kind: 'product', sourceId: product.sku || id, title: product.name, actorId: req.principal?.id ?? null },
+        () => publishProductToMarketplace({
         sku: product.sku,
         title: product.name,
         subtitle: product.teaser,
@@ -463,7 +475,7 @@ export function registerFurnitureProductRoutes(app: Express): void {
         variants: toBridgeVariants(product.variants),
         sellerSlug,
         categorySlug: cleanCategorySlug(product.marketplaceCategory),
-      });
+      }));
       setPublishProgress(id, {
         done: 1,
         label: photosCount + videosCount > 0 ? 'Завантаження медіа…' : 'Медіа немає',

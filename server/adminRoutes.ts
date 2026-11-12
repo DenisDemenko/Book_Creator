@@ -35,7 +35,7 @@ import {
   StoredPayment,
 } from './store';
 import { listBooks } from './bookStore';
-import { withPublicationJournal } from './storefrontPublications';
+import { withPublicationJournal, listPublications } from './storefrontPublications';
 import { listAllCourses, getCourse, updateCourse } from './courseStore';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { buildCoursePublishInput } from './courseMarketplacePayload';
@@ -504,6 +504,22 @@ export function registerAdminRoutes(app: Express): void {
       walletAvailable: isAvailable(),
     };
   }
+
+  // ── Публікації у вітрину (журнал #554) ───────────────────────────────────────────────────────────
+  // Читання журналу: що, якою версією і коли поїхало у вітрину, і що відповів міст.
+  // Невдалі спроби тут теж видно — саме вони відповідають на «публікували, а нічого не з'явилось».
+
+  app.get('/api/admin/storefront-publications', requireAdmin, (req, res) => {
+    const kind = String(req.query.kind ?? '');
+    const status = String(req.query.status ?? '');
+    const publications = listPublications({
+      kind: kind === 'book' || kind === 'course' || kind === 'product' ? kind : undefined,
+      sourceId: req.query.sourceId ? String(req.query.sourceId) : undefined,
+      status: status === 'ok' || status === 'failed' ? status : undefined,
+      limit: Number(req.query.limit) || 200,
+    });
+    res.json({ publications });
+  });
 
   // ── Копії бази (журнал #538) ───────────────────────────────────────────────────────────────────────
   // Знімок на томі захищає від пошкодження бази; від втрати тому — лише завантаження поза нього.

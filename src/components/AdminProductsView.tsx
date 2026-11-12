@@ -32,12 +32,43 @@ interface ShelfRow {
   categoryName?: string | null;
 }
 
+/** Рядок журналу публікацій — те, що віддає `/api/admin/storefront-publications` (журнал #554). */
+interface PublicationRow {
+  id: string;
+  kind: 'book' | 'course' | 'product';
+  sourceId: string;
+  format: string | null;
+  publicationNo: number;
+  version: string | null;
+  sourceRevision: number | null;
+  status: 'ok' | 'failed';
+  externalId: string | null;
+  slug: string | null;
+  created: boolean | null;
+  error: string | null;
+  title: string | null;
+  at: string;
+}
+
+const PUB_KIND_LABELS: Record<PublicationRow['kind'], string> = { book: 'Книга', course: 'Курс', product: 'Виріб' };
+
+const pubWhen = (at: string) => {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? at : d.toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' });
+};
+
+/** Чим саме підписати публікацію: власною версією книги, якщо вона є, інакше — номером публікації. */
+const pubVersionLabel = (p: PublicationRow) =>
+  p.version ? `версія ${p.version}` : `публікація №${p.publicationNo}`;
+
 const money = (priceMinor: number) =>
   priceMinor > 0 ? `${(priceMinor / 100).toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ₴` : 'Безкоштовно';
 
 export const AdminProductsView: React.FC = () => {
   const [rows, setRows] = useState<ShelfRow[] | null>(null);
   const [drafts, setDrafts] = useState<FurnitureProduct[]>([]);
+  /** Журнал публікацій (#554): що, якою версією і коли поїхало у вітрину. */
+  const [pubs, setPubs] = useState<PublicationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,9 +80,12 @@ export const AdminProductsView: React.FC = () => {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [shelfRes, draftRes] = await Promise.all([
+      const [shelfRes, draftRes, pubRes] = await Promise.all([
         fetch('/api/admin/marketplace-bridge/books', { credentials: 'same-origin' }),
         fetch('/api/admin/furniture-products', { credentials: 'same-origin' }),
+        // Журнал читається окремо й НЕ впливає на решту: він живе в Studio, а не
+        // за мостом, тож має показуватись навіть тоді, коли вітрина недоступна.
+        fetch('/api/admin/storefront-publications?limit=200', { credentials: 'same-origin' }),
       ]);
       // Чорнетки виробів мають завантажуватись НАВІТЬ тоді, коли міст до
       // вітрини не налаштований: це два незалежні джерела, і відмова одного
@@ -65,6 +99,8 @@ export const AdminProductsView: React.FC = () => {
       }
       const draftData = await draftRes.json().catch(() => ({}));
       if (draftRes.ok && Array.isArray(draftData.products)) setDrafts(draftData.products);
+      const pubData = await pubRes.json().catch(() => ({}));
+      if (pubRes.ok && Array.isArray(pubData.publications)) setPubs(pubData.publications);
     } catch (err: any) {
       setRows(null);
       setError(err?.message || 'Помилка читання переліку.');
@@ -109,6 +145,13 @@ export const AdminProductsView: React.FC = () => {
         onSaved={() => void load()}
       />
     );
+  }
+
+  // Остання ВДАЛА публікація кожного лістинга: журнал приходить відсортованим
+  // за часом спадаюче, тож перший збіг і є найсвіжіший.
+  const lastByExternal = new Map<string, PublicationRow>();
+  for (const pr of pubs) {
+    if (pr.status === 'ok' && pr.externalId && !lastByExternal.has(pr.externalId)) lastByExternal.set(pr.externalId, pr);
   }
 
   const remove = async (row: ShelfRow) => {
@@ -263,6 +306,7 @@ export const AdminProductsView: React.FC = () => {
             {rows.map((row) => {
               const { kind, id: bookId, engineId } = parseExternalId(row.externalId);
               const waiting = confirming === row.externalId;
+              const pub = lastByExternal.get(row.externalId);
               return (
                 <div
                   key={row.externalId}
@@ -292,6 +336,14 @@ export const AdminProductsView: React.FC = () => {
                     {row.hasFile ? 'Файл є' : 'Без файла'}
                   </span>
                   <span className="text-[10px] text-slate-500 shrink-0">{row.status}</span>
+                  {/* Версія й дата з журналу Studio (#554), а не з вітрини: там `publishedAt`
+                      ставиться один раз, при створенні лістинга, і далі не змінюється. */}
+                  <span
+                    className="text-[10px] shrink-0 text-slate-500"
+                    title={pub ? `Публікація №${pub.publicationNo}${pub.sourceRevision ? `, ревізія ${pub.sourceRevision}` : ''}` : 'Публікацій до появи журналу (#554) не записували'}
+                  >
+                    {pub ? `${pubVersionLabel(pub)} · ${pubWhen(pub.at)}` : 'версія невідома'}
+                  </span>
 
                   {waiting ? (
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -320,6 +372,58 @@ export const AdminProductsView: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl bg-slate-900/60 border border-white/[0.06] p-5">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Публікації у вітрину</h4>
+          <span className="text-[10px] text-slate-500">журнал Studio · останні {pubs.length || 0}</span>
+        </div>
+        <p className="text-[11px] leading-relaxed text-slate-400 mb-3">
+          Кожна відправка у вітрину: що, якою версією, коли й що відповів міст.{' '}
+          <b className="text-slate-300">Невдалі спроби теж тут</b> — саме вони відповідають на «публікували, а
+          нічого не з'явилось». Записи з'являються з моменту введення журналу; публікації до нього не враховані.
+        </p>
+        {pubs.length === 0 && (
+          <p className="text-xs text-slate-500">
+            Журнал порожній: з моменту введення обліку нічого не публікували (або міст ще не викликали).
+          </p>
+        )}
+        {pubs.length > 0 && (
+          <div className="space-y-2">
+            {pubs.map((pr) => (
+              <div key={pr.id} className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-2.5 flex-wrap">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 bg-slate-800 text-slate-300 border-slate-700">
+                  {PUB_KIND_LABELS[pr.kind] || pr.kind}
+                </span>
+                <div className="flex-1 min-w-[180px]">
+                  <p className="text-xs font-semibold text-slate-200 truncate">{pr.title || pr.sourceId}</p>
+                  <p className="text-[10px] text-slate-500 font-mono truncate">
+                    {pr.sourceId}
+                    {pr.format ? ` · ${pr.format}` : ''}
+                    {pr.sourceRevision ? ` · ревізія ${pr.sourceRevision}` : ''}
+                    {pr.slug ? ` · ${pr.slug}` : ''}
+                  </p>
+                </div>
+                <span className="text-[10px] text-slate-400 shrink-0">{pubVersionLabel(pr)}</span>
+                <span className="text-[10px] tabular-nums text-slate-400 shrink-0">{pubWhen(pr.at)}</span>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${
+                    pr.status === 'ok'
+                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                      : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                  }`}
+                  title={pr.error || undefined}
+                >
+                  {pr.status === 'ok' ? (pr.created === false ? 'Оновлено' : 'Опубліковано') : 'Не вдалося'}
+                </span>
+                {pr.status === 'failed' && pr.error && (
+                  <p className="basis-full text-[10px] text-rose-300/80 break-words">{pr.error}</p>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
