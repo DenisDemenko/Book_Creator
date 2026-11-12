@@ -14,6 +14,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { requireAdmin } from './auth';
+import { withPublicationJournal } from './storefrontPublications';
 import { LabyrinthError } from './core/labyrinth/model';
 import {
   MarketplaceBridgeError,
@@ -556,7 +557,18 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           .filter(Boolean)
           .join(' ');
 
-        const published = await publishBookToMarketplace(
+        // Журнал публікацій (#554): той самий облік, що й для публікації з адмінки.
+        const published = await withPublicationJournal(
+          {
+            kind: 'book',
+            sourceId: String(book.id),
+            format,
+            version: book.version ? String(book.version) : null,
+            sourceRevision: typeof book.revisionNumber === 'number' ? book.revisionNumber : null,
+            title: String(book.title || ''),
+            actorId: req.principal?.id ?? null,
+          },
+          () => publishBookToMarketplace(
           {
             bookId: String(book.id),
             format,
@@ -571,7 +583,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             engineId: bridgeEngineId,
           },
           { settings }
-        );
+        ));
 
         // Файл шлемо ПІСЛЯ публікації: приймач прикріплює його до наявного
         // лістинга, і в зворотному порядку отримав би 404.
@@ -906,7 +918,18 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         `${publicBase}/api/public/books/${encodeURIComponent(stored.id)}/cover` +
         `?format=${cover.record.format}&v=${coverStamp}`;
 
-      const published = await publishBookToMarketplace(
+      // Журнал публікацій (#554): і вдала, і невдала спроба лишають слід — версію книги, ревізію й відповідь мосту.
+      const published = await withPublicationJournal(
+        {
+          kind: 'book',
+          sourceId: stored.id,
+          format,
+          version: book.version ? String(book.version) : null,
+          sourceRevision: stored.revision,
+          title: String(book.title || ''),
+          actorId: (params.req as { principal?: { id?: string } })?.principal?.id ?? null,
+        },
+        () => publishBookToMarketplace(
         {
           bookId: stored.id,
           format,
@@ -921,7 +944,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           highlights: params.highlights,
         },
         { settings }
-      );
+      ));
 
       /*
         ФАЙЛ КНИГИ БІЛЬШЕ НЕ ЗРИВАЄ ПУБЛІКАЦІЮ.

@@ -35,6 +35,7 @@ import {
   StoredPayment,
 } from './store';
 import { listBooks } from './bookStore';
+import { withPublicationJournal } from './storefrontPublications';
 import { listAllCourses, getCourse, updateCourse } from './courseStore';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { buildCoursePublishInput } from './courseMarketplacePayload';
@@ -1567,13 +1568,17 @@ export function registerAdminRoutes(app: Express): void {
       const settings = await readBridgeSettings();
       const richContent = await bridgeSupportsCourseContent({ settings });
       const photoUpload = richContent && (await bridgeSupportsCourseMedia({ settings }));
-      const result = await publishCourseToMarketplace(
-        buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', {
-          richContent,
-          photoUpload,
-          instructorName: (await findUserById(course.ownerId))?.name,
-        }),
-        { settings }
+      // Журнал публікацій (#554). Версії в курсу немає, тож у вітрині він рахується номером публікації.
+      const result = await withPublicationJournal(
+        { kind: 'course', sourceId: course.id, title: course.title, actorId: req.principal?.id ?? null },
+        async () => publishCourseToMarketplace(
+          buildCoursePublishInput(course, process.env.BRIDGE_SELLER_SLUG || 'fusion-lab', {
+            richContent,
+            photoUpload,
+            instructorName: (await findUserById(course.ownerId))?.name,
+          }),
+          { settings }
+        )
       );
       const media = await syncCourseMedia(course, { photoUpload, settings });
       updateCourse(course.id, { status: 'published' });

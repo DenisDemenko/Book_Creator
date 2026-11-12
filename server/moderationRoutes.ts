@@ -13,6 +13,7 @@
 
 import type { Express } from 'express';
 import { requireAdmin } from './auth';
+import { withPublicationJournal } from './storefrontPublications';
 import {
   publishCourseToMarketplace,
   assertStorefrontCover,
@@ -157,12 +158,16 @@ export function registerModerationRoutes(app: Express): void {
         // Фото з медіатеки їдуть файлами лише до приймача, що це вміє
         // (`course-media-v1`); інакше вони, як і раніше, відсіюються.
         const photoUpload = richContent && (await bridgeSupportsCourseMedia());
-        const result = await publishCourseToMarketplace(
-          buildCoursePublishInput(course, sellerSlug, {
-            richContent,
-            photoUpload,
-            instructorName: (await findUserById(course.ownerId))?.name,
-          })
+        // Журнал публікацій (#554): погодження модератора — це теж публікація у вітрину.
+        const result = await withPublicationJournal(
+          { kind: 'course', sourceId: course.id, title: course.title, actorId: req.principal?.id ?? null },
+          async () => publishCourseToMarketplace(
+            buildCoursePublishInput(course, sellerSlug, {
+              richContent,
+              photoUpload,
+              instructorName: (await findUserById(course.ownerId))?.name,
+            })
+          )
         );
         // Фото — після лістингу, до зміни статусів: збій тут зупиняє погодження,
         // і адмін повторює його (синхронізація ідемпотентна).
