@@ -638,6 +638,9 @@ Prisma руками) і 3 (інструкції: публікувати як к�
 `republishedAt` з `publishedAt`. Тест `node scripts/test-listing-version.mjs` — 34.
 Studio: `PublishBookInput.version` і передавання `book.version` у тілі мосту з обох місць публікації книги; `test:bridge` 165.
 **ПОРЯДОК ДЕПЛОЮ, якщо власник скаже пушити: 1) застосувати міграцію руками (деплой її не запускає), 2) API вітрини, 3) Studio.**
+Studio насправді можна й першою: приймач підіймається з `ValidationPipe({ whitelist: true })` **без** `forbidNonWhitelisted`,
+тож незнайоме поле `version` старий API тихо відкине, а не відповість 400. Міграція гейтить саме НОВИЙ код `apps/api`:
+без колонок він впаде на першому ж запиті до `Listing`.
 Без міграції новий `apps/api` падає на запиті до `Listing`. Головну копію вітрини не чіпав: там чужі незакомічені зміни
 (`messages/*.json`, `sitemap.ts`, `site-nav.ts`, сторінка grabfusion) і вона на 75 комітів позаду origin/master; мої правки
 `messages/uk.json` і `messages/en.json` на мерджі з ними конфліктуватимуть.
