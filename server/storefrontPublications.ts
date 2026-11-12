@@ -14,7 +14,13 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 
-export type PublicationKind = 'book' | 'course' | 'product';
+/**
+ * Що саме публікували. `instruction` — окремий вид у ЖУРНАЛІ, хоч у вітрині
+ * воно стає книгою (рішення власника 12.11.2026, запис #556): журнал має
+ * відповідати на «що ми публікували», а не на «як це виглядає у вітрині»,
+ * інакше інструкції розчинилися б серед книг і їх облік був би неможливий.
+ */
+export type PublicationKind = 'book' | 'course' | 'product' | 'instruction';
 export type PublicationStatus = 'ok' | 'failed';
 
 export interface PublicationRecord {

@@ -513,7 +513,7 @@ export function registerAdminRoutes(app: Express): void {
     const kind = String(req.query.kind ?? '');
     const status = String(req.query.status ?? '');
     const publications = listPublications({
-      kind: kind === 'book' || kind === 'course' || kind === 'product' ? kind : undefined,
+      kind: kind === 'book' || kind === 'course' || kind === 'product' || kind === 'instruction' ? kind : undefined,
       sourceId: req.query.sourceId ? String(req.query.sourceId) : undefined,
       status: status === 'ok' || status === 'failed' ? status : undefined,
       limit: Number(req.query.limit) || 200,

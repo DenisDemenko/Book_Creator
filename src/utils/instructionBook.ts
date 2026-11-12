@@ -93,6 +93,8 @@ export function buildBookFromInstructionPayload(payload: InstructionBookCreation
       createdAt: iso,
     }));
   }
+  // Слід інструкції: сервер бере з нього назву для вітрини (#556).
+  if (payload.instruction) book.instructionOrigin = payload.instruction;
   if (opts.designThemeId) {
     book.layoutConfig = applyBookDesignTheme(book.layoutConfig, opts.designThemeId as BookDesignThemeId);
   }

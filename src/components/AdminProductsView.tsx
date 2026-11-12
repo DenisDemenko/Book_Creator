@@ -35,7 +35,7 @@ interface ShelfRow {
 /** Рядок журналу публікацій — те, що віддає `/api/admin/storefront-publications` (журнал #554). */
 interface PublicationRow {
   id: string;
-  kind: 'book' | 'course' | 'product';
+  kind: 'book' | 'course' | 'product' | 'instruction';
   sourceId: string;
   format: string | null;
   publicationNo: number;
@@ -50,7 +50,9 @@ interface PublicationRow {
   at: string;
 }
 
-const PUB_KIND_LABELS: Record<PublicationRow['kind'], string> = { book: 'Книга', course: 'Курс', product: 'Виріб' };
+// Інструкція стоїть у вітрині книгою, але в журналі має власну позначку —
+// інакше облік інструкцій неможливо відділити від книг (#556).
+const PUB_KIND_LABELS: Record<PublicationRow['kind'], string> = { book: 'Книга', course: 'Курс', product: 'Виріб', instruction: 'Інструкція' };
 
 const pubWhen = (at: string) => {
   const d = new Date(at);

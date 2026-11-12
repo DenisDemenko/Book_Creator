@@ -15,6 +15,7 @@
 import type { Express, Request, Response } from 'express';
 import { requireAdmin } from './auth';
 import { withPublicationJournal } from './storefrontPublications';
+import { instructionListingTitle, type InstructionListingOrigin } from '../shared/instructionListing';
 import { LabyrinthError } from './core/labyrinth/model';
 import {
   MarketplaceBridgeError,
@@ -549,8 +550,11 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
                 return { bytes: out.bytes, pageCount: out.pageCount, numberedPages: out.pageCount, notesUk: out.notesUk };
               })();
 
+        // Книга з інструкції їде у вітрину під назвою «Інструкція з …» (#556):
+        // покупець має бачити з назви, що купує інструкцію, а не повість.
+        const instrOrigin = (book as { instructionOrigin?: InstructionListingOrigin }).instructionOrigin;
         const editionTitle = [
-          String(book.title),
+          instrOrigin ? instructionListingTitle(instrOrigin) : String(book.title),
           format === 'print' ? '(друковане видання)' : null,
           engineLabel ? `— тест рушія ${engineLabel}` : null,
         ]
@@ -560,7 +564,9 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         // Журнал публікацій (#554): той самий облік, що й для публікації з адмінки.
         const published = await withPublicationJournal(
           {
-            kind: 'book',
+            // У вітрині це книга, у журналі — інструкція: інакше облік інструкцій
+            // розчинився б серед книг (#556).
+            kind: instrOrigin ? 'instruction' : 'book',
             sourceId: String(book.id),
             format,
             version: book.version ? String(book.version) : null,
@@ -921,10 +927,14 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         `${publicBase}/api/public/books/${encodeURIComponent(stored.id)}/cover` +
         `?format=${cover.record.format}&v=${coverStamp}`;
 
+      // Книга з інструкції: назва у вітрині — «Інструкція з …», а в журналі
+      // вона рахується окремим видом (#556).
+      const storedInstruction = (book as { instructionOrigin?: InstructionListingOrigin }).instructionOrigin;
+
       // Журнал публікацій (#554): і вдала, і невдала спроба лишають слід — версію книги, ревізію й відповідь мосту.
       const published = await withPublicationJournal(
         {
-          kind: 'book',
+          kind: storedInstruction ? 'instruction' : 'book',
           sourceId: stored.id,
           format,
           version: book.version ? String(book.version) : null,
@@ -936,7 +946,9 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
         {
           bookId: stored.id,
           format,
-          title: format === 'print' ? `${String(book.title)} (друковане видання)` : String(book.title),
+          title: storedInstruction
+            ? `${instructionListingTitle(storedInstruction)}${format === 'print' ? ' (друковане видання)' : ''}`
+            : format === 'print' ? `${String(book.title)} (друковане видання)` : String(book.title),
           subtitle: book.subtitle ? String(book.subtitle) : undefined,
           summary: book.logline ? String(book.logline) : undefined,
           description: book.synopsis ? String(book.synopsis) : undefined,

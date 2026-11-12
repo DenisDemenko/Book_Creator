@@ -23,6 +23,7 @@ import { aiDraftText } from '../../shared/aiTextOrigin';
 import type { Instruction } from '../types';
 import { buildEntityTag } from './coreEntities';
 import type { InstructionTypeConfig } from '../data/instructionTypes';
+import type { InstructionListingOrigin } from '../../shared/instructionListing';
 
 /** Ілюстрація майбутньої книги — кадр кроку інструкції; id збігається з маркером `[IMG: …]` у тексті кроку. */
 export interface InstructionBookIllustrationDraft {
@@ -39,6 +40,8 @@ export interface InstructionBookCreationPayload {
   illustrations?: InstructionBookIllustrationDraft[];
   /** Шаблон верстки (`BookDesignThemeId`), обраний у документі інструкції. */
   designThemeId?: string;
+  /** Слід інструкції: з нього складається назва лістинга у вітрині (#556). */
+  instruction?: InstructionListingOrigin;
 }
 
 export interface InstructionBookSectionDraft {

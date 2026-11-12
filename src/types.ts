@@ -1,3 +1,4 @@
+import type { InstructionListingOrigin } from '../shared/instructionListing';
 import type { StoryWorld, StoryLocation, SceneSetting } from '../shared/storyWorld';
 export type NavigationTab =
   | 'my-space'     // Т6.4: «Мій простір» — простір ролі в проєкті, процес ШІ, «Моя роль у проєкті»
@@ -973,6 +974,14 @@ export interface Book {
    * той самий формат, що й `chat_sessions.modelId` на сервері.
    */
   preferredAiModelId?: string;
+  /**
+   * Книга зроблена з документа інструкції: тип, підпис типу й назва виробу
+   * (журнал #556). Потрібно рівно для одного — назви у вітрині: «Інструкція
+   * зі складання: Шафа Соло» замість просто «Шафа Соло». Книги з інструкцій,
+   * створені до #556, цього сліду не мають, і у вітрині лишаться під власною
+   * назвою: відновити тип уже нізвідки.
+   */
+  instructionOrigin?: InstructionListingOrigin;
   /** Курс/мінікурс на базі книги («Курси»). */
   course?: CourseConfig;
   /** WYSIWYG-верстка PDF («Верстка PDF»). */

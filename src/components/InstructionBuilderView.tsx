@@ -857,6 +857,7 @@ export const InstructionBuilderView: React.FC<{
           title: buildInstructionBookTitle(doc, type),
           sections: buildInstructionBookSections(doc, type),
           illustrations: buildInstructionBookIllustrations(doc),
+          instruction: { docType: type.id, badge: type.docBadge, name: buildInstructionBookTitle(doc, type) },
         },
         { now: Date.now(), author: '', authorRole: 'writer', designThemeId: layout.designThemeId }
       ).book,
@@ -937,7 +938,10 @@ export const InstructionBuilderView: React.FC<{
     const title = buildInstructionBookTitle(doc, type);
     const illustrations: InstructionBookIllustrationDraft[] = buildInstructionBookIllustrations(doc);
     setIsCreatingBook(false);
-    onInstructionBookCreated?.({ title, sections, ...(illustrations.length ? { illustrations } : {}), ...(doc.pdfLayout ? { designThemeId: doc.pdfLayout.designThemeId } : {}) });
+    // Слід інструкції їде разом із книгою: у вітрині лістинг має зватися
+    // «Інструкція зі складання: <назва>», а не просто «<назва>» (#556).
+    const instruction = { docType: type.id, badge: type.docBadge, name: title };
+    onInstructionBookCreated?.({ title, sections, instruction, ...(illustrations.length ? { illustrations } : {}), ...(doc.pdfLayout ? { designThemeId: doc.pdfLayout.designThemeId } : {}) });
   };
 
   return (
