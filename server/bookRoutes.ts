@@ -32,6 +32,7 @@ import { registerBookSyncRoutes } from './bookSyncRoutes';
 import {validateEditableDocument} from '../shared/wardrobeDocument.mjs';
 import {
   BookRevisionConflict,
+  deleteBookEverywhere,
   getBook,
   listArtifacts,
   listBooks,
@@ -167,6 +168,27 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
       res.json(meta);
     } catch (err) {
       fail(res, err, 'Не вдалося зберегти книгу.');
+    }
+  });
+
+  /**
+   * Видалити книгу з Studio назавжди (журнал #552). Лише власник книги або адміністратор.
+   *
+   * Чужа книга — 404, як і на читанні: 403 підтвердив би, що книга з таким id існує.
+   * Відповідь каже, що саме прибрано, щоб інтерфейс не вигадував цього сам.
+   */
+  app.delete('/api/books/:id', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const existing = await getBook(req.params.id);
+      if (!existing || (existing.ownerId && existing.ownerId !== req.principal?.id && req.principal?.role !== 'admin')) {
+        return res.status(404).json({ error: 'Книгу не знайдено.' });
+      }
+      const result = await deleteBookEverywhere(req.params.id);
+      if (!result.deleted) return res.status(404).json({ error: 'Книгу не знайдено.' });
+      console.warn(`[books] видалено книгу ${req.params.id} (${existing.title || 'без назви'}) на запит ${req.principal?.id ?? 'невідомо'}`);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      fail(res, err, 'Не вдалося видалити книгу.');
     }
   });
 

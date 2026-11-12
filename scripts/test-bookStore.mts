@@ -218,5 +218,60 @@ console.log('\nЗахист шляху');
   t('тека створена всередині books/', fs.existsSync(`${DIR}/books`));
 }
 
+console.log('\nВидалення книги (журнал #552)');
+{
+  const express = (await import('express')).default;
+  const routes = await import('../server/bookRoutes');
+
+  const keepId = 'BK-KEEP-0001';
+  const dropId = 'BK-DROP-0001';
+  await store.saveBook({ book: { id: keepId, title: 'Сусідня книга' }, ownerId: 'u-owner' });
+  await store.saveBook({ book: { id: dropId, title: 'Книга на видалення' }, ownerId: 'u-owner' });
+  await store.saveBook({ book: { id: dropId, title: 'Книга на видалення 2' }, ownerId: 'u-owner', expectedRevision: 1 });
+  await store.saveArtifact({ bookId: dropId, kind: 'pdf', format: 'digital', filename: 'book.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([1, 2, 3]) });
+  await store.saveArtifact({ bookId: keepId, kind: 'pdf', format: 'digital', filename: 'book.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([4, 5, 6]) });
+  t('перед видаленням: книга, її ревізії й файл на місці', !!(await store.getBook(dropId)) && (await store.listBookRevisions(dropId)).length >= 1 && fs.existsSync(`${DIR}/books/${dropId}`));
+
+  const removed = await store.deleteBookEverywhere(dropId);
+  t('видалення повідомляє, що прибрано книгу, її файли й ревізії', removed.deleted && removed.artifacts === 1 && removed.revisions >= 1, JSON.stringify(removed));
+  t('книги більше немає ні в сховищі, ні в переліку', (await store.getBook(dropId)) === null && !(await store.listBooks('u-owner')).some((b) => b.id === dropId));
+  t('ревізії, опис файлів і сама тека з файлами теж зникли', (await store.listBookRevisions(dropId)).length === 0 && (await store.listArtifacts(dropId)).length === 0 && !fs.existsSync(`${DIR}/books/${dropId}`));
+  t('сусідню книгу з її файлом не зачепило', !!(await store.getBook(keepId)) && (await store.listArtifacts(keepId)).length === 1 && fs.existsSync(`${DIR}/books/${keepId}`));
+  t('повторне видалення нічого не ламає й каже «не знайдено»', (await store.deleteBookEverywhere(dropId)).deleted === false);
+  t('порожній id не видаляє нічого', (await store.deleteBookEverywhere('  ')).deleted === false && !!(await store.getBook(keepId)));
+
+  // Маршрут: чужу книгу видалити не можна, і відповідь не підтверджує, що вона існує.
+  const app = express();
+  app.use(express.json());
+  let who: Record<string, unknown> = { id: 'u-owner', role: 'writer' };
+  app.use((req: any, _res: unknown, next: () => void) => {
+    req.principal = who;
+    next();
+  });
+  routes.registerBookRoutes(app, {} as never);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const del = (id: string) => fetch(`${base}/api/books/${id}`, { method: 'DELETE' }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+  const strangerId = 'BK-STRANGER-1';
+  await store.saveBook({ book: { id: strangerId, title: 'Чужа книга' }, ownerId: 'u-other' });
+  who = { id: 'u-stranger', role: 'writer' };
+  const denied = await del(strangerId);
+  t('чужу книгу видалити не можна: 404, і вона на місці', denied.status === 404 && !!(await store.getBook(strangerId)));
+  t('відмова не зізнається, що книга існує', !JSON.stringify(denied.body).includes('Чужа'));
+
+  who = { id: 'u-admin', role: 'admin' };
+  t('адміністратор видалити може', (await del(strangerId)).status === 200 && (await store.getBook(strangerId)) === null);
+
+  const mineId = 'BK-MINE-0001';
+  await store.saveBook({ book: { id: mineId, title: 'Моя книга' }, ownerId: 'u-owner' });
+  who = { id: 'u-owner', role: 'writer' };
+  const mine = await del(mineId);
+  t('власник видаляє свою книгу: 200 і в сховищі її немає', mine.status === 200 && (mine.body as { ok?: boolean }).ok === true && (await store.getBook(mineId)) === null);
+  t('видалення неіснуючої книги — 404', (await del('BK-NOPE-0001')).status === 404);
+  await new Promise((r) => server.close(r));
+}
+
 console.log(`\nПідсумок: ${pass} пройдено, ${fail} провалено.`);
 if (fail > 0) process.exit(1);

@@ -219,6 +219,73 @@ export async function saveBook(params: {
   return result;
 }
 
+export interface BookDeletion {
+  deleted: boolean;
+  /** Скільки зверстаних файлів (PDF, обкладинка, уривок…) прибрано разом із книгою. */
+  artifacts: number;
+  revisions: number;
+}
+
+/**
+ * Повне видалення книги з Studio (журнал #552).
+ *
+ * Прибирає саме книгу, її ревізії, квитанції злиття, описи зверстаних файлів і теку з цими файлами,
+ * а також доступи співавторів — без них запрошення вело б у порожнечу.
+ *
+ * НЕ чіпає того, що живе своїм життям і потрібне після книги: медіатеку (ті самі зображення бувають
+ * у кількох книгах), журнал витрат (це облік грошей) і лістинги у вітрині маркетплейсу — вітрину знімають
+ * окремою дією, і мовчки прибирати звідти товар не можна (вказівка власника 03.09.2026).
+ *
+ * Іде тією ж чергою записів, що й saveBook: інакше видалення могло б розминутися зі збереженням,
+ * яке вже в дорозі, і книга «воскресла» б наступним записом.
+ */
+export async function deleteBookEverywhere(id: string): Promise<BookDeletion> {
+  const bookId = String(id || '').trim();
+  if (!bookId) return { deleted: false, artifacts: 0, revisions: 0 };
+  const run = bookWriteChain.then(() => deleteBookSerial(bookId));
+  bookWriteChain = run.catch(() => undefined);
+  return run;
+}
+
+async function deleteBookSerial(bookId: string): Promise<BookDeletion> {
+  let out: BookDeletion;
+  if (useJson()) {
+    const data = await loadJson();
+    const before = data.books.length;
+    data.books = data.books.filter((b) => b.id !== bookId);
+    const artifacts = data.artifacts.filter((a) => a.bookId === bookId).length;
+    const revisions = data.revisions.filter((r) => r.bookId === bookId).length;
+    data.artifacts = data.artifacts.filter((a) => a.bookId !== bookId);
+    data.revisions = data.revisions.filter((r) => r.bookId !== bookId);
+    data.merges = data.merges.filter((m) => m.bookId !== bookId);
+    out = { deleted: data.books.length < before, artifacts, revisions };
+    await persistJson();
+  } else {
+    const db = getDb()!;
+    const artifacts = Number((db.prepare('SELECT COUNT(*) AS n FROM book_artifacts WHERE book_id = ?').get(bookId) as any)?.n || 0);
+    const revisions = Number((db.prepare('SELECT COUNT(*) AS n FROM book_revisions WHERE book_id = ?').get(bookId) as any)?.n || 0);
+    db.exec('BEGIN');
+    try {
+      const res = db.prepare('DELETE FROM books WHERE id = ?').run(bookId) as { changes?: number };
+      db.prepare('DELETE FROM book_revisions WHERE book_id = ?').run(bookId);
+      db.prepare('DELETE FROM book_merge_receipts WHERE book_id = ?').run(bookId);
+      db.prepare('DELETE FROM book_artifacts WHERE book_id = ?').run(bookId);
+      db.prepare('DELETE FROM book_collab_invites WHERE book_id = ?').run(bookId);
+      db.prepare('DELETE FROM book_collab_owners WHERE book_id = ?').run(bookId);
+      db.exec('COMMIT');
+      out = { deleted: Number(res.changes) > 0, artifacts, revisions };
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+  // Файли прибираємо після бази: якщо не вийде, у базі вже немає записів, що на них посилаються.
+  await fs.rm(bookDir(bookId), { recursive: true, force: true }).catch((err) => {
+    console.error('[bookStore] Не вдалося прибрати теку книги', bookId, err);
+  });
+  return out;
+}
+
 /** Hold the existing book write queue while a version-bound agreement is committed.
  * The callback reads snapshots directly; it must never enqueue another book write. */
 export async function withBookSnapshot<T>(bookId: string, fn: (book: StoredBook | null) => Promise<T>): Promise<T> {

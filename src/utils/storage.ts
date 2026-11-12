@@ -458,6 +458,8 @@ export interface BookSummary {
   title: string;
   status: Book['status'];
   updatedAt: string;
+  /** Приватна книга: лежить на цьому локальному сервері, а не в хмарі (журнал #549). Потрібно вікну видалення. */
+  privateStore?: { storeId: string };
 }
 
 export async function listBooks(): Promise<BookSummary[]> {
@@ -474,6 +476,7 @@ export async function listBooks(): Promise<BookSummary[]> {
         title: book.title || 'Без назви',
         status: book.status,
         updatedAt: book.updatedAt || '',
+        ...(book.privateStore ? { privateStore: book.privateStore } : {}),
       });
     }
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -485,6 +488,7 @@ export async function listBooks(): Promise<BookSummary[]> {
       title: r.data.title || 'Без назви',
       status: r.data.status,
       updatedAt: r.updatedAt,
+      ...(r.data.privateStore ? { privateStore: r.data.privateStore } : {}),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }

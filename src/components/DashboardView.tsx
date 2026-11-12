@@ -48,7 +48,7 @@ interface DashboardViewProps {
   /** Відкрити книгу, знайдену локально або отриману з сервера без перезапису. */
   onOpenExistingBook: (book: Book, serverRevision?: number) => Promise<void>;
   /** Видалити книгу за id (власник обробляє перемикання активної книги). */
-  onDeleteBook: (id: string) => void;
+  onDeleteBook: (id: string, options?: { cloud?: boolean }) => void | Promise<void>;
   /** «Мої роботи»: відкрити експрес-чернетку інструкції (майстер інструкцій із цією чернеткою). */
   onOpenExpressInstruction?: (draftId: string) => void;
   /** «Мої роботи»: відкрити інструкцію, що лежить у цьому браузері (конструктор). */
@@ -340,6 +340,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
   const [grabfusionOpen, setGrabfusionOpen] = useState(false);
   const [bookToDelete, setBookToDelete] = useState<BookSummary | null>(null);
+  /**
+   * Де саме лежить книга — вікно видалення мусить назвати це прямо (журнал #552): раніше воно просто питало
+   * «точно видалити?», а книга при цьому зникала лише з браузера й поверталася зі Studio наступного разу.
+   */
+  // Будь-яка НЕ приватна книга могла потрапити в хмару (збереження дзеркалить її туди), тож видаляємо й звідти.
+  // Свідомо не питаємо про це перелік `serverBooks`: він буває ще не завантажений, і тоді копія в хмарі лишилася б
+  // мовчки. Якщо книги там немає, сервер відповідає 404, і це нормальний результат.
+  const inCloud = (b: BookSummary) => !b.privateStore;
+  const privateStoreName = (b: BookSummary) =>
+    privateStores.find((st) => st.id === b.privateStore?.storeId)?.name || t('dashboard.deleteBookLocalServerFallback');
+  const deletePlaces = (b: BookSummary) => {
+    const places: Array<{ key: string; text: string; tone: string }> = [];
+    if (b.privateStore) places.push({ key: 'local', tone: 'text-emerald-300', text: t('dashboard.deleteBookWhereLocal', { name: privateStoreName(b) }) });
+    if (inCloud(b)) places.push({ key: 'cloud', tone: 'text-sky-300', text: t('dashboard.deleteBookWhereCloud') });
+    places.push({ key: 'browser', tone: 'text-slate-400', text: t('dashboard.deleteBookWhereBrowser') });
+    return places;
+  };
+  // Чи є книга у вітрині, Studio локально не знає (публікація живе в маркетплейсі), тож для хмарної книги
+  // показуємо застереження завжди — воно сформульоване як умова («якщо книга є у вітрині»).
+  const deleteStorefrontNote = (b: BookSummary) => inCloud(b);
 
   // Персональний облік витрат токенів (Завдання 2 grill-me сесії) — та сама
   // усage_log-агрегація, що й адмінська панель, але відфільтрована сервером
@@ -696,11 +716,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </button>
                   <button
                     onClick={() => setBookToDelete(b)}
-                    className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+                    data-delete-book={b.id}
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-bold text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 border border-slate-700 hover:border-rose-500/40 transition-colors shrink-0"
                     title={t('dashboard.deleteBook')}
                     aria-label={`${t('dashboard.deleteBook')}: ${b.title}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{t('dashboard.deleteBook')}</span>
                   </button>
                 </div>
               ))}
@@ -896,8 +918,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
                 <h3 className="text-base font-bold text-white">{t('dashboard.deleteBookConfirmTitle')}</h3>
               </div>
-              <p className="text-sm text-slate-300">{t('dashboard.deleteBookConfirm')}</p>
-              <p className="text-xs text-slate-500 mt-1">{t('dashboard.deleteBookConfirmHint')}</p>
+              <p className="text-sm text-slate-300">
+                {t('dashboard.deleteBookConfirm')} <b className="text-slate-100">«{bookToDelete.title || bookToDelete.id}»</b>
+              </p>
+              <p className="text-xs text-slate-400 mt-3">{t('dashboard.deleteBookWhereTitle')}</p>
+              <ul className="mt-1.5 space-y-1 text-xs" data-delete-book-places>
+                {deletePlaces(bookToDelete).map((place) => (
+                  <li key={place.key} className="flex items-start gap-1.5 text-slate-300">
+                    <span className={place.tone}>•</span>
+                    <span>{place.text}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-rose-300 mt-3">{t('dashboard.deleteBookConfirmHint')}</p>
+              {deleteStorefrontNote(bookToDelete) && (
+                <p className="text-xs text-slate-500 mt-1.5">{t('dashboard.deleteBookStorefrontNote')}</p>
+              )}
               <div className="flex gap-2 mt-5">
                 <button
                   onClick={() => setBookToDelete(null)}
@@ -906,9 +942,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   {t('dashboard.cancel')}
                 </button>
                 <button
+                  data-delete-book-confirm
                   onClick={() => {
-                    onDeleteBook(bookToDelete.id);
+                    void onDeleteBook(bookToDelete.id, { cloud: inCloud(bookToDelete) });
                     setBookToDelete(null);
+                    setPrivateRefresh((v) => v + 1);
                   }}
                   className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors"
                 >

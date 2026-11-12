@@ -1615,7 +1615,12 @@ function StudioApp() {
    * Видалення книги зі сховища. Якщо видалено активну книгу — перемикаємось
    * на першу з решти; якщо книг не лишилось — створюємо порожню.
    */
-  const handleDeleteBook = async (id: string) => {
+  /**
+   * Видалення книги звідусіль, де вона лежить (журнал #552): локальний сервер (усередині `deleteBook`),
+   * цей браузер і хмара Studio. Приватну книгу в хмару не шлемо взагалі — її там за задумом немає.
+   * Хмару прибираємо ПІСЛЯ локального: якщо сервер відмовить, книга лишиться видимою хоч десь, а не зникне мовчки.
+   */
+  const handleDeleteBook = async (id: string, options: { cloud?: boolean } = {}) => {
     try {
       await deleteBook(id);
     } catch (err) {
@@ -1623,6 +1628,16 @@ function StudioApp() {
       setSaveToast('Не вдалося видалити книгу. Спробуйте ще раз.');
       setTimeout(() => setSaveToast(null), 3500);
       return;
+    }
+    if (options.cloud) {
+      try {
+        const res = await fetch(`/api/books/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('[books] Помилка видалення книги з хмари', err);
+        setSaveToast('З цього браузера книгу прибрано, а з хмари — ні. Спробуйте ще раз.');
+        setTimeout(() => setSaveToast(null), 5000);
+      }
     }
 
     if (id !== book.id) {
