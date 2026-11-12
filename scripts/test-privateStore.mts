@@ -355,6 +355,16 @@ t('без токена — 401', (await gfCall()).status === 401);
 t('токен застосунку не відкриває чужих серверів: u3 не бачить сервера u1', !(await gfCall(phone3)).raw.includes(storeId));
 await new Promise((r) => gfServer.close(r));
 
+console.log('\nГалочка «приватно» переживає закриття вікна створення');
+// Помилка 12.11.2026 (#551): ефект дашборда скидав вибір на закритті вікна, а вікно закриває той самий клік,
+// що відкриває майстер, — книга мовчки ставала хмарною. Перевіряємо саме порядок у коді, бо React-ефект тестом утиліти не спіймати.
+const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+const dashboardSource = fs.readFileSync(path.join(repoRoot, 'src/components/DashboardView.tsx'), 'utf8');
+const closeBranch = /if \(!createChooserOpen\) \{([\s\S]*?)\n    \}/.exec(dashboardSource);
+t('на закритті вікна вибір сервера не скидається', !!closeBranch && !/setPendingPrivateStore/.test(closeBranch[1]), closeBranch ? closeBranch[1].slice(0, 120) : 'гілку не знайдено');
+t('натомість вибір скидається на ВІДКРИТТІ вікна', /\}\n    setPendingPrivateStore\(null\);/.test(dashboardSource));
+t('кнопки способу створення спершу запамʼятовують вибір, потім закривають вікно', (dashboardSource.match(/choosePrivate\(\);\n\s*setCreateChooserOpen\(false\);/g) || []).length >= 2);
+
 console.log('\nОхоронець приватності в браузері');
 const guard = await import('../src/utils/privateStore');
 t('поки приватного матеріалу не відкрито, нічого не блокується', !guard.blockedByPrivacy('POST', '/api/courses') && !guard.isPrivateMaterialActive());

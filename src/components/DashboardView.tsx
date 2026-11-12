@@ -294,9 +294,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   useEffect(() => {
     if (!createChooserOpen) {
       setPrivateChecked(false);
-      setPendingPrivateStore(null);
+      // Вибору «приватно» тут НЕ скидаємо: вікно закриває той самий клік, що запускає створення книги,
+      // і цей ефект виконується вже після нього. Скидання тут робило галочку недійсною — книга мовчки
+      // йшла в хмару (знайдено живим прогоном у проді 12.11.2026, журнал #551).
       return;
     }
+    setPendingPrivateStore(null); // нове вікно — попередній, незабраний вибір не діє
     let cancelled = false;
     void usablePrivateStores('book').then((list) => {
       if (cancelled) return;
