@@ -581,6 +581,9 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             categorySlug: bridgeCategorySlug,
             highlights: bridgeHighlights,
             engineId: bridgeEngineId,
+            // Версію везе та сама публікація, що й у журнал: вітрина підписує
+            // нею лістинг, інакше покупець бачив би лише першу дату (#555).
+            version: book.version ? String(book.version) : undefined,
           },
           { settings }
         ));
@@ -942,6 +945,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           sellerSlug: params.sellerSlug,
           categorySlug: params.categorySlug,
           highlights: params.highlights,
+          version: book.version ? String(book.version) : undefined,
         },
         { settings }
       ));

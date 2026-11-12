@@ -706,6 +706,21 @@ console.log('\nКатегорії вітрини:');
     { fetch: book.fetch, settings });
   t('categorySlug їде в тілі книги', book.calls[0].body.categorySlug === 'knyhy');
 
+  // Версія книги (журнал #555): вітрина підписує нею лістинг і показує дату
+  // останнього оновлення. Якщо поле не доїде, покупець бачитиме лише першу
+  // дату публікації — те саме замовчування, через яке журнал і зʼявився.
+  const ver = capture(201, { created: false, listing: { slug: 'x' } });
+  await bridge.publishBookToMarketplace(
+    { bookId: 'b1', format: 'digital', title: 'T', priceMinor: 100, version: 'v1.3.0' },
+    { fetch: ver.fetch, settings });
+  t('версія книги їде в тілі', ver.calls[0].body.version === 'v1.3.0', String(ver.calls[0].body.version));
+
+  const noVer = capture(201, { created: false, listing: { slug: 'x' } });
+  await bridge.publishBookToMarketplace(
+    { bookId: 'b1', format: 'digital', title: 'T', priceMinor: 100 },
+    { fetch: noVer.fetch, settings });
+  t('без версії поле не вигадується', noVer.calls[0].body.version === undefined, String(noVer.calls[0].body.version));
+
   const course = capture(201, { created: true, listing: { slug: 'c' } });
   await bridge.publishCourseToMarketplace(
     { bookId: 'b1', title: 'C', priceMinor: 100, categorySlug: 'chpu', category: 'ЧПУ' },

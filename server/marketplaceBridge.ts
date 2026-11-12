@@ -210,6 +210,14 @@ export interface PublishBookInput {
   categorySlug?: string;
   /** Непорожнє — лише для тестового видання нестандартним рушієм PDF. */
   engineId?: string;
+  /**
+   * Версія книги (журнал #555). Вітрина показує її покупцеві поруч із датою
+   * останнього оновлення: `publishedAt` там ставиться раз, при створенні
+   * лістинга, тож сам по собі він на «наскільки це свіже» не відповідає.
+   * Курси й вироби власної версії не мають — вони передають це поле порожнім,
+   * і вітрина тоді показує лише дату.
+   */
+  version?: string;
 }
 
 export interface PublishBookResult {
@@ -1647,6 +1655,7 @@ export async function publishBookToMarketplace(
     highlights: input.highlights,
     sellerSlug: input.sellerSlug,
     categorySlug: input.categorySlug,
+    version: input.version,
   };
 
   const controller = new AbortController();
