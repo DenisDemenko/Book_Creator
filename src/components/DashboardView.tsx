@@ -186,6 +186,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // "Де мені це подивитися" — список УСІХ книг письменника. Раніше такого
   // списку не було в жодному екрані застосунку: письменник бачив лише
   // активну книгу (utils/storage.ts → META_ACTIVE_BOOK).
+  /** Зростає після видалення книги: обидва переліки (локальний і зі Studio) мають перечитатися. */
+  const [booksRefresh, setBooksRefresh] = useState(0);
   const [myBooks, setMyBooks] = useState<BookSummary[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -199,7 +201,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [book.id, book.updatedAt]);
+  }, [book.id, book.updatedAt, booksRefresh]);
 
   const handleSwitchBook = async (id: string) => {
     if (id === book.id) return;
@@ -241,7 +243,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       })
       .finally(() => { if (!cancelled) setServerBooksLoading(false); });
     return () => { cancelled = true; };
-  }, [authUser?.id, book.id]);
+  }, [authUser?.id, book.id, booksRefresh]);
 
   const handleOpenCloudBook = async (bookId: string) => {
     if (!authUser?.id || openingBookId) return;
@@ -339,7 +341,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setPrivateRefresh((v) => v + 1);
   };
   const [grabfusionOpen, setGrabfusionOpen] = useState(false);
-  const [bookToDelete, setBookToDelete] = useState<BookSummary | null>(null);
+  /** Книга, яку просять видалити: мінімум, спільний для локального переліку й переліку зі Studio. */
+  const [bookToDelete, setBookToDelete] = useState<{ id: string; title: string; privateStore?: { storeId: string } } | null>(null);
   /**
    * Де саме лежить книга — вікно видалення мусить назвати це прямо (журнал #552): раніше воно просто питало
    * «точно видалити?», а книга при цьому зникала лише з браузера й поверталася зі Studio наступного разу.
@@ -347,10 +350,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Будь-яка НЕ приватна книга могла потрапити в хмару (збереження дзеркалить її туди), тож видаляємо й звідти.
   // Свідомо не питаємо про це перелік `serverBooks`: він буває ще не завантажений, і тоді копія в хмарі лишилася б
   // мовчки. Якщо книги там немає, сервер відповідає 404, і це нормальний результат.
-  const inCloud = (b: BookSummary) => !b.privateStore;
-  const privateStoreName = (b: BookSummary) =>
+  const inCloud = (b: { privateStore?: { storeId: string } }) => !b.privateStore;
+  const privateStoreName = (b: { privateStore?: { storeId: string } }) =>
     privateStores.find((st) => st.id === b.privateStore?.storeId)?.name || t('dashboard.deleteBookLocalServerFallback');
-  const deletePlaces = (b: BookSummary) => {
+  const deletePlaces = (b: { privateStore?: { storeId: string } }) => {
     const places: Array<{ key: string; text: string; tone: string }> = [];
     if (b.privateStore) places.push({ key: 'local', tone: 'text-emerald-300', text: t('dashboard.deleteBookWhereLocal', { name: privateStoreName(b) }) });
     if (inCloud(b)) places.push({ key: 'cloud', tone: 'text-sky-300', text: t('dashboard.deleteBookWhereCloud') });
@@ -359,7 +362,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
   // Чи є книга у вітрині, Studio локально не знає (публікація живе в маркетплейсі), тож для хмарної книги
   // показуємо застереження завжди — воно сформульоване як умова («якщо книга є у вітрині»).
-  const deleteStorefrontNote = (b: BookSummary) => inCloud(b);
+  const deleteStorefrontNote = (b: { privateStore?: { storeId: string } }) => inCloud(b);
 
   // Персональний облік витрат токенів (Завдання 2 grill-me сесії) — та сама
   // усage_log-агрегація, що й адмінська панель, але відфільтрована сервером
@@ -428,7 +431,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      <StudioBookDocuments books={serverBooks.filter(b=>b.ownerId===authUser?.id)} userId={authUser?.id??null} opening={openingBookId} onOpen={id=>void handleOpenCloudBook(id)} onCreate={()=>setCreateChooserOpen(true)}/>
+      <StudioBookDocuments books={serverBooks.filter(b=>b.ownerId===authUser?.id)} userId={authUser?.id??null} opening={openingBookId} onOpen={id=>void handleOpenCloudBook(id)} onDelete={b=>setBookToDelete(b)} onCreate={()=>setCreateChooserOpen(true)}/>
       {/* Швидке повернення до книги з іншого пристрою. Чужі книги сервер не віддає. */}
       <section data-testid="existing-book-entry" className="nova-glass-dark rounded-2xl p-5 border border-cyan-500/30">
         <div className="flex items-center gap-2 mb-2">
@@ -944,9 +947,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <button
                   data-delete-book-confirm
                   onClick={() => {
-                    void onDeleteBook(bookToDelete.id, { cloud: inCloud(bookToDelete) });
+                    void Promise.resolve(onDeleteBook(bookToDelete.id, { cloud: inCloud(bookToDelete) })).finally(() => {
+                      setPrivateRefresh((v) => v + 1);
+                      setBooksRefresh((v) => v + 1);
+                    });
                     setBookToDelete(null);
-                    setPrivateRefresh((v) => v + 1);
                   }}
                   className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors"
                 >
