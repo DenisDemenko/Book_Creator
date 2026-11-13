@@ -42,7 +42,7 @@ echo "Сервіс:"
 hz=$(curl -s -L -m 30 "$BASE/healthz")
 echo "$hz" | grep -q '"ok":true' && ok "/healthz: $hz" || bad "/healthz не ok: ${hz:0:120}"
 # Очікувана версія контракту; після підвищення контракту (shared/photoDraftContract.ts) змінити тут або передати зовні.
-EXPECTED_CONTRACT="${GRABFUSION_EXPECTED_CONTRACT:-1.6.0}"
+EXPECTED_CONTRACT="${GRABFUSION_EXPECTED_CONTRACT:-1.7.0}"
 echo "$hz" | grep -q "\"contractVersion\":\"${EXPECTED_CONTRACT}\"" && ok "контракт ${EXPECTED_CONTRACT}" || bad "версія контракту не ${EXPECTED_CONTRACT} (Studio і сервіс мають збігатися)"
 
 echo "Безпека:"
