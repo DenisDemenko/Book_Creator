@@ -375,7 +375,8 @@
     "test:shared-furniture-access": "tsx scripts/test-shared-furniture-access.mts",
     "test:stored-designcraft-publication": "tsx scripts/test-storedDesigncraftPublication.mts",
     "test:geohome": "tsx scripts/test-geohome.mts",
-    "test:wardrobe-documents": "node --import tsx scripts/test-wardrobeDocuments.mts"
+    "test:wardrobe-documents": "node --import tsx scripts/test-wardrobeDocuments.mts",
+    "test:marketplace-assistant": "node --import tsx scripts/test-marketplaceAssistant.mts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

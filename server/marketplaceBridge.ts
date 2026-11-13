@@ -191,6 +191,8 @@ export async function saveBridgeSettings(input: { url?: string; key?: string }):
 export type MarketplaceFormat = 'digital' | 'print';
 
 export interface PublishBookInput {
+  printStock?: number;
+  printOnDemand?: boolean;
   /** Ідентифікатор книги в Nova — основа для externalId, тому публікація ідемпотентна. */
   bookId: string;
   format: MarketplaceFormat;
@@ -1646,6 +1648,10 @@ export async function publishBookToMarketplace(
 
   const body = {
     externalId,
+    editionFormat: input.format,
+    sourceBookId: input.bookId,
+    ...(input.format==='print'?{printStock:input.printStock??0,printOnDemand:input.printOnDemand!==false}:{}),
+    testPublication: !!input.engineId || input.bookId==='nova-bridge-test',
     title: input.title,
     subtitle: input.subtitle,
     summary: input.summary,

@@ -484,6 +484,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
       for (const edition of editions) {
         const format = edition.format === 'print' ? 'print' : 'digital';
+        if(format==='print'&&edition.printOnDemand===false&&(!Number.isInteger(Number(edition.printStock))||Number(edition.printStock)<0||Number(edition.printStock)>100000))return res.status(400).json({error:'Вкажіть кількість готових друкованих примірників від 0 до 100000.'});
         const priceMinor = Number(edition.priceMinor);
         if (!Number.isFinite(priceMinor) || priceMinor < 0) {
           return res.status(400).json({ error: `Некоректна ціна для редакції «${format}».`, kind: 'bad_input' });
@@ -583,6 +584,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
             summary: book.logline ? String(book.logline) : undefined,
             description: book.synopsis ? String(book.synopsis) : undefined,
             priceMinor: Math.round(priceMinor),
+            printStock: Number(edition.printStock||0),
+            printOnDemand: edition.printOnDemand!==false,
             sellerSlug: req.body?.sellerSlug ? String(req.body.sellerSlug) : undefined,
             categorySlug: bridgeCategorySlug,
             highlights: bridgeHighlights,
@@ -870,6 +873,7 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
 
     for (const edition of params.editions) {
       const format = edition.format === 'print' ? 'print' : 'digital';
+      if(format==='print'&&edition.printOnDemand===false&&(!Number.isInteger(Number(edition.printStock))||Number(edition.printStock)<0||Number(edition.printStock)>100000))throw new Error('Вкажіть кількість готових друкованих примірників від 0 до 100000.');
       const priceMinor = Number(edition.priceMinor);
       if (!Number.isFinite(priceMinor) || priceMinor < 0) {
         throw new MarketplaceBridgeError(`Некоректна ціна для редакції «${format}».`, 'rejected', 400);
@@ -953,6 +957,8 @@ export function registerPdfRoutes(app: Express, deps: PdfRoutesDeps): StoredBook
           summary: book.logline ? String(book.logline) : undefined,
           description: book.synopsis ? String(book.synopsis) : undefined,
           priceMinor: Math.round(priceMinor),
+          printStock: Number(edition.printStock||0),
+          printOnDemand: edition.printOnDemand!==false,
           coverUrl,
           sellerSlug: params.sellerSlug,
           categorySlug: params.categorySlug,
