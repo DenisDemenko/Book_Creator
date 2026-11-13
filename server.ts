@@ -55,6 +55,7 @@ import {
   MAX_REFERENCE_IMAGES,
 } from './server/imageGeneration';
 import { listVideoEngines } from './server/videoGeneration';
+import { noEngineMessage, resolveEngineForWizard } from './server/expressEngine';
 import {
   geminiClient as ai,
   generateWithGemini,
@@ -639,6 +640,25 @@ registerCourseRoutes(app, {
     return out;
   },
   onCourseChanged: (course) => void ensureCourseInCore(`${COURSE_PREFIX}${course.id}`).catch(() => {}),
+  // «Доповнити це з ШІ» в блоці «Готовність»: рушій обираємо так само, як у
+  // майстрі (ключ автора → ключ сервера), щоб вибір не розходився між розділами.
+  async askText(req, label, system, prompt) {
+    const principal = (req as { principal?: { id?: string | null } }).principal ?? null;
+    const choice = await resolveEngineForWizard(principal?.id ?? null);
+    if (!choice) throw new Error(noEngineMessage());
+    const result = await generateAiText({
+      engine: choice.engine,
+      modelId: choice.modelId,
+      prompt,
+      systemInstruction: system,
+      json: true,
+      privateContent: true,
+      apiKeyOverride: choice.apiKeyOverride,
+      req,
+      label,
+    } as never);
+    return { text: (result as { text: string }).text };
+  },
 });
 registerCourseWizardRoutes(app);
 registerModerationRoutes(app);

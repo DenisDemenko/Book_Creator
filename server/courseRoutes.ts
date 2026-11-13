@@ -16,6 +16,8 @@ import { can, requireAuth, requirePermission } from './auth';
 import { latestModerationFor, submitForModeration } from './moderationStore';
 import { fetchGraduateStats, listBridgeCategories, MarketplaceBridgeError } from './marketplaceBridge';
 import { GRADUATE_SELLING_MODES, type GraduateSelling } from '../src/utils/coursePublishRules';
+import { isValidGap, type CourseGap } from '../shared/courseGapFill';
+import { buildGapPrompt, gapSystemInstruction, parseGapSuggestion } from './courseGapPrompt';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import {
   createCourse,
@@ -45,6 +47,11 @@ export interface CourseRoutesDeps {
   listCategories?: () => Promise<Array<{ slug: string; name: string }>>;
   /** Показники продажу робіт випускників курсу (типово — через міст). */
   graduateStats?: (courseId: string) => Promise<unknown | null>;
+  /**
+   * Текстовий прохід ШІ для «Доповнити це з ШІ» (блок «Готовність»). Без нього
+   * маршрут чесно відповідає 503, а решта редактора працює як раніше.
+   */
+  askText?: (req: unknown, label: string, system: string, prompt: string) => Promise<{ text: string }>;
 }
 
 /**
@@ -165,6 +172,41 @@ export function registerCourseRoutes(app: Express, deps: CourseRoutesDeps = {}):
         return res.status(err.status === 401 ? 502 : err.status).json({ error: err.message });
       }
       res.status(503).json({ error: String((err as Error).message) });
+    }
+  });
+
+  /**
+   * «Доповнити це з ШІ»: одна прогалина з блоку «Готовність» → пропозиція вмісту.
+   *
+   * Курс НЕ змінюється: пропозиція повертається авторові, той править її у вікні
+   * й застосовує звичайним збереженням. Інакше кнопка «доповнити» переписувала б
+   * курс однією моделлю без згоди людини — а це навчальний матеріал, за який
+   * відповідає автор, і підмінити там формулювання гірше, ніж лишити порожнє поле.
+   *
+   * Прогалину сервер перевіряє сам (`isValidGap`): з браузера приходить лише опис
+   * «що і де», і приймати його на віру означало б писати в будь-який урок будь-що.
+   */
+  app.post('/api/courses/:id/gap-fill', requireAuth, requirePermission('canUseAi'), async (req, res) => {
+    try {
+      if (!deps.askText) {
+        return res.status(503).json({ error: 'Доповнення з ШІ не налаштовано на цьому сервері.', kind: 'ai_unavailable' });
+      }
+      const course = getCourse(req.params.id);
+      const level = course ? await accessTo(deps, req.principal!, course) : 'none';
+      if (!course || level === 'none') return res.status(404).json({ error: OWNER_ERROR });
+      if (level === 'view') {
+        return res.status(403).json({ error: 'У вас доступ лише на перегляд цього курсу.', kind: 'forbidden' });
+      }
+      const gap = req.body?.gap as CourseGap;
+      if (!isValidGap(gap, course)) {
+        return res.status(400).json({ error: 'Невідоме місце курсу: оновіть сторінку й спробуйте ще раз.', kind: 'bad_gap' });
+      }
+      const system = gapSystemInstruction(gap);
+      const prompt = buildGapPrompt(course, gap);
+      const { text } = await deps.askText(req, `Курс: доповнити (${gap.kind})`, system, prompt);
+      res.json({ gap, suggestion: parseGapSuggestion(text, gap) });
+    } catch (err) {
+      res.status(502).json({ error: String((err as Error).message), kind: 'ai_failed' });
     }
   });
 

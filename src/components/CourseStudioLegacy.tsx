@@ -16,6 +16,7 @@ import {
   RefreshCw,
   AlertTriangle,
   Lock,
+  Sparkles,
 } from 'lucide-react';
 import {
   CourseAssignment,
@@ -36,6 +37,8 @@ import {
 import { parsePriceMinor } from './adminOs/priceInput';
 import CourseGraduateStats from './CourseGraduateStats';
 import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
+import { CourseGapFillModal } from './CourseGapFillModal';
+import { gapForProblem, type CourseGap } from '../../shared/courseGapFill';
 import { PrivateBookBadge } from './PrivateBookBadge';
 import {
   PrivateStoreError,
@@ -211,11 +214,14 @@ const LinesEditor: React.FC<{
   onChange: (lines: string[]) => void;
   placeholder?: string;
   min?: number;
-}> = ({ label, lines, onChange, placeholder, min }) => {
+  /** Навіщо це поле авторові: де рядки з'являться й що з ними станеться далі. */
+  hint?: string;
+}> = ({ label, lines, onChange, placeholder, min, hint }) => {
   const value = lines.join('\n');
   return (
     <label className="block">
       <span className="text-[11px] text-slate-400 font-semibold">{label}</span>
+      {hint && <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug" data-field-hint>{hint}</span>}
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value.split('\n'))}
@@ -412,6 +418,19 @@ export const CourseStudioView: React.FC<{
     void loadPrivate();
   }, [loadPrivate]);
   const usablePrivate = privateLists.filter((l) => l.reachable && l.store.online).map((l) => l.store);
+
+  /**
+   * Розпочаті курси — чернетки, над якими ще працюють, найсвіжіші перші. Курс із GrabFusion
+   * приїжджає саме чернеткою, тож одразу стає першим у цьому переліку. Готові й опубліковані
+   * сюди не потрапляють: «продовжити роботу» про них уже не йдеться.
+   */
+  const startedCourses = useMemo(
+    () => (courses ?? [])
+      .filter((c) => c.status === 'draft')
+      .slice()
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))),
+    [courses],
+  );
 
   const openCourse = useCallback(
     async (id: string) => {
@@ -629,10 +648,38 @@ export const CourseStudioView: React.FC<{
     void loadPrivate();
   }, [loadPrivate]);
 
+  /**
+   * Відкрите вікно «Доповнити це з ШІ»: який пункт готовності закриваємо.
+   * Тримаємо й текст пункту — у вікні видно, що саме доповнюємо.
+   */
+  const [gapFill, setGapFill] = useState<{ gap: CourseGap; problem: string } | null>(null);
+
   const readiness = useMemo(
     () => (course ? collectReadiness(course, storefrontCategories.length > 0) : { blocking: [], polish: [] }),
     [course, storefrontCategories.length]
   );
+
+  /**
+   * Кнопка «Доповнити це з ШІ» навпроти пункту готовності — лише там, де ШІ справді
+   * може допомогти. Пункти про фото, відео, ціну й категорію лишаються без кнопки:
+   * обіцяти доповнення там, де потрібен файл автора чи його рішення про гроші,
+   * гірше, ніж не обіцяти нічого (див. shared/courseGapFill.ts).
+   */
+  const gapButton = (problem: string) => {
+    if (!course || access === 'view') return null;
+    const gap = gapForProblem(problem, course);
+    if (!gap) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => setGapFill({ gap, problem })}
+        className="mt-1 flex items-center gap-1 text-[10px] font-bold text-amber-300 hover:text-amber-200"
+        data-gap-button={gap.kind}
+      >
+        <Sparkles className="w-3 h-3" /> Доповнити це з ШІ
+      </button>
+    );
+  };
 
   // -------- модифікатори структури --------
   const addModule = () => patch((c) => ({ ...c, modules: [...c.modules, emptyModule()] }));
@@ -789,6 +836,48 @@ export const CourseStudioView: React.FC<{
               )}
             </span>
           </label>
+        )}
+
+        {/*
+          Розпочаті курси окремо й НАГОРІ (прохання власника 13.11.2026). Причина конкретна:
+          курс, надісланий із GrabFusion, лягав у спільну сітку разом із усіма іншими — після
+          відправки з телефона автор відкривав Студію й шукав свій курс очима серед решти.
+          Тут він перший, із позначкою, звідки приїхав, і з датою останньої зміни.
+        */}
+        {startedCourses.length > 0 && (
+          <section className="mt-5" data-course-started>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-violet-300">
+              Розпочаті курси — продовжити роботу
+            </h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Чернетки, над якими ви працюєте. Курси з GrabFusion зʼявляються тут одразу після відправки з телефона.
+            </p>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {startedCourses.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => void openCourse(c.id)}
+                  className="text-left p-4 rounded-2xl bg-slate-900 border border-violet-500/30 hover:border-violet-400/60 transition-all"
+                  data-course-started-item={c.id}
+                >
+                  <span className="text-sm font-bold text-slate-100 truncate block">{c.title}</span>
+                  {c.origin && (
+                    <div className="mt-1.5">
+                      <span data-course-origin="photo-draft" className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-violet-500/40 bg-violet-500/10 text-violet-200">
+                        Створено за фото
+                      </span>
+                    </div>
+                  )}
+                  <div className="mt-1.5 text-[11px] text-slate-500">
+                    {c.modules.length} модулів · {c.modules.reduce((n, m) => n + m.lessons.length, 0)} уроків
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-600 font-mono">
+                    оновлено {new Date(c.updatedAt).toLocaleDateString('uk-UA')}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {privateLists.length > 0 && (
@@ -1132,7 +1221,20 @@ export const CourseStudioView: React.FC<{
               />
               <LinesEditor label="Аудиторія (по одному на рядок)" lines={course.audience} onChange={(audience) => patch((c) => ({ ...c, audience }))} min={1} />
               <LinesEditor label="Результати навчання" lines={course.outcomes} onChange={(outcomes) => patch((c) => ({ ...c, outcomes }))} min={1} />
-              <LinesEditor label="Три вигоди на картку" lines={course.highlights} onChange={(highlights) => patch((c) => ({ ...c, highlights }))} min={3} />
+              {/*
+                Прохання власника 13.11.2026: біля поля має бути сказано, що воно дає.
+                «Вигоди на картку» — єдине поле курсу, яке покупець бачить ДО того, як
+                відкриє опис: саме ці рядки їдуть у вітрину в `highlights`
+                (server/courseMarketplacePayload.ts). Без підпису автор пише туди
+                склад курсу («12 уроків»), а не те, що людина отримає.
+              */}
+              <LinesEditor
+                label="Три вигоди на картку"
+                hint="Три короткі рядки на картці курсу у вітрині — покупець бачить їх ще до опису. Пишіть, що людина отримає («готові шаблони», «розбір помилок»), а не склад курсу. Менше трьох — курс не подати."
+                lines={course.highlights}
+                onChange={(highlights) => patch((c) => ({ ...c, highlights }))}
+                min={3}
+              />
               <div className="flex gap-2">
                 <input value={course.coverUrl ?? ''} onChange={(e) => patch((c) => ({ ...c, coverUrl: e.target.value }))} placeholder="Обкладинка (URL або з медіатеки)" className={inputCls} />
                 {libraryButton((url) => patch((c) => ({ ...c, coverUrl: url })))}
@@ -1362,6 +1464,7 @@ export const CourseStudioView: React.FC<{
                       {readiness.blocking.map((item, i) => (
                         <li key={i} className="text-[11px] text-slate-300 leading-relaxed border-l-2 border-rose-500/50 pl-2">
                           {item}
+                          {gapButton(item)}
                         </li>
                       ))}
                     </ul>
@@ -1377,6 +1480,7 @@ export const CourseStudioView: React.FC<{
                       {readiness.polish.map((item, i) => (
                         <li key={i} className="text-[11px] text-slate-400 leading-relaxed border-l-2 border-amber-500/40 pl-2">
                           {item}
+                          {gapButton(item)}
                         </li>
                       ))}
                     </ul>
@@ -1387,6 +1491,15 @@ export const CourseStudioView: React.FC<{
           </div>
         </div>
       </div>
+      {gapFill && course && (
+        <CourseGapFillModal
+          course={course}
+          gap={gapFill.gap}
+          problem={gapFill.problem}
+          onApply={(next) => patch(() => next)}
+          onClose={() => setGapFill(null)}
+        />
+      )}
       {picker && (
         <PickFromMediaLibraryModal
           onPick={(url) => picker.onPick(url)}
