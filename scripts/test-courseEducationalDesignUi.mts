@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import ts from 'typescript';
 import { readFile } from 'node:fs/promises';
 
 const shell = await readFile(new URL('../src/components/CourseStudioView.tsx', import.meta.url), 'utf8');
@@ -29,7 +30,16 @@ console.log('  ✓ empty course lists are treated as loaded and cannot trigger a
 
 assert.match(shell, /data-course-content-workspace/);
 assert.match(shell, /mode === 'course' \? '' : 'hidden'/);
-assert.match(shell, /<LegacyCourseStudioView onOpenWizard=\{onOpenWizard\} initialCourseId=\{initialCourseId\} lang=\{lang\} \/>/);
+// Check forwarding rather than a fixed attribute list: private-course entry adds props.
+const ast=ts.createSourceFile('CourseStudioView.tsx',shell,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+let editor: ts.JsxSelfClosingElement|undefined;
+function visit(node:ts.Node){if(ts.isJsxSelfClosingElement(node)&&node.tagName.getText(ast)==='LegacyCourseStudioView')editor=node;ts.forEachChild(node,visit);}
+visit(ast);assert.ok(editor,'the preserved course editor is rendered');
+for(const name of ['onOpenWizard','initialCourseId','lang','initialPrivateCourse','onInitialPrivateConsumed']){
+  const prop=editor.attributes.properties.find(p=>ts.isJsxAttribute(p)&&p.name.getText(ast)===name);
+  assert.ok(prop&&ts.isJsxAttribute(prop)&&prop.initializer&&ts.isJsxExpression(prop.initializer)&&prop.initializer.expression&&ts.isIdentifier(prop.initializer.expression)&&prop.initializer.expression.text===name,`${name} must reach the course editor unchanged`);
+}
+
 assert.match(shell, /\{mode === 'design' \? \(/);
 assert.match(shell, /data-course-design-workspace/);
 assert.doesNotMatch(shell, /\{mode === 'course' \? \(\s*<div[^>]*>\s*<LegacyCourseStudioView/s);
