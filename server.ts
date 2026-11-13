@@ -1,3 +1,4 @@
+import { registerMarketplaceAssistant } from './server/marketplaceAssistant';
 import { chatOutputCap } from './src/utils/chatLimits';
 import { registerTableAiBillingRoutes } from './server/tableAiBilling';
 import { registerGeoHomeRoutes } from './server/geohome/routes';
@@ -651,6 +652,7 @@ registerProcurementRoutes(app);
 registerThresholdRoutes(app);
 registerCoreEntityRoutes(app);
 registerSupportChatRoutes(app);
+registerMarketplaceAssistant(app);
 registerGitHistoryRoutes(app);
 registerGitCommandRoutes(app);
 
