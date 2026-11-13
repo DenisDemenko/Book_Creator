@@ -1227,9 +1227,15 @@ export function registerAdminRoutes(app: Express): void {
       const sellerSlug = typeof req.body?.sellerSlug === 'string' && req.body.sellerSlug.trim()
         ? req.body.sellerSlug.trim()
         : undefined;
-      const result = await publishBookToMarketplace(
-        { ...bridgeTestBook(), format: 'digital', priceMinor: 100, sellerSlug },
-        { settings }
+      // Журнал публікацій (#557). Тестова книга — теж лістинг у публічній
+      // вітрині, і доти вона була єдиним шляхом публікації повз журнал:
+      // кнопку натискали, у магазині зʼявлявся товар, а в обліку — нічого.
+      const result = await withPublicationJournal(
+        { kind: 'book', sourceId: bridgeTestBook().bookId, format: 'digital', title: bridgeTestBook().title, actorId: req.principal?.id ?? null },
+        () => publishBookToMarketplace(
+          { ...bridgeTestBook(), format: 'digital', priceMinor: 100, sellerSlug },
+          { settings }
+        )
       );
 
       // Публікація без файла лишає покупця з написом «продавець ще не додав
@@ -1531,9 +1537,15 @@ export function registerAdminRoutes(app: Express): void {
         }
         assertFreePriceConfirmed(Math.round(priceMinor), entry?.free, `Формат «${format}»`);
         results.push(
-          await publishBookToMarketplace(
-            { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug, categorySlug },
-            { settings }
+          // Журнал публікацій (#557): тут одна книга їде у вітрину кількома
+          // форматами за раз, і кожен формат — окремий лістинг, тож і запис
+          // у журналі окремий, зі своєю нумерацією.
+          await withPublicationJournal(
+            { kind: 'book', sourceId: bookId, format, title, actorId: req.principal?.id ?? null },
+            () => publishBookToMarketplace(
+              { bookId, format, title, subtitle, summary, description, priceMinor, coverUrl, highlights, sellerSlug, categorySlug },
+              { settings }
+            )
           )
         );
       }

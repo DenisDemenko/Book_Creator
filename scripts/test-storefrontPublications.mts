@@ -128,12 +128,40 @@ for (const [name, text] of sources) {
   t(name + ' імпортує журнал', text.includes("from './storefrontPublications'"));
   t(name + ' обгортає виклик', text.includes('withPublicationJournal('));
 }
-// Найважливіше: виклик мосту НЕ лишився поза обгорткою — інакше журнал був би
-// на місці, а публікації проходили б мимо нього.
-t('книгу не публікують прямим викликом', !pdfRoutes.includes('const published = await publishBookToMarketplace('));
-t('курс в адмінці не публікують прямим викликом', !adminRoutes.includes('const result = await publishCourseToMarketplace('));
-t('курс у модерації не публікують прямим викликом', !moderation.includes('const result = await publishCourseToMarketplace('));
-t('виріб не публікують прямим викликом', !furniture.includes('const result = await publishProductToMarketplace('));
+// НАЙВАЖЛИВІШЕ, і перевірка тут навмисно суцільна, а не по трьох відомих
+// файлах: журнал нічого не вартий, якщо хоч один виклик мосту лишився повз
+// нього. Саме так і сталося — тестова публікація мосту в адмінці (кнопка
+// «Опублікувати тестову книгу») рік стояла осторонь і зʼявилась у вітрині,
+// не лишивши сліду в обліку. Знайдено живою перевіркою 12.11.2026 (#557).
+// Тому тут проглядається ВЕСЬ server/: кожен виклик `publish*ToMarketplace(`
+// мусить мати `withPublicationJournal(` в попередніх рядках.
+{
+  const dir = new URL('../server/', import.meta.url);
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.ts'));
+  const bare: string[] = [];
+  let calls = 0;
+  for (const f of files) {
+    if (f === 'marketplaceBridge.ts') continue; // тут вони ОГОЛОШЕНІ, а не викликані
+    const text = fs.readFileSync(new URL(f, dir), 'utf8');
+    for (const m of text.matchAll(/publish(?:Book|Course|Product)ToMarketplace\s*\(/g)) {
+      // Вікно велике навмисно: опис публікації в журналі займає до десятка
+      // рядків, і на 400 символах обгортка не влізала — тест «знаходив» як
+      // дірки якраз ті місця, що вже обгорнуті.
+      const before = text.slice(Math.max(0, m.index! - 1000), m.index!);
+      const NL = String.fromCharCode(10);
+      // Рядок імпорту — не виклик: `publishBookToMarketplace,` у списку імпорту.
+      if (/^\s*publish(?:Book|Course|Product)ToMarketplace,?$/m.test(before.split(NL).pop() ?? '')) continue;
+      calls++;
+      if (!before.includes('withPublicationJournal(')) {
+        bare.push(`${f}:${text.slice(0, m.index!).split(NL).length}`);
+      }
+    }
+  }
+  t('виклики мосту знайдено', calls >= 5, String(calls));
+  t('жоден виклик мосту не йде повз журнал', bare.length === 0, bare.join(', '));
+}
+t('тестова публікація мосту теж у журналі',
+  adminRoutes.includes("sourceId: bridgeTestBook().bookId"));
 t('конструкторську картку теж записано', furniture.includes("kind: 'product', sourceId: String(constructorId(id))"));
 t('книга передає свою версію й ревізію', pdfRoutes.includes('sourceRevision: stored.revision'));
 
