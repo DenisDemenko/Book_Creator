@@ -14,6 +14,7 @@
  * вітрини, минаючи чергу модерації). Це свідоме обмеження v1, не помилка;
  * див. коментар до GET /api/admin/crm/users у server/adminRoutes.ts.
  */
+import { MarketplaceSupportPanel } from './MarketplaceSupportPanel';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MAX_SUPPORT_ATTACHMENTS,
@@ -430,6 +431,7 @@ export const AdminCrmView: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <MarketplaceSupportPanel />
       <div className="p-6 rounded-2xl glass-panel space-y-4">
         <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
           <h2 className="text-sm font-bold flex items-center gap-2">

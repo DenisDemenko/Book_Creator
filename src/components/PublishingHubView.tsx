@@ -329,10 +329,12 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
   const { lang } = useLanguage();
   const locale = lang === 'en' ? 'en-US' : 'uk-UA';
   const [variant, setVariant] = useState<'code' | 'design'>('code');
-  const [withPrint, setWithPrint] = useState(true);
+  const [withPrint, setWithPrint] = useState(false);
+  const [printOnDemand,setPrintOnDemand]=useState(true);
+  const [printStock,setPrintStock]=useState(1);
   const [trimId, setTrimId] = useState('6x9');
   const [priceDigital, setPriceDigital] = useState('150');
-  const [pricePrint, setPricePrint] = useState('390');
+  const [pricePrint, setPricePrint] = useState('');
   // Ціна 0 — окреме рішення, а не наслідок порожнього поля: без прапорця
   // «Безкоштовна» нульова чи некоректна ціна публікацію не пропускає.
   const [freeDigital, setFreeDigital] = useState(false);
@@ -633,6 +635,8 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
       if (withPrint && printPrice && printPrice.ok) {
         editions.push({
           format: 'print',
+          printOnDemand,
+          printStock:printOnDemand?0:printStock,
           priceMinor: printPrice.minor,
           free: printPrice.free,
           variant,
@@ -964,12 +968,18 @@ const VitrynaPanel: React.FC<{ book: Book; isGuest: boolean }> = ({ book, isGues
         <div className="rounded-xl border border-slate-800 p-3 space-y-3">
           <label className="flex items-center gap-2 text-xs text-slate-200">
             <input type="checkbox" checked={withPrint} onChange={(e) => setWithPrint(e.target.checked)} />
-            Додати друковану редакцію (макет Amazon KDP)
+            Додати продаж паперової книги — один примірник
           </label>
           {withPrint && (
             <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-xs text-slate-300">Наявність паперової книги
+                <select value={printOnDemand?'order':'stock'} onChange={e=>setPrintOnDemand(e.target.value==='order')} className="mt-1 w-full rounded-xl bg-slate-950 border border-slate-800 p-2">
+                  <option value="order">Друк на замовлення — 1 примірник</option><option value="stock">Готові друковані книги в наявності</option>
+                </select>
+              </label>
+              {!printOnDemand&&<label className="block text-xs text-slate-300">Кількість готових примірників<input type="number" min={0} max={100000} value={printStock} onChange={e=>setPrintStock(Number(e.target.value))} className="mt-1 w-full rounded-xl bg-slate-950 border border-slate-800 p-2"/></label>}
               <label className="block">
-                <span className="block text-[11px] font-semibold text-slate-300 mb-1">Ціна друкованої, грн</span>
+                <span className="block text-[11px] font-semibold text-slate-300 mb-1">Ціна одного друкованого примірника, грн</span>
                 <input
                   value={pricePrint}
                   onChange={(e) => setPricePrint(e.target.value)}
