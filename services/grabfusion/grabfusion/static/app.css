@@ -108,3 +108,16 @@ details>summary{cursor:pointer;font:600 .95rem var(--font-display);letter-spacin
 .choice-icon{font-size:1.6rem;line-height:1}
 .choice-body{display:flex;flex-direction:column;gap:4px}
 .choice-body strong{font:600 1rem var(--font-display);color:var(--foreground)}
+
+/* Пропозиція ШІ до тексту уроку (контракт 1.7.0) */
+.suggest{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.suggest-head{display:flex;align-items:center;gap:8px}
+.suggest-text{margin:0;padding:10px 12px;border-radius:12px;background:var(--accent-soft);border:1px solid var(--line);white-space:pre-wrap}
+.suggest .row{flex-wrap:wrap;gap:6px}
+
+/* Вікно швидкої правки пропозиції */
+.modal{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);padding:12px}
+.modal-win{width:100%;max-width:560px;max-height:85vh;overflow:auto;background:var(--surface);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.modal-win h3{margin:0;font:600 1.05rem var(--font-display)}
+.modal-win textarea{width:100%}
+@media (min-width:640px){.modal{align-items:center}}

@@ -48,6 +48,18 @@ class Note:
 
 
 @dataclass
+class LessonSuggestion:
+    """Пропозиція ШІ до тексту уроку (1.7.0). Лежить ПОРУЧ із `body` і не чіпає його."""
+    text: str
+    createdAt: str = ""
+    modelId: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "LessonSuggestion":
+        return _build(cls, d)
+
+
+@dataclass
 class Lesson:
     lessonId: str
     title: str
@@ -56,10 +68,12 @@ class Lesson:
     body: str | None = None
     topics: list[str] = field(default_factory=list)
     aiFields: list[str] = field(default_factory=list)
+    suggestion: LessonSuggestion | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Lesson":
-        return _build(cls, d)
+        sug = d.get("suggestion")
+        return _build(cls, d, suggestion=LessonSuggestion.from_dict(sug) if sug else None)
 
 
 @dataclass
@@ -100,9 +114,10 @@ class Assumption:
 
 @dataclass
 class Job:
-    kind: str  # structure | generate
+    kind: str  # structure | generate | suggest
     status: str  # running | failed
     moduleId: str | None = None
+    lessonId: str | None = None  # лише suggest (1.7.0)
     error: str | None = None
     startedAt: str = ""
 
@@ -242,11 +257,13 @@ class AiOptions:
     balance: int | None
     unlimited: bool
     checkedAt: str
+    lessonId: str | None = None  # лише pass=lesson (1.7.0)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "AiOptions":
         return cls(
             pass_name=d["pass"], moduleId=d.get("moduleId"), defaultModelId=d.get("defaultModelId"),
+            lessonId=d.get("lessonId"),
             models=[PassModelOption.from_dict(m) for m in d.get("models", [])],
             balance=d.get("balance"), unlimited=bool(d.get("unlimited")), checkedAt=d.get("checkedAt", ""))
 

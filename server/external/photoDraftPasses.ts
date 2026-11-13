@@ -9,6 +9,8 @@
  *    та припущення, які людина має підтвердити.
  *  - Прохід 3 «текст модуля»: з уроків одного модуля — мета, текст (Markdown),
  *    теми. Поля, які викладач уже правив, ШІ не перезаписує.
+ *  - Прохід «підказати» (1.7.0): короткий варіант тексту ОДНОГО уроку за його
+ *    кадрами й метою; у чернетку він лягає пропозицією, не чіпаючи `body`.
  *  - computeSubmitBlockers: усе, що заважає відправці (400 `submit_blocked`).
  *
  * Описи кадрів, слова викладача й назви йдуть у промпт як ДАНІ в огорожах
@@ -493,6 +495,79 @@ export function mergeAssumptions(
     });
   }
   return next;
+}
+
+// ---------------------------------------------------------------------------
+// Прохід «підказати»: пропозиція до тексту ОДНОГО уроку (контракт 1.7.0)
+// ---------------------------------------------------------------------------
+
+/*
+ * ЧОМУ ОКРЕМИЙ ПРОХІД, а не «Написати» на один урок. Прохід 3 пише модуль цілком, у JSON, по
+ * ~250 токенів на урок, і одразу кладе результат у `body`. Тут інше завдання: викладач стоїть над
+ * полем «Текст уроку» й хоче ОДИН короткий варіант, який прочитає цілим і або візьме, або
+ * виправить, або відкине. Тому:
+ *   — вихід ≤ maxLessonSuggestionChars (500) і звичайним текстом, без JSON і без заголовка «## »:
+ *     розбирати нічого, а в полі має опинитись те саме, що викладач бачив у пропозиції;
+ *   — опорою є МЕТА уроку, яку викладач уже вписав: саме про це просив власник;
+ *   — результат не торкається `body` (див. LessonSuggestion у контракті).
+ */
+
+export function suggestSystemInstruction(kind: PhotoDraftKind, mode?: PhotoDraftInstructionMode | null, source?: PhotoDraftCourseSource | null): string {
+  const w = KIND_WORDS[kind];
+  const limit = PHOTO_DRAFT_LIMITS.maxLessonSuggestionChars;
+  const document = kind === 'course' && source === 'document';
+  return [
+    `Ти — автор, що пише ${w.whole}. Зараз пропонуєш текст ОДНОГО ${w.lesson} — так, як його почав би писати сам.`,
+    ...(kind === 'instruction' ? [`Інструкція описує ${MODE_UK[mode ?? 'assembly']}.`] : []),
+    'Головне — МЕТА цього уроку, якщо її вказано: текст має вести саме до неї, а не переказувати все, що видно.',
+    w.style,
+    `Пиши ОДИН суцільний шматок тексту до ${limit} символів: 2–4 коротких абзаци або 3–5 пунктів.`,
+    'Жодних заголовків, жодної розмітки «##», жодних лапок навколо відповіді, жодних пояснень до або після — лише сам текст уроку.',
+    'Це чернетка, яку викладач виправить: краще коротко й по суті, ніж повно й з вигадками.',
+    ...(document ? DOCUMENT_RULES : SAFETY_RULES),
+    'Відповідай українською.',
+  ].join('\n');
+}
+
+export function buildSuggestPrompt(draft: PassDraft, module: DraftModule, lesson: DraftLesson): string {
+  const byId = new Map(draft.photos.map((p) => [p.photoId, p]));
+  const w = KIND_WORDS[draft.kind];
+  const lines = [`Що складаємо: ${w.whole}.`, ...frame(draft), '', `${w.module}: <<<${module.title}>>>`];
+  if (module.summary) lines.push(`Про що частина: <<<${module.summary}>>>`);
+  lines.push('', `${w.lesson}: <<<${lesson.title}>>>`);
+  lines.push(lesson.goal ? `МЕТА цього уроку (головне): <<<${lesson.goal}>>>` : 'Мету не вказано — виведи її з кадрів сам, але не вигадуй нового.');
+  if (lesson.topics.length) lines.push(`Теми: ${lesson.topics.join(', ')}`);
+  const photos = lesson.photoIds.map((id) => byId.get(id)).filter((p): p is PassPhoto => !!p);
+  if (photos.length) {
+    for (const photo of photos) lines.push('', photoBlock(draft, photo));
+  } else {
+    // Урок без власних кадрів — не відмова: назви, мети й тем досить, щоб запропонувати початок.
+    lines.push('', 'Кадрів до цього уроку немає — спирайся на назву, мету й теми.');
+  }
+  if (lesson.body?.trim()) {
+    lines.push('', `Теперішній текст уроку (запропонуй кращий варіант того самого, не повторюй дослівно): <<<${clip(lesson.body, 2000)}>>>`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Відповідь проходу «підказати» — звичайний текст. Знімаємо огорожу ```, заголовок «## » і лапки,
+ * якими моделі люблять обрамляти відповідь, і ріжемо по межі: краще обрізана пропозиція, ніж
+ * відмова після того, як бали вже витрачено.
+ */
+export function parseSuggestResult(raw: string): string {
+  let text = String(raw ?? '').trim();
+  text = text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/, '').trim();
+  text = text.replace(/^#{1,6}[ \t]+[^\n]*\n+/, '').trim();
+  const PAIRS: [string, string][] = [['"', '"'], ['«', '»'], ['“', '”'], ["'", "'"]];
+  for (const [open, close] of PAIRS) {
+    if (text.length > 1 && text.startsWith(open) && text.endsWith(close)) {
+      text = text.slice(open.length, text.length - close.length).trim();
+      break;
+    }
+  }
+  if (!text) throw new Error('Модель не запропонувала тексту. Спробуйте ще раз.');
+  return clip(text, PHOTO_DRAFT_LIMITS.maxLessonSuggestionChars);
 }
 
 // ---------------------------------------------------------------------------

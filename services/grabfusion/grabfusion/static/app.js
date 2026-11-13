@@ -486,7 +486,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let saveChain = Promise.resolve();
 const serial = (fn) => { const run = saveChain.then(fn, fn); saveChain = run.catch(() => {}); return run; };
 const pollMs = () => (state.limits ? state.limits.pollIntervalMs : 2000);
-const JOB_TEXT = { structure: 'ШІ розкладає кадри на кроки…', generate: 'ШІ пише текст…' };
+const JOB_TEXT = { structure: 'ШІ розкладає кадри на кроки…', generate: 'ШІ пише текст…', suggest: 'ШІ пише підказку до уроку…' };
 
 function confirmBtn(label, confirmLabel, fn, props) {
   const b = h('button', Object.assign({ text: label }, props || {}));
@@ -772,7 +772,142 @@ function lessonField(d, les, field, label, multiline) {
   const aiStill = () => { const m = state.draft.structure.modules.flatMap((x) => x.lessons).find((x) => x.lessonId === les.lessonId); return !!m && m.aiFields.includes(field); };
   const ai = (les.aiFields || []).includes(field) && h('span', { class: 'badge ai', text: 'ШІ — перевірте' });
   const chips = d.kind === 'instruction' && field === 'body' ? stepLineChips(el, les.body) : null;
-  return h('div', null, h('label', null, label, ' ', ai || ''), el, chips, cnt);
+  const suggest = field === 'body' ? viewSuggest(d, les) : null;
+  return h('div', null, h('label', null, label, ' ', ai || ''), el, chips, cnt, suggest);
+}
+
+/* ---------- пропозиція ШІ до тексту уроку (контракт 1.7.0) ----------
+   Власник просив: під полем тексту — кнопка, що просить ШІ запропонувати текст за кадрами уроку й
+   вписаною метою; далі «Прийняти», «Внести зміни» (вікно швидкої правки) або «Відхилити повністю».
+   Пропозиція НЕ лягає в поле, доки її не прийняли: `body` лишається тим, що був (див. контракт). */
+
+/** Поточний стан по одному уроку: 'asking' (питаємо ціну), 'confirm' (показали ціну), 'running'. */
+function suggestState(lessonId) {
+  state.suggest = state.suggest || {};
+  return state.suggest[lessonId] || null;
+}
+function setSuggestState(lessonId, value) {
+  state.suggest = state.suggest || {};
+  if (value) state.suggest[lessonId] = value; else delete state.suggest[lessonId];
+  render();
+}
+
+function viewSuggest(d, les) {
+  const box = h('div', { class: 'suggest', 'data-lesson': les.lessonId });
+  const st = suggestState(les.lessonId);
+  const job = d.job;
+  const busy = !!(job && job.status === 'running');
+  const mine = busy && job.kind === 'suggest' && job.lessonId === les.lessonId;
+  if (les.suggestion) {
+    box.append(
+      h('div', { class: 'suggest-head' }, h('span', { class: 'badge ai', text: 'ШІ пропонує' }),
+        h('span', { class: 'muted', text: `${chars(les.suggestion.text)} символів` })),
+      h('p', { class: 'suggest-text', text: les.suggestion.text }),
+      h('div', { class: 'row' },
+        h('button', { class: 'primary small', 'data-act': 'accept', text: 'Прийняти пропозицію', disabled: busy,
+          onclick: () => resolveSuggestion(les.lessonId, 'accept') }),
+        h('button', { class: 'small', 'data-act': 'edit', text: 'Внести зміни', disabled: busy,
+          onclick: () => openSuggestEditor(les) }),
+        h('button', { class: 'small', 'data-act': 'reject', text: 'Відхилити пропозицію повністю', disabled: busy,
+          onclick: () => resolveSuggestion(les.lessonId, 'reject') })),
+      h('p', { class: 'muted', text: 'Доки не вирішите — текст уроку лишається таким, як зараз.' }));
+    return box;
+  }
+  if (mine || (st && st.phase === 'running')) {
+    box.append(h('p', { class: 'row' }, h('span', { class: 'badge processing', text: 'працює' }),
+      h('span', { text: 'ШІ пише підказку до цього уроку…' })));
+    return box;
+  }
+  if (st && st.phase === 'asking') {
+    box.append(h('p', { class: 'muted', text: 'Рахую вартість підказки…' }));
+    return box;
+  }
+  if (st && st.phase === 'confirm') {
+    box.append(h('p', { class: 'muted', text: st.message }),
+      h('div', { class: 'row' },
+        h('button', { class: 'primary small', 'data-act': 'go', text: st.cost ? `Так, підказати (${credits(st.cost)})` : 'Так, підказати',
+          onclick: () => startSuggest(les.lessonId, st.modelId) }),
+        h('button', { class: 'small', text: 'Скасувати', onclick: () => setSuggestState(les.lessonId, null) })));
+    return box;
+  }
+  box.append(h('button', { class: 'small', 'data-act': 'suggest', text: '✨ Підказати текст ШІ', disabled: busy || state.writing,
+    onclick: () => askSuggest(d, les.lessonId) }));
+  if (st && st.error) box.append(h('p', { class: 'err', text: st.error }));
+  return box;
+}
+
+/** Крок 1 — ціна. Питаємо Studio ДО запуску: бали списуються, і їх розмір автор має бачити заздалегідь. */
+async function askSuggest(d, lessonId) {
+  setSuggestState(lessonId, { phase: 'asking' });
+  try {
+    const r = await api('GET', `/drafts/${d.draftId}/ai-options?pass=lesson&lessonId=${encodeURIComponent(lessonId)}`);
+    const usable = (r.models || []).filter((m) => m.usable);
+    if (!usable.length) { setSuggestState(lessonId, { error: 'Жодна модель ШІ зараз недоступна.' }); return; }
+    const saved = aiStored();
+    const modelId = [state.ai && state.ai.modelId, saved, r.defaultModelId].find((id) => id && usable.some((m) => m.modelId === id)) || usable[0].modelId;
+    const picked = usable.find((m) => m.modelId === modelId);
+    const cost = picked && picked.credits ? picked.credits.expected : null;
+    const max = picked && picked.credits ? picked.credits.max : null;
+    if (!r.unlimited && max != null && r.balance != null && r.balance < max) {
+      setSuggestState(lessonId, { error: `Не вистачає балів: потрібно до ${max}, на балансі ${r.balance}.` });
+      return;
+    }
+    const message = r.unlimited
+      ? `${picked.label}: для вашого облікового запису бали не списуються.`
+      : `${picked.label}: ≈ ${credits(cost ?? 0)}` + (r.balance != null ? ` · на балансі ${r.balance}` : '');
+    setSuggestState(lessonId, { phase: 'confirm', message, cost: r.unlimited ? null : cost, modelId });
+  } catch (e) {
+    setSuggestState(lessonId, { error: e.message });
+  }
+}
+
+/** Крок 2 — сам прохід. Фоновий, як решта: чекаємо завершення опитуванням. */
+async function startSuggest(lessonId, modelId) {
+  if (state.writing) return;
+  setSuggestState(lessonId, { phase: 'running' });
+  state.writing = true; render();
+  const id = state.draft.draftId;
+  try {
+    await runJob(() => api('POST', `/drafts/${id}/lessons/${encodeURIComponent(lessonId)}/suggest`, modelId ? { modelId } : undefined));
+  } finally {
+    state.writing = false;
+    state.ai = null;
+    setSuggestState(lessonId, null);
+  }
+}
+
+/** Крок 3 — рішення викладача. `text` — виправлений у вікні варіант. */
+async function resolveSuggestion(lessonId, action, text) {
+  const id = state.draft.draftId;
+  try {
+    const r = await api('POST', `/drafts/${id}/lessons/${encodeURIComponent(lessonId)}/suggestion`,
+      { action, ...(text !== undefined ? { text } : {}) });
+    state.draft = r.draft; state.blockers = null;
+  } catch (e) {
+    toast(e.message);
+    await reloadDraft();
+  }
+  render();
+}
+
+/* Вікно швидкої правки: пропозиція вже написана, лишилось підправити формулювання й зберегти. */
+function openSuggestEditor(les) {
+  const area = h('textarea', { rows: 10, 'aria-label': 'Текст пропозиції' });
+  area.value = (les.suggestion && les.suggestion.text) || '';
+  const close = () => { overlay.remove(); state.editing = false; };
+  const save = async () => { const v = area.value; close(); await resolveSuggestion(les.lessonId, 'accept', v); };
+  const win = h('div', { class: 'modal-win', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Внести зміни в пропозицію' },
+    h('h3', { text: 'Внести зміни' }),
+    h('p', { class: 'muted', text: 'Виправте текст і збережіть — він ляже в поле «Текст уроку» як ваш.' }),
+    area,
+    h('div', { class: 'row' },
+      h('button', { class: 'primary', text: 'Зберегти в урок', onclick: () => void save() }),
+      h('button', { text: 'Скасувати', onclick: close })));
+  const overlay = h('div', { class: 'modal', onclick: (e) => { if (e.target === overlay) close(); } }, win);
+  document.body.append(overlay);
+  state.editing = true;
+  area.focus();
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 }
 function saveLesson(lessonId, fields) { return serial(async () => {
   try {

@@ -325,6 +325,29 @@ const modId = (await get(d2)).structure.modules[0].moduleId;
 }
 
 // ---------------------------------------------------------------------------
+console.log('\nПрохід «підказати» (один урок, 1.7.0)');
+resetWallet();
+ai.calls = [];
+{
+  const lid = (await get(d2)).structure.modules[0].lessons[0].lessonId;
+  const opt = await call('GET', `${PD}/${d2}/ai-options?pass=lesson&lessonId=${lid}`, { token: grab });
+  t('ai-options для lesson — за схемою, з уроком і його модулем', opt.status === 200 && opt.data.pass === 'lesson' && opt.data.lessonId === lid && opt.data.moduleId === modId && conforms('AiOptionsResponse', opt.data) === '', conforms('AiOptionsResponse', opt.data));
+  const gen = await call('GET', `${PD}/${d2}/ai-options?pass=generate&moduleId=${modId}`, { token: grab });
+  const price = (r: any) => r.data.models.find((m: any) => m.modelId === 'm-ok')?.credits?.max ?? null;
+  // Вихід підказки обмежено 500 символами, тож вона має бути дешевшою за прохід цілого модуля.
+  t('підказка дешевша за «Написати» модуль', price(opt) !== null && price(gen) !== null && price(opt) < price(gen), `${price(opt)} проти ${price(gen)}`);
+  t('невідомий урок — 404 lesson_not_found', isError(await call('GET', `${PD}/${d2}/ai-options?pass=lesson&lessonId=l-404`, { token: grab }), 404, 'lesson_not_found'));
+  const bad = await call('POST', `${PD}/${d2}/lessons/${lid}/suggest`, { token: grab, body: { modelId: 'm-nokey' } });
+  t('suggest: недоступна модель — 400', isError(bad, 400, 'bad_input'));
+  const run = await call('POST', `${PD}/${d2}/lessons/${lid}/suggest`, { token: grab, body: { modelId: 'm-ok' } });
+  t('suggest з моделлю — 202, бали зарезервовано', run.status === 202 && wallet.reserved > 0);
+  await flush();
+  t('suggest: модель і ознака оплати дійшли до writeText', ai.calls.at(-1)?.modelId === 'm-ok' && ai.calls.at(-1)?.creditBilled === true);
+  t('suggest: списано за фактом, резерв порожній', wallet.ledger.some((x) => x.startsWith('settle:')) && wallet.reserved === 0);
+  t('suggest: модель записано в пропозицію', (await get(d2)).structure.modules[0].lessons[0].suggestion?.modelId === 'm-ok');
+}
+
+// ---------------------------------------------------------------------------
 console.log('\nБез гейта балів (адмін, облік вимкнено)');
 resetWallet();
 wallet.gated = false;

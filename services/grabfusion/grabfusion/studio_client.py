@@ -1,4 +1,4 @@
-"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.6.0).
+"""Клієнт API Studio `/api/external/v1/photo-drafts*` (контракт 1.7.0).
 
 Синхронний (httpx). Токен тримає сервер GrabFusion. Розгалужуватись слід лише за `StudioError.kind`.
 """
@@ -152,9 +152,11 @@ class StudioClient:
         return Draft.from_dict(self._request("DELETE", f"/photo-drafts/{draft_id}/notes/{note_id}")["draft"])
 
     # --- проходи ШІ і відправка ----------------------------------------
-    def ai_options(self, draft_id: str, *, pass_name: str = "structure", module_id: str | None = None) -> AiOptions:
+    def ai_options(self, draft_id: str, *, pass_name: str = "structure", module_id: str | None = None,
+                   lesson_id: str | None = None) -> AiOptions:
         """Які моделі можна обрати для проходу й скільки це коштує в балах (з 1.4.0)."""
-        params = {"pass": pass_name, **({"moduleId": module_id} if module_id else {})}
+        params = {"pass": pass_name, **({"moduleId": module_id} if module_id else {}),
+                  **({"lessonId": lesson_id} if lesson_id else {})}
         return AiOptions.from_dict(self._request("GET", f"/photo-drafts/{draft_id}/ai-options", params=params))
 
     def structure(self, draft_id: str, *, replace: bool = False, model_id: str | None = None) -> Draft:
@@ -165,6 +167,20 @@ class StudioClient:
         body = {"modelId": model_id} if model_id else None
         return Draft.from_dict(
             self._request("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate", json=body)["draft"])
+
+    def suggest_lesson(self, draft_id: str, lesson_id: str, *, model_id: str | None = None) -> Draft:
+        """Прохід «підказати» (1.7.0): пропозиція до тексту одного уроку; `body` лишається незмінним."""
+        body = {"modelId": model_id} if model_id else None
+        return Draft.from_dict(
+            self._request("POST", f"/photo-drafts/{draft_id}/lessons/{lesson_id}/suggest", json=body)["draft"])
+
+    def resolve_suggestion(self, draft_id: str, lesson_id: str, *, action: str, text: str | None = None) -> Draft:
+        """`accept` (з `text` — виправлений викладачем варіант) або `reject`. Обидва прибирають пропозицію."""
+        body: dict[str, Any] = {"action": action}
+        if text is not None:
+            body["text"] = text
+        return Draft.from_dict(
+            self._request("POST", f"/photo-drafts/{draft_id}/lessons/{lesson_id}/suggestion", json=body)["draft"])
 
     def submit(self, draft_id: str) -> SubmitResult:
         d = self._request("POST", f"/photo-drafts/{draft_id}/submit")

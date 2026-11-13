@@ -1,5 +1,5 @@
 {
-  "contractVersion": "1.6.0",
+  "contractVersion": "1.7.0",
   "limits": {
     "maxNoteChars": 500,
     "maxImageBytes": 10485760,
@@ -13,6 +13,7 @@
     "pollIntervalMs": 2000,
     "maxManuscriptPages": 120,
     "manuscriptPagesPerHour": 200,
-    "maxPageTextChars": 20000
+    "maxPageTextChars": 20000,
+    "maxLessonSuggestionChars": 500
   }
 }

@@ -222,8 +222,10 @@ def build_router(deps: Deps) -> APIRouter:
 
     @router.get("/drafts/{draft_id}/ai-options")
     def ai_options(draft_id: str, pass_name: str = Query("structure", alias="pass"),
-                   moduleId: str | None = Query(None), s: Session = Depends(current)) -> Any:
-        params = {"pass": pass_name, **({"moduleId": moduleId} if moduleId else {})}
+                   moduleId: str | None = Query(None), lessonId: str | None = Query(None),
+                   s: Session = Depends(current)) -> Any:
+        params = {"pass": pass_name, **({"moduleId": moduleId} if moduleId else {}),
+                  **({"lessonId": lessonId} if lessonId else {})}
         return call(s, lambda c: c.raw("GET", f"/photo-drafts/{draft_id}/ai-options", params=params))
 
     @router.post("/drafts/{draft_id}/modules/{module_id}/generate", status_code=202)
@@ -231,6 +233,20 @@ def build_router(deps: Deps) -> APIRouter:
         body = await _json_body(request, optional=True)
         return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/modules/{module_id}/generate",
                                        json=body or None))
+
+    @router.post("/drafts/{draft_id}/lessons/{lesson_id}/suggest", status_code=202)
+    async def suggest_lesson(draft_id: str, lesson_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        """Прохід «підказати» (1.7.0): пропозиція до тексту одного уроку. Тіло — лише `modelId`."""
+        body = await _json_body(request, optional=True)
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/lessons/{lesson_id}/suggest",
+                                       json=body or None))
+
+    @router.post("/drafts/{draft_id}/lessons/{lesson_id}/suggestion")
+    async def resolve_suggestion(draft_id: str, lesson_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        """Рішення викладача: `{action: accept|reject, text?}`."""
+        body = await _json_body(request)
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/lessons/{lesson_id}/suggestion",
+                                       json=body))
 
     @router.post("/drafts/{draft_id}/submit", status_code=201)
     def submit(draft_id: str, s: Session = Depends(current)) -> Any:

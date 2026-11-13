@@ -62,6 +62,18 @@ export function estimateGeneratePass(system: string, prompt: string, lessonCount
   return build(system, prompt, GENERATE_OUTPUT_BASE + GENERATE_OUTPUT_PER_LESSON * Math.max(1, lessonCount), maxOutputTokens);
 }
 
+/**
+ * Прохід «підказати» (один урок, з 1.7.0): вихід обмежено 500 символами, тож він НЕ росте ні з
+ * кадрами, ні з уроками — на відміну від проходів 2–3. Беремо за межею пропозиції (500 символів
+ * ≈ 200 токенів) із тим самим запасом ≈1,5×, що й вище: модель часто пише трохи довше, а зайве
+ * сервер обріже.
+ */
+const SUGGEST_OUTPUT_TOKENS = 300;
+
+export function estimateSuggestPass(system: string, prompt: string, maxOutputTokens: number): PassTokenEstimate {
+  return build(system, prompt, SUGGEST_OUTPUT_TOKENS, maxOutputTokens);
+}
+
 /** Тариф моделі: долари за мільйон токенів. `null` — «не звірено», не «безкоштовно». */
 export interface TokenRate {
   inputPerMillionUsd: number | null;

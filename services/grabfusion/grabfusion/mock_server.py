@@ -63,6 +63,8 @@ ROUTES: list[Route] = [
     _r("PUT", "/photo-drafts/:draftId/photos/:photoId/text", 200, "put-photo-text"),
     _r("POST", "/photo-drafts/:draftId/structure", 202, "structure-running"),
     _r("POST", "/photo-drafts/:draftId/modules/:moduleId/generate", 202, "generate-running"),
+    _r("POST", "/photo-drafts/:draftId/lessons/:lessonId/suggest", 202, "suggest-running"),
+    _r("POST", "/photo-drafts/:draftId/lessons/:lessonId/suggestion", 200, "suggestion-accepted"),
     _r("GET", "/photo-drafts/:draftId/ai-options", 200, "ai-options"),
     _r("POST", "/photo-drafts/:draftId/submit", 201, "submit-course"),
 ]
@@ -80,7 +82,7 @@ def fixtures_served_by_routes() -> set[str]:
     names = {r.fixture for r in ROUTES if r.fixture}
     names |= set(SUBMIT_BY_KIND.values()) | {"submit-manuscript-existing-book"}
     names |= {"get-draft-structured", "get-draft-written", "get-draft-job-failed", "get-draft-manuscript",
-              "get-draft-course-document"}
+              "get-draft-course-document", "get-draft-suggestion"}
     return names
 
 
@@ -257,7 +259,8 @@ def create_app(*, stateful: bool = False, poll_interval_ms: int | None = None) -
                     return bad
             if route.name.endswith("/ai-options"):
                 params = {**params, "q_pass": request.query_params.get("pass", "structure"),
-                          "q_moduleId": request.query_params.get("moduleId", "")}
+                          "q_moduleId": request.query_params.get("moduleId", ""),
+                          "q_lessonId": request.query_params.get("lessonId", "")}
             res = sim.handle(route.name, params, body)
             if res is not None:
                 app.state.calls.append((route.name, "sim"))

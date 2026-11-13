@@ -17,6 +17,7 @@ from . import contract
 Result = tuple[int, dict[str, Any]]
 STRUCTURE_TICKS = 2
 GENERATE_TICKS = 1
+SUGGEST_TICKS = 1  # підказка коротка: один опит (1.7.0)
 
 
 def _now() -> str:
@@ -93,6 +94,15 @@ class Sim:
             if not d["title"]:
                 d["title"] = ref["title"]
             d["status"] = "structured"
+        elif job["kind"] == "suggest":
+            found = self._find_lesson(d, job.get("lessonId", ""))
+            if found is not None:
+                # Текст уроку НЕ чіпаємо: пропозиція лягає поруч, як і на справжньому сервері.
+                ref = contract.load_fixture("get-draft-suggestion")["draft"]
+                sample = next(s for mm in ref["structure"]["modules"] for ll in mm["lessons"]
+                              if (s := ll.get("suggestion")))
+                found[1]["suggestion"] = {"text": sample["text"], "createdAt": _now(),
+                                          "modelId": "openai:gpt-4o"}
         else:
             m = next((m for m in d["structure"]["modules"] if m["moduleId"] == job["moduleId"]), None)
             if m:
@@ -179,11 +189,16 @@ class Sim:
         if method == "PUT" and name.endswith("/text"):
             return self._put_text(d, params["photoId"], body)
         if method == "GET" and name.endswith("/ai-options"):
-            return self._ai_options(d, params.get("q_pass", "structure"), params.get("q_moduleId", ""))
+            return self._ai_options(d, params.get("q_pass", "structure"), params.get("q_moduleId", ""),
+                                    params.get("q_lessonId", ""))
         if method == "POST" and name.endswith("/structure"):
             return self._structure(d, body)
         if method == "POST" and name.endswith("/generate"):
             return self._generate(d, params["moduleId"], body)
+        if method == "POST" and name.endswith("/suggest"):
+            return self._suggest(d, params["lessonId"], body)
+        if method == "POST" and name.endswith("/suggestion"):
+            return self._resolve_suggestion(d, params["lessonId"], body)
         if method == "POST" and name.endswith("/submit"):
             return self._submit(d)
         return None
@@ -408,19 +423,28 @@ class Sim:
             return _err(400, "bad_input", f"Модель «{models[wanted]['label']}» недоступна: {models[wanted]['note']}")
         return None
 
-    def _ai_options(self, d: dict[str, Any], pass_name: str, module_id: str) -> Result:
+    def _ai_options(self, d: dict[str, Any], pass_name: str, module_id: str, lesson_id: str = "") -> Result:
         if d["kind"] == "manuscript":
             return _err(409, "wrong_status", "Для рукопису проходів 2–3 немає.")
-        if pass_name not in {"structure", "generate"}:
-            return _err(400, "bad_input", "pass — structure або generate.")
+        if pass_name not in {"structure", "generate", "lesson"}:
+            return _err(400, "bad_input", "pass — structure, generate або lesson.")
         weight = len(d["photos"])
         if pass_name == "generate":
             mod = next((m for m in (d["structure"] or {"modules": []})["modules"] if m["moduleId"] == module_id), None)
             if mod is None:
                 return _err(404, "module_not_found", "Модуля немає в структурі.")
             weight = len(mod["lessons"]) * 3
+        if pass_name == "lesson":
+            found = self._find_lesson(d, lesson_id)
+            if found is None:
+                return _err(404, "lesson_not_found", "Уроку немає в структурі.")
+            module_id = found[0]["moduleId"]
+            # Підказка коштує найменше: вихід обмежено 500 символами й не росте з чернеткою.
+            weight = 1
         fx = contract.load_fixture("ai-options")
-        fx["pass"], fx["moduleId"] = pass_name, (module_id or None) if pass_name == "generate" else None
+        fx["pass"] = pass_name
+        fx["moduleId"] = (module_id or None) if pass_name in {"generate", "lesson"} else None
+        fx["lessonId"] = (lesson_id or None) if pass_name == "lesson" else None
         scale = max(1.0, weight / 4)
         for m in fx["models"]:
             if m["credits"]:
@@ -459,6 +483,57 @@ class Sim:
         d["job"] = {"kind": "generate", "status": "running", "moduleId": module_id, "error": None, "startedAt": _now()}
         self.ticks[d["draftId"]] = GENERATE_TICKS
         return 202, {"draft": copy.deepcopy(d)}
+
+    @staticmethod
+    def _find_lesson(d: dict[str, Any], lesson_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        for m in (d["structure"] or {"modules": []})["modules"]:
+            for les in m["lessons"]:
+                if les["lessonId"] == lesson_id:
+                    return m, les
+        return None
+
+    def _suggest(self, d: dict[str, Any], lesson_id: str, body: Any = None) -> Result:
+        bad = self._check_model(body)
+        if bad:
+            return bad
+        if d["job"] and d["job"]["status"] == "running":
+            return _err(409, "job_running", "Уже виконується фонова робота.")
+        if not d["structure"]:
+            return _err(409, "wrong_status", "Спершу розкладіть кадри на уроки.")
+        found = self._find_lesson(d, lesson_id)
+        if found is None:
+            return _err(404, "lesson_not_found", "Уроку немає в структурі.")
+        d["job"] = {"kind": "suggest", "status": "running", "moduleId": found[0]["moduleId"],
+                    "lessonId": lesson_id, "error": None, "startedAt": _now()}
+        self.ticks[d["draftId"]] = SUGGEST_TICKS
+        return 202, {"draft": copy.deepcopy(d)}
+
+    def _resolve_suggestion(self, d: dict[str, Any], lesson_id: str, body: Any) -> Result:
+        action = body.get("action") if isinstance(body, dict) else None
+        if action not in {"accept", "reject"}:
+            return _err(400, "bad_input", "action — accept або reject.")
+        text = body.get("text") if isinstance(body, dict) else None
+        if action == "reject" and text is not None:
+            return _err(400, "bad_input", "З reject текст не передають.")
+        found = self._find_lesson(d, lesson_id)
+        if found is None:
+            return _err(404, "lesson_not_found", "Уроку немає в структурі.")
+        module, les = found
+        if not les.get("suggestion"):
+            return _err(409, "wrong_status", "Пропозиції до цього уроку немає.")
+        if action == "accept":
+            chosen = (text if isinstance(text, str) else les["suggestion"]["text"]).strip()
+            les["body"] = chosen or None
+            mine = isinstance(text, str) and text.strip() != les["suggestion"]["text"]
+            les["aiFields"] = [f for f in les["aiFields"] if f != "body"]
+            if not mine and chosen:
+                les["aiFields"] = sorted(les["aiFields"] + ["body"])
+            module["written"] = all(x.get("body") for x in module["lessons"])
+        les["suggestion"] = None
+        if d["status"] != "collecting" and d["structure"]:
+            d["status"] = "written" if all(m["written"] for m in d["structure"]["modules"]) else "structured"
+        self._bump(d)
+        return 200, {"draft": copy.deepcopy(d)}
 
     def blockers(self, d: dict[str, Any]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

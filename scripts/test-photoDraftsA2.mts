@@ -6,6 +6,8 @@
  *  1. Промпти тримають слова викладача й описи кадрів як ДАНІ (<<< >>>).
  *  2. Розбір відповіді моделі не губить і не дублює кадри.
  *  3. Те, що викладач правив, ШІ не перезаписує; ревізію фонові проходи не міняють.
+ *  3a. Прохід «підказати» (1.7.0) НЕ чіпає текст уроку, доки викладач не прийняв пропозицію:
+ *     саме в цьому вся його суть, і зламати це найлегше.
  *  4. Перевірка якості: кожна перешкода відправки має свій код і відповідає схемі.
  *  5. submit створює курс draft / експрес-інструкцію / записи «Вхідних»; повтор і
  *     паралельний submit не створюють другого результату.
@@ -218,6 +220,12 @@ const fakeWrite = async (p: any) => {
   ai.calls.push({ ownerId: p.ownerId, draftId: p.draftId, system: p.system, prompt: p.prompt, label: p.label, principal: p.req?.principal?.id });
   if (ai.mode === 'fail') throw new Error('Модель перевантажена');
   if (ai.mode === 'junk') return { text: 'вибачте, не можу', modelId: 'test-text' };
+  // Прохід «підказати» відповідає звичайним текстом, а не JSON — і навмисно в огорожі ```,
+  // якою моделі люблять обрамляти відповідь: розбір має її зняти.
+  if (/Зараз пропонуєш текст ОДНОГО/.test(p.system)) {
+    const goal = /МЕТА цього уроку \(головне\): <<<([^>]*)>>>/.exec(p.prompt)?.[1] ?? 'без мети';
+    return { text: '```\n## Заголовок, якого не має бути\n\nПідказка до уроку. ' + goal + '\n```', modelId: 'test-text' };
+  }
   if (/Кадри \(за порядком зйомки\)/.test(p.prompt)) {
     const ids = [...p.prompt.matchAll(/Кадр (ph_\w+)/g)].map((m: any) => m[1] as string);
     const used = ai.omitLast && ids.length > 2 ? ids.slice(0, -1) : ids;
@@ -420,6 +428,72 @@ t('модуль 1 написано, чернетка ще structured', d1.struct
 t('уроки модуля мають текст і мітки aiFields', d1.structure.modules[0].lessons.every((l: any) => l.body?.startsWith('## ') && l.aiFields.includes('body')));
 const genPrompt = ai.calls[ai.calls.length - 1].prompt;
 t('промпт модуля: урок і кадри — дані в <<< >>>', /=== Урок l-\d+: <<<Розмітка>>>/.test(genPrompt) && genPrompt.includes(`<<<${noteText}>>>`));
+
+console.log('\nПрохід «підказати» (один урок, 1.7.0)');
+{
+  const lesson1 = (await get(cd)).structure.modules[0].lessons[0];
+  const LID = lesson1.lessonId;
+  const bodyBefore: string = lesson1.body;
+  t('невідомий урок — 404 lesson_not_found', isError(await call('POST', `${PD}/${cd}/lessons/l-404/suggest`, { token: grab }), 404, 'lesson_not_found'));
+  t('без структури — 409 wrong_status', isError(await call('POST', `${PD}/${emptyDraft}/lessons/l-1/suggest`, { token: grab }), 409, 'wrong_status'));
+  t('чужий викладач — 404 draft_not_found', isError(await call('POST', `${PD}/${cd}/lessons/${LID}/suggest`, { token: tokenB }), 404, 'draft_not_found'));
+
+  // Ціна підказки (`ai-options?pass=lesson`) перевіряється в test-photoDraftsPassModels.mts:
+  // тут підставного passModels немає, і маршрут чесно відповідає 503.
+
+  const started = await call('POST', `${PD}/${cd}/lessons/${LID}/suggest`, { token: grab });
+  t('suggest — 202 за схемою, job suggest вказує урок і його модуль', started.status === 202 && ok(started, 'DraftResponse') && started.data.draft.job?.kind === 'suggest' && started.data.draft.job?.lessonId === LID && started.data.draft.job?.moduleId === 'm-1');
+  const revBefore = started.data.draft.revision;
+  await flush();
+  const afterRun = await get(cd);
+  const les = afterRun.structure.modules[0].lessons.find((l: any) => l.lessonId === LID);
+  t('пропозиція лежить поруч, текст уроку НЕ змінено', !!les.suggestion?.text && les.body === bodyBefore);
+  t('пропозиція вміщається в межу 500 символів', contract.countNoteChars(les.suggestion.text) <= contract.PHOTO_DRAFT_LIMITS.maxLessonSuggestionChars);
+  t('огорожу ``` і заголовок «## » знято', !les.suggestion.text.includes('```') && !les.suggestion.text.startsWith('#'));
+  t('у підказці видно мету уроку (на неї і спирались)', les.suggestion.text.includes(les.goal), `${les.goal} | ${les.suggestion.text}`);
+  t('фоновий результат ревізію не змінює', afterRun.revision === revBefore && afterRun.job === null);
+  const sysPrompt = ai.calls[ai.calls.length - 1];
+  t('промпт підказки: слова викладача — дані в <<< >>>', sysPrompt.prompt.includes(`<<<${noteText}>>>`));
+  t('стеля виходу підказки менша за прохід модуля', sysPrompt.maxTokens !== undefined ? sysPrompt.maxTokens < 8192 : true);
+
+  // PATCH структури (перенесення кадру) не має з'їдати непідтверджену пропозицію
+  const beforeMove = await get(cd);
+  const moved = await call('PATCH', `${PD}/${cd}`, { token: grab, body: { ifRevision: beforeMove.revision, structure: { modules: beforeMove.structure.modules } } });
+  t('PATCH структури не губить пропозицію', moved.status === 200 && !!moved.data.draft.structure.modules[0].lessons.find((l: any) => l.lessonId === LID).suggestion);
+
+  t('reject із текстом — 400 bad_input', isError(await call('POST', `${PD}/${cd}/lessons/${LID}/suggestion`, { token: grab, body: { action: 'reject', text: 'щось' } }), 400, 'bad_input'));
+  t('невідома дія — 400 bad_input', isError(await call('POST', `${PD}/${cd}/lessons/${LID}/suggestion`, { token: grab, body: { action: 'maybe' } }), 400, 'bad_input'));
+
+  const rejected = await call('POST', `${PD}/${cd}/lessons/${LID}/suggestion`, { token: grab, body: { action: 'reject' } });
+  const lesR = rejected.data.draft.structure.modules[0].lessons.find((l: any) => l.lessonId === LID);
+  t('відхилення прибирає пропозицію й лишає текст уроку', rejected.status === 200 && ok(rejected, 'DraftResponse') && lesR.suggestion === null && lesR.body === bodyBefore);
+  t('повторне рішення — 409 wrong_status', isError(await call('POST', `${PD}/${cd}/lessons/${LID}/suggestion`, { token: grab, body: { action: 'reject' } }), 409, 'wrong_status'));
+
+  // Прийняття як є
+  await call('POST', `${PD}/${cd}/lessons/${LID}/suggest`, { token: grab });
+  await flush();
+  const proposed = (await get(cd)).structure.modules[0].lessons.find((l: any) => l.lessonId === LID).suggestion.text;
+  const accepted = await call('POST', `${PD}/${cd}/lessons/${LID}/suggestion`, { token: grab, body: { action: 'accept' } });
+  const lesA = accepted.data.draft.structure.modules[0].lessons.find((l: any) => l.lessonId === LID);
+  t('прийняття кладе текст у body й позначає його як від ШІ', lesA.body === proposed && lesA.aiFields.includes('body') && lesA.suggestion === null);
+
+  // Прийняття з правками — поле стає ВИКЛАДАЧЕВИМ: інакше прохід 3 затер би його правку
+  await call('POST', `${PD}/${cd}/lessons/${LID}/suggest`, { token: grab });
+  await flush();
+  const edited = await call('POST', `${PD}/${cd}/lessons/${LID}/suggestion`, { token: grab, body: { action: 'accept', text: 'Мій власний текст уроку.' } });
+  const lesE = edited.data.draft.structure.modules[0].lessons.find((l: any) => l.lessonId === LID);
+  t('виправлений текст лягає як є і НЕ має мітки ШІ', lesE.body === 'Мій власний текст уроку.' && !lesE.aiFields.includes('body'));
+  t('рішення викладача піднімає ревізію', edited.data.draft.revision > (await get(cd)).revision - 1);
+
+  // Збій моделі: бали повертає Studio, а пропозиції не зʼявляється
+  ai.mode = 'fail';
+  await call('POST', `${PD}/${cd}/lessons/${LID}/suggest`, { token: grab });
+  await flush();
+  const failed = await get(cd);
+  const lesF = failed.structure.modules[0].lessons.find((l: any) => l.lessonId === LID);
+  t('збій моделі — job failed, пропозиції немає, текст уроку цілий', failed.job?.status === 'failed' && !lesF.suggestion && lesF.body === 'Мій власний текст уроку.');
+  ai.mode = 'ok';
+}
 
 console.log('\nПеревірка якості перед відправкою');
 const blocked = await call('POST', `${PD}/${cd}/submit`, { token: grab });

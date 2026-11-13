@@ -1,4 +1,4 @@
-# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.6.0
+# API «чернеток за фото» (Studio ↔ GrabFusion), контракт 1.7.0
 
 Крок A0 плану `docs/proposals/GRABFUSION_PHOTO_COURSE_APP_2026-10-28.md`. Цей опис, типи
 `shared/photoDraftContract.ts`, схема `docs/photo-drafts-api/schema.json` (JSON Schema draft-07) і
@@ -46,6 +46,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `maxManuscriptPages` | 120 | Сторінок в одній чернетці-рукописі (окремо від `maxPhotosPerDraft`; з 1.3.0) |
 | `manuscriptPagesPerHour` | 200 | Нових сторінок рукопису на годину на автора (окремо від `photosPerHour`; з 1.3.0) |
 | `maxPageTextChars` | 20 000 | Текст однієї сторінки рукопису |
+| `maxLessonSuggestionChars` | 500 | Пропозиція ШІ до тексту одного уроку (прохід `lesson`; з 1.7.0) |
 
 **Як рахувати символи.** Кодові точки Unicode: у TypeScript `[...text].length`
 (`countNoteChars` у контракті), у Python — `len(text)`. «👍» — один символ. Лічильник у застосунку й
@@ -77,10 +78,13 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
   замість опису в ній `text` (дослівно розпізнаний текст, `null` до розпізнавання) і `textEdited`.
 - `notes[]` — описи викладача: `{ noteId, photoIds, text }`; один кадр або серія.
 - `structure` — модулі й уроки після проходу 2 (`null` до того); у уроках — `body` після проходу 3.
-  `aiFields` перелічує поля, які написав ШІ й викладач ще не правив.
+  `aiFields` перелічує поля, які написав ШІ й викладач ще не правив. З 1.7.0 урок може нести
+  `suggestion` — непідтверджену пропозицію ШІ до `body` (`{ text, createdAt, modelId }`): вона лежить
+  ПОРУЧ із `body` і не чіпає його, доки викладач не прийме її.
 - `assumptions[]` — що ШІ припустило й викладач має підтвердити (`open` / `confirmed` / `rejected`).
-- `job` — фонова робота (`structure` або `generate`), `running` або `failed` з причиною; `null`,
-  коли нічого не виконується.
+- `job` — фонова робота (`structure`, `generate` або `suggest`), `running` або `failed` з причиною;
+  `null`, коли нічого не виконується. Для `suggest` (з 1.7.0) є ще `lessonId` — урок, до якого пишеться
+  пропозиція.
 - `submitted` — куди лягла чернетка після відправки (`course` / `express` / `inbox` / `book`, `id`,
   `studioUrl`). `studioUrl` — відносний шлях у Studio, застосунок лише відкриває його як посилання;
   точні шляхи фіксує етап 3.
@@ -104,6 +108,8 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `PUT /photo-drafts/:draftId/photos/:photoId/text` | 5 | 200 | `put-photo-text` |
 | `POST /photo-drafts/:draftId/structure` | 3 | 202 | `structure-running` |
 | `POST /photo-drafts/:draftId/modules/:moduleId/generate` | 3 | 202 | `generate-running` |
+| `POST /photo-drafts/:draftId/lessons/:lessonId/suggest` | 3 | 202 | `suggest-running` |
+| `POST /photo-drafts/:draftId/lessons/:lessonId/suggestion` | 3 | 200 | `suggestion-accepted` |
 | `GET /photo-drafts/:draftId/ai-options` | 3 | 200 | `ai-options` |
 | `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book`, `submit-manuscript`, `submit-manuscript-existing-book` |
 
@@ -172,10 +178,24 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
   `topics` лише в тих полях, які викладач не правив (поле, яке він змінив, лишається його, а `aiFields`
   показує, що саме від ШІ). Може додати нові `open`-припущення. Коли написано всі модулі, `status`
   стає `written`; стерти текст уроку через PATCH — значить повернути модуль у «не написано».
+- **`POST …/lessons/:lessonId/suggest`** (прохід «підказати», з 1.7.0) — коротка пропозиція до тексту
+  ОДНОГО уроку за його кадрами й уже вписаною метою. Тіло необовʼязкове: `{ "modelId": "…" }`, правила
+  вибору моделі й оплата ті самі, що в проходів 2–3 (ціна — `?pass=lesson&lessonId=…`). Відповідь — `202`
+  з чернеткою, де `job` = `{ kind: "suggest", moduleId, lessonId, status: "running" }`; результат
+  забирається опитуванням, як і в решти проходів. Урок, якого немає в структурі → `404 lesson_not_found`;
+  без структури → `409 wrong_status`; інша робота вже йде → `409 job_running`.
+  Готова пропозиція лягає в `lesson.suggestion` і **не чіпає `body`**: доки викладач не вирішив, текст
+  уроку лишається тим, що був. Нова пропозиція заміщає попередню непідтверджену.
+- **`POST …/lessons/:lessonId/suggestion`** (з 1.7.0) — що зробити з пропозицією: тіло
+  `{ action: "accept" | "reject", text? }`. `accept` кладе в `body` текст пропозиції або `text`
+  (виправлений викладачем варіант, ≤ `maxLessonBodyChars`) і позначає `body` в `aiFields`; `reject`
+  лише прибирає пропозицію, `body` лишається як був. Обидва прибирають `suggestion`, тож повторне
+  натискання безпечне; пропозиції вже немає → `409 wrong_status`. Відповідь — `200` з чернеткою;
+  ревізія зростає (це дія викладача).
 - **`GET …/ai-options`** (з 1.4.0) — які моделі можна обрати для проходів 2–3 і скільки це коштуватиме в
-  балах. Запит `?pass=structure` (типово) або `?pass=generate&moduleId=…` (`404 module_not_found`,
-  якщо модуля немає). Відповідь `{ pass, moduleId, defaultModelId, models[], balance, unlimited,
-  checkedAt }`. Кожна модель — `{ modelId, label, provider, status, usable, note, credits }`: Studio
+  балах. Запит `?pass=structure` (типово), `?pass=generate&moduleId=…` (`404 module_not_found`,
+  якщо модуля немає) або `?pass=lesson&lessonId=…` (з 1.7.0; `404 lesson_not_found`). Відповідь
+  `{ pass, moduleId, lessonId, defaultModelId, models[], balance, unlimited, checkedAt }`. Кожна модель — `{ modelId, label, provider, status, usable, note, credits }`: Studio
   звіряє ключі, які адміністратор ввів у «Ключах API» (або змінну оточення), і одним дешевим запитом
   перевіряє, що ключ дійсний і на ньому є кошти (результат у кеші 5 хв, `checkedAt` — коли). `usable`
   — модель можна обрати (`ok` або `busy`: перевантажена зараз, Studio спробує запасну); `note` — пояснення,
@@ -252,6 +272,7 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `photo_not_found` | 404 | Кадру немає в цій чернетці |
 | `note_not_found` | 404 | Опису немає |
 | `module_not_found` | 404 | Модуля немає в структурі |
+| `lesson_not_found` | 404 | Уроку немає в структурі (з 1.7.0) |
 | `book_not_found` | 404 | Книги немає або вона чужа |
 | `wrong_status` | 409 | Дія недоступна в поточному стані чернетки чи фото |
 | `job_running` | 409 | Уже виконується фонова робота |
@@ -279,6 +300,7 @@ B просить A коментарем у документі плану.
 
 | Версія | Дата | Зміна |
 |---|---|---|
+| 1.7.0 | 2026-11-13 | Прохід «підказати» для одного уроку: `POST …/lessons/:lessonId/suggest` (202) і `POST …/lessons/:lessonId/suggestion` (`accept` / `reject`), нова межа `maxLessonSuggestionChars` (500), `lesson.suggestion`, `job.kind: suggest` з `job.lessonId`, `pass: lesson` в `ai-options`. Пропозиція не чіпає `body`, доки її не прийняли. Лише додавання; фікстури `suggest-running`, `get-draft-suggestion`, `suggestion-accepted` |
 | 1.6.0 | 2026-11-11 | «Курс зі скану документа»: `courseSource` (`photos` / `document`) у `POST` створення, у чернетці й у переліку; для `document` сторінки розпізнаються дослівно (`photo.text` — тепер і в курсів), `PUT …/photos/:photoId/text` і блокер `empty_page` діють і для них; прохід «Розкласти» курсу додає `structure.summary` і `structure.outcomes` (поля курсу в Studio). Лише додавання; фікстура `get-draft-course-document` |
 | 1.5.0 | 2026-11-10 | «Набір книги» без наявної книги: `submit` сам створює книгу в Studio — новий вид цілі `book` (адитивно: решта цілей без змін), фікстури `submit-manuscript` (книга) і `submit-manuscript-existing-book` (`inbox`). |
 | 1.4.0 | 2026-11-09 | Вибір моделі й бали за проходи 2–3: новий `GET …/ai-options`, необовʼязкове `modelId` у `POST …/structure` і `…/generate` (нове необовʼязкове тіло), бали резервуються до запуску й списуються за фактичною вартістю; нових `kind` помилок немає (недоступна модель → `bad_input`, бракує балів → `ai_budget_exceeded`) |

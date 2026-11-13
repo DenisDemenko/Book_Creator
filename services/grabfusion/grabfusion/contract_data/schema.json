@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.6.0.json",
-  "title": "Studio photo-drafts API (GrabFusion contract) 1.6.0",
+  "$id": "https://fusionlab.in.ua/schemas/photo-drafts/1.7.0.json",
+  "title": "Studio photo-drafts API (GrabFusion contract) 1.7.0",
   "description": "JSON Schema (draft-07) for responses of /api/external/v1/photo-drafts*. Source of truth together with shared/photoDraftContract.ts; checked by scripts/test-photoDraftContract.mts.",
   "definitions": {
     "Kind": {
@@ -50,7 +50,8 @@
     "JobKind": {
       "enum": [
         "structure",
-        "generate"
+        "generate",
+        "suggest"
       ]
     },
     "JobStatus": {
@@ -93,6 +94,7 @@
         "photo_not_found",
         "note_not_found",
         "module_not_found",
+        "lesson_not_found",
         "book_not_found",
         "wrong_status",
         "job_running",
@@ -130,7 +132,8 @@
         "pollIntervalMs",
         "maxManuscriptPages",
         "manuscriptPagesPerHour",
-        "maxPageTextChars"
+        "maxPageTextChars",
+        "maxLessonSuggestionChars"
       ],
       "properties": {
         "maxNoteChars": {
@@ -184,6 +187,10 @@
         "maxPageTextChars": {
           "type": "integer",
           "minimum": 1
+        },
+        "maxLessonSuggestionChars": {
+          "type": "integer",
+          "const": 500
         }
       },
       "additionalProperties": true
@@ -361,6 +368,16 @@
               "topics"
             ]
           }
+        },
+        "suggestion": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/LessonSuggestion"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": true
@@ -505,6 +522,12 @@
         "startedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "lessonId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": true
@@ -929,7 +952,8 @@
       "type": "string",
       "enum": [
         "structure",
-        "generate"
+        "generate",
+        "lesson"
       ]
     },
     "PassModelOption": {
@@ -1039,6 +1063,37 @@
         },
         "checkedAt": {
           "type": "string"
+        },
+        "lessonId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "LessonSuggestion": {
+      "type": "object",
+      "required": [
+        "text",
+        "createdAt",
+        "modelId"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": true

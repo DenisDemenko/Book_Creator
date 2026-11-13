@@ -20,7 +20,7 @@
  */
 
 /** Версія контракту. Мінорна — додавання; мажорна — ламка зміна. */
-export const PHOTO_DRAFT_CONTRACT_VERSION = '1.6.0';
+export const PHOTO_DRAFT_CONTRACT_VERSION = '1.7.0';
 
 /** Префікс маршрутів. Автентифікація — `Authorization: Bearer nst_…`. */
 export const PHOTO_DRAFT_API_BASE = '/api/external/v1';
@@ -62,6 +62,13 @@ export const PHOTO_DRAFT_LIMITS = {
   manuscriptPagesPerHour: 200,
   /** Текст однієї сторінки рукопису після розпізнавання або правки, у символах Unicode. */
   maxPageTextChars: 20_000,
+  /**
+   * Пропозиція ШІ до тексту одного уроку (прохід `lesson`, з 1.7.0), у символах Unicode.
+   * Навмисно коротка: це підказка, з якої викладач починає, а не готовий урок —
+   * її видно цілою на екрані телефона, тож рішення «прийняти / виправити /
+   * відхилити» приймається без прокручування.
+   */
+  maxLessonSuggestionChars: 500,
 } as const;
 
 export type PhotoDraftLimits = typeof PHOTO_DRAFT_LIMITS;
@@ -131,8 +138,12 @@ export type PhotoDraftLevel = (typeof PHOTO_DRAFT_LEVELS)[number];
 export const PHOTO_DRAFT_INSTRUCTION_MODES = ['assembly', 'operation'] as const;
 export type PhotoDraftInstructionMode = (typeof PHOTO_DRAFT_INSTRUCTION_MODES)[number];
 
-/** Довгі проходи (2 і 3) — у фоні; стан видно в `draft.job`. */
-export const PHOTO_DRAFT_JOB_KINDS = ['structure', 'generate'] as const;
+/**
+ * Довгі проходи (2 і 3) — у фоні; стан видно в `draft.job`.
+ * `suggest` (з 1.7.0) — коротка пропозиція до тексту ОДНОГО уроку: теж у фоні,
+ * бо телефон може згорнутися чи втратити мережу, а бали вже зарезервовано.
+ */
+export const PHOTO_DRAFT_JOB_KINDS = ['structure', 'generate', 'suggest'] as const;
 export type PhotoDraftJobKind = (typeof PHOTO_DRAFT_JOB_KINDS)[number];
 
 export const PHOTO_DRAFT_JOB_STATUSES = ['running', 'failed'] as const;
@@ -173,6 +184,8 @@ export const PHOTO_DRAFT_ERROR_KINDS = [
   'photo_not_found',
   'note_not_found',
   'module_not_found',
+  /** З 1.7.0: урок, до якого просять підказку, зник зі структури. */
+  'lesson_not_found',
   'book_not_found',
   'wrong_status',
   'job_running',
@@ -258,6 +271,21 @@ export interface DraftNote {
   updatedAt: string;
 }
 
+/**
+ * Пропозиція ШІ до тексту уроку (з 1.7.0). ЛЕЖИТЬ ПОРУЧ із `body`, а не в ньому:
+ * поки викладач її не прийняв, текст уроку лишається таким, яким був — інакше
+ * «відхилити» означало б відновлювати затерте, а цього ніхто не гарантує.
+ * Зникає, коли викладач прийняв або відхилив її (`POST …/lessons/:lessonId/suggestion`).
+ */
+export interface LessonSuggestion {
+  /** До `maxLessonSuggestionChars` символів, звичайний текст (не Markdown-заголовок). */
+  text: string;
+  /** Коли ШІ її написав. */
+  createdAt: string;
+  /** Якою моделлю; null — сервер працює без вибору моделей. */
+  modelId: string | null;
+}
+
 export interface DraftLesson {
   lessonId: string;
   title: string;
@@ -268,6 +296,8 @@ export interface DraftLesson {
   topics: string[];
   /** Які поля написав ШІ й викладач їх ще не правив: 'title' | 'goal' | 'body' | 'topics'. */
   aiFields: string[];
+  /** Непідтверджена пропозиція ШІ до `body` (з 1.7.0); null або немає — пропозиції нема. */
+  suggestion?: LessonSuggestion | null;
 }
 
 export interface DraftModule {
@@ -300,8 +330,10 @@ export interface DraftAssumption {
 export interface DraftJob {
   kind: PhotoDraftJobKind;
   status: PhotoDraftJobStatus;
-  /** Для `generate` — модуль, текст якого пишеться. */
+  /** Для `generate` — модуль, текст якого пишеться; для `suggest` — модуль уроку. */
   moduleId: string | null;
+  /** Лише для `suggest` (з 1.7.0): урок, до якого ШІ пише пропозицію. */
+  lessonId?: string | null;
   error: string | null;
   startedAt: string;
 }
@@ -403,8 +435,11 @@ export interface SubmitResponse {
 export const PASS_MODEL_STATUSES = ['ok', 'busy', 'no_key', 'key_rejected', 'no_funds', 'model_missing', 'price_unknown'] as const;
 export type PassModelStatus = (typeof PASS_MODEL_STATUSES)[number];
 
-/** Проходи ШІ, за які списуються бали: розкласти кадри / написати текст модуля. */
-export const AI_PASSES = ['structure', 'generate'] as const;
+/**
+ * Проходи ШІ, за які списуються бали: розкласти кадри / написати текст модуля /
+ * підказати текст одного уроку (`lesson`, з 1.7.0 — найдешевший, бо вихід ≤500 символів).
+ */
+export const AI_PASSES = ['structure', 'generate', 'lesson'] as const;
 export type AiPass = (typeof AI_PASSES)[number];
 
 export interface PassModelOption {
@@ -422,8 +457,10 @@ export interface PassModelOption {
 
 export interface AiOptionsResponse {
   pass: AiPass;
-  /** Для `generate` — модуль, для якого пораховано вартість; для `structure` — null. */
+  /** Для `generate` і `lesson` — модуль, для якого пораховано вартість; для `structure` — null. */
   moduleId: string | null;
+  /** Для `lesson` (з 1.7.0) — урок, для якого пораховано вартість; інакше null. */
+  lessonId?: string | null;
   /** Модель, яку Studio візьме, якщо `modelId` не передати; null — немає жодної придатної. */
   defaultModelId: string | null;
   models: PassModelOption[];
@@ -492,6 +529,24 @@ export interface StructureRequest {
 export interface GenerateRequest {
   /** Модель із `GET …/ai-options?pass=generate`; без неї — `defaultModelId`. Недоступна → `400 bad_input`. */
   modelId?: string;
+}
+
+/** Тіло `POST …/lessons/:lessonId/suggest` необовʼязкове (з 1.7.0). */
+export interface SuggestLessonRequest {
+  /** Модель із `GET …/ai-options?pass=lesson&lessonId=…`; без неї — `defaultModelId`. */
+  modelId?: string;
+}
+
+/**
+ * Тіло `POST …/lessons/:lessonId/suggestion` (з 1.7.0) — що робити з пропозицією:
+ *   accept — покласти в `body` (`text` — виправлений викладачем варіант, якщо він правив);
+ *   reject — прибрати, не чіпаючи `body`.
+ * Обидва прибирають `suggestion`, тож повторне натискання нічого не зіпсує.
+ */
+export interface ResolveSuggestionRequest {
+  action: 'accept' | 'reject';
+  /** Лише з `accept`: текст замість запропонованого, ≤ `maxLessonBodyChars`. */
+  text?: string;
 }
 
 export interface PatchLesson {
@@ -563,6 +618,8 @@ export const PHOTO_DRAFT_ROUTES: readonly PhotoDraftRoute[] = [
   { method: 'PUT', path: '/photo-drafts/:draftId/photos/:photoId/text', status: 200, fixture: 'put-photo-text', response: 'PhotoResponse', stage: 5 },
   { method: 'POST', path: '/photo-drafts/:draftId/structure', status: 202, fixture: 'structure-running', response: 'DraftResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/modules/:moduleId/generate', status: 202, fixture: 'generate-running', response: 'DraftResponse', stage: 3 },
+  { method: 'POST', path: '/photo-drafts/:draftId/lessons/:lessonId/suggest', status: 202, fixture: 'suggest-running', response: 'DraftResponse', stage: 3 },
+  { method: 'POST', path: '/photo-drafts/:draftId/lessons/:lessonId/suggestion', status: 200, fixture: 'suggestion-accepted', response: 'DraftResponse', stage: 3 },
   { method: 'GET', path: '/photo-drafts/:draftId/ai-options', status: 200, fixture: 'ai-options', response: 'AiOptionsResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/submit', status: 201, fixture: 'submit-course', response: 'SubmitResponse', stage: 3 },
 ] as const;
@@ -581,6 +638,7 @@ export const PHOTO_DRAFT_EXTRA_FIXTURES: Readonly<Record<string, string>> = {
   'submit-manuscript-existing-book': 'SubmitResponse',
   'get-draft-manuscript': 'DraftResponse',
   'get-draft-course-document': 'DraftResponse',
+  'get-draft-suggestion': 'DraftResponse',
   'error-note-too-long': 'Error',
   'error-revision-conflict': 'Error',
   'error-scope-denied': 'Error',

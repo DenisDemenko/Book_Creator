@@ -59,6 +59,7 @@ import {
   hasPageText,
   type DraftLesson,
   type DraftModule,
+  type LessonSuggestion,
   type DraftPhoto,
   type AiOptionsResponse,
   type AiPass,
@@ -68,6 +69,7 @@ import {
   type PhotoDraft,
   type PhotoDraftCourseSource,
   type PhotoDraftInstructionMode,
+  type PhotoDraftJobKind,
   type PhotoDraftKind,
   type PhotoDraftLevel,
   type PhotoDraftSummary,
@@ -78,6 +80,7 @@ import {
   applyGenerated,
   buildGeneratePrompt,
   buildStructurePrompt,
+  buildSuggestPrompt,
   computeSubmitBlockers,
   generateSystemInstruction,
   INSTRUCTION_MAX_STEPS,
@@ -87,15 +90,23 @@ import {
   mergeAssumptions,
   parseGenerateResult,
   parseStructureResult,
+  parseSuggestResult,
   placePhotos,
   structureSystemInstruction,
+  suggestSystemInstruction,
 } from './photoDraftPasses';
-import { estimateGeneratePass, estimateStructurePass, type PassTokenEstimate } from './photoDraftEstimate';
+import { estimateGeneratePass, estimateStructurePass, estimateSuggestPass, type PassTokenEstimate } from './photoDraftEstimate';
 import { toCourseInput, toExpressPayload, toInboxItems, toManuscriptItems, type CourseInput, type InboxItem } from './photoDraftMapping';
 
 const BASE = '/api/external/v1/photo-drafts';
 /** Стеля виходу моделі в проходах 2–3 і основа оцінки резерву балів. */
 const PASS_MAX_TOKENS = 8192;
+/**
+ * Стеля виходу проходу «підказати» (1.7.0). Межа пропозиції — 500 символів ≈ 200 токенів; беремо
+ * втричі більше, бо моделі часто пишуть довше, а зайве обрізає parseSuggestResult. Тримати стелю
+ * низькою тут важливо: саме вона йде в резерв балів.
+ */
+const SUGGEST_MAX_TOKENS = 600;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 export interface DescribePhotoParams {
@@ -434,6 +445,10 @@ function validateStructure(input: unknown, d: StoredDraft): DraftStructure {
       const old = oldLessons.get(l.lessonId);
       if (old) {
         lesson.aiFields = old.aiFields.filter((f) => JSON.stringify((old as any)[f]) === JSON.stringify((lesson as any)[f]));
+        // Пропозиція ШІ переживає PATCH структури (перенесення кадру, перейменування уроку):
+        // застосунок шле структуру цілою й поля `suggestion` в ній не має, тож без цього рядка
+        // непідтверджена пропозиція тихо зникала б від чужої дії.
+        if (old.suggestion) lesson.suggestion = old.suggestion;
       }
       return lesson;
     });
@@ -449,6 +464,15 @@ function validateStructure(input: unknown, d: StoredDraft): DraftStructure {
   const summary = rawIn.summary !== undefined ? nullableText(rawIn.summary, 600, 'Опис курсу') : (d.structure?.summary ?? null);
   const outcomes = rawIn.outcomes !== undefined ? strings(rawIn.outcomes, 'outcomes', 200).slice(0, 8) : (d.structure?.outcomes ?? []);
   return { modules, ...(summary ? { summary } : {}), ...(outcomes.length ? { outcomes } : {}) };
+}
+
+/** Урок за id разом із його модулем: обидва потрібні і для промпту, і для запису результату. */
+function findLesson(d: StoredDraft, lessonId: string): { module: DraftModule; lesson: DraftLesson } | null {
+  for (const module of d.structure?.modules ?? []) {
+    const lesson = module.lessons.find((l) => l.lessonId === lessonId);
+    if (lesson) return { module, lesson };
+  }
+  return null;
 }
 
 function statusAfterStructure(structure: DraftStructure): 'structured' | 'written' {
@@ -1162,10 +1186,11 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
   const startJob = async (
     req: Request,
     res: Response,
-    kind: 'structure' | 'generate',
+    kind: PhotoDraftJobKind,
     moduleId: string | null,
     check: (d: StoredDraft) => void,
-    estimate: (d: StoredDraft) => PassTokenEstimate
+    estimate: (d: StoredDraft) => PassTokenEstimate,
+    lessonId: string | null = null
   ) => {
     if (!deps.writeText) return fail(res, 503, 'server_error', 'Прохід ШІ не налаштовано на сервері.');
     const ownerId = owner(req);
@@ -1213,7 +1238,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         ownerId,
         (d) => {
           assertJobStartable(d, check);
-          d.job = { kind, status: 'running', moduleId, error: null, startedAt };
+          const inModule = lessonId ? (findLesson(d, lessonId)?.module.moduleId ?? null) : moduleId;
+          d.job = { kind, status: 'running', moduleId: inModule, ...(lessonId ? { lessonId } : {}), error: null, startedAt };
           return JSON.parse(JSON.stringify(d)) as StoredDraft;
         },
         { byTeacher: true, now }
@@ -1234,7 +1260,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     ownerId: string,
     draftId: string,
     startedAt: string,
-    kind: 'structure' | 'generate',
+    kind: PhotoDraftJobKind,
     run: () => Promise<(d: StoredDraft) => void>
   ) => {
     schedule(async () => {
@@ -1275,19 +1301,30 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         return fail(res, 409, 'wrong_status', 'У рукописі немає проходів «Розкласти» й «Написати»: моделі обирати нема для чого.');
       }
       const passParam = req.query.pass === undefined ? 'structure' : String(req.query.pass);
-      if (passParam !== 'structure' && passParam !== 'generate') {
-        return fail(res, 400, 'bad_input', 'pass — `structure` або `generate`.');
+      if (passParam !== 'structure' && passParam !== 'generate' && passParam !== 'lesson') {
+        return fail(res, 400, 'bad_input', 'pass — `structure`, `generate` або `lesson`.');
       }
       const pass: AiPass = passParam;
       let moduleId: string | null = null;
+      let lessonId: string | null = null;
       let est: PassTokenEstimate;
       if (pass === 'structure') {
         est = estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS);
-      } else {
+      } else if (pass === 'generate') {
         moduleId = String(req.query.moduleId ?? '');
         const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
         if (!m) return fail(res, 404, 'module_not_found', 'Модуля немає в структурі.');
         est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
+      } else {
+        lessonId = String(req.query.lessonId ?? '');
+        const found = findLesson(d, lessonId);
+        if (!found) return fail(res, 404, 'lesson_not_found', 'Уроку немає в структурі.');
+        est = estimateSuggestPass(
+          suggestSystemInstruction(d.kind, d.instructionMode, d.courseSource),
+          buildSuggestPrompt(d, found.module, found.lesson),
+          SUGGEST_MAX_TOKENS
+        );
+        moduleId = found.module.moduleId;
       }
       const [listing, bal] = await Promise.all([deps.passModels.list(ownerId), deps.passModels.balance(req)]);
       const models: PassModelOption[] = listing.models.map((m) => {
@@ -1300,6 +1337,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       const body: AiOptionsResponse = {
         pass,
         moduleId,
+        lessonId,
         defaultModelId,
         models,
         balance: bal.unlimited ? null : bal.balance,
@@ -1426,6 +1464,124 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       res.status(202).json({ draft: publicDraft(draft) });
     } catch (err) {
       sendChangeError(res, err, 'generate');
+    }
+  });
+
+  /**
+   * Прохід «підказати» (1.7.0): короткий варіант тексту ОДНОГО уроку за його кадрами й метою.
+   * Робота фонова, як проходи 2–3 — телефон може згорнутись, а бали вже зарезервовано, тож
+   * результат має де дочекатись викладача.
+   */
+  app.post(`${BASE}/:draftId/lessons/:lessonId/suggest`, auth, requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const lessonId = String(req.params.lessonId);
+      const begun = await startJob(
+        req,
+        res,
+        'suggest',
+        null,
+        (d) => {
+          if (!d.structure) throw new DraftChangeError(409, 'wrong_status', 'Спершу розкладіть кадри на модулі й уроки.');
+          if (!findLesson(d, lessonId)) throw new DraftChangeError(404, 'lesson_not_found', 'Уроку немає в структурі.');
+        },
+        (d) => {
+          const found = findLesson(d, lessonId);
+          return estimateSuggestPass(
+            suggestSystemInstruction(d.kind, d.instructionMode, d.courseSource),
+            found ? buildSuggestPrompt(d, found.module, found.lesson) : '',
+            SUGGEST_MAX_TOKENS
+          );
+        },
+        lessonId
+      );
+      if (!begun) return;
+      const { ownerId, draftId, startedAt, snapshot, draft, charge, modelId } = begun;
+      const found = findLesson(snapshot, lessonId)!;
+      finishJob(ownerId, draftId, startedAt, 'suggest', async () => {
+        let text: string;
+        try {
+          const out = await deps.writeText!({
+            ownerId,
+            draftId,
+            system: suggestSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource),
+            prompt: buildSuggestPrompt(snapshot, found.module, found.lesson),
+            maxTokens: SUGGEST_MAX_TOKENS,
+            label: passLabel('Підказка до тексту уроку (GrabFusion)', !!charge),
+            req,
+            modelId,
+            creditBilled: !!charge,
+          });
+          text = parseSuggestResult(out.text);
+          charge?.settleUsd(out.costUsd ?? 0);
+        } catch (err) {
+          charge?.release('Прохід «Підказати» не дав результату');
+          throw err;
+        }
+        return (d) => {
+          const target = findLesson(d, lessonId);
+          if (!target) {
+            d.job = { ...d.job!, status: 'failed', error: 'Урок зник зі структури, поки писалася підказка.' };
+            return;
+          }
+          // `body` НЕ чіпаємо: поки викладач не прийняв, текст уроку лишається його.
+          const suggestion: LessonSuggestion = { text, createdAt: now().toISOString(), modelId: modelId ?? null };
+          target.lesson.suggestion = suggestion;
+          d.job = null;
+        };
+      });
+      res.status(202).json({ draft: publicDraft(draft) });
+    } catch (err) {
+      sendChangeError(res, err, 'suggest');
+    }
+  });
+
+  /** Рішення викладача щодо пропозиції: прийняти (можливо, виправлену) або відхилити. */
+  app.post(`${BASE}/:draftId/lessons/:lessonId/suggestion`, auth, async (req, res) => {
+    try {
+      const lessonId = String(req.params.lessonId);
+      const action = req.body?.action;
+      if (action !== 'accept' && action !== 'reject') {
+        return fail(res, 400, 'bad_input', 'action — `accept` або `reject`.');
+      }
+      const raw = req.body?.text;
+      if (raw !== undefined && typeof raw !== 'string') {
+        return fail(res, 400, 'bad_input', 'text — рядок.');
+      }
+      if (action === 'reject' && raw !== undefined) {
+        return fail(res, 400, 'bad_input', 'З `reject` текст не передають: пропозицію просто прибирають.');
+      }
+      if (typeof raw === 'string' && countNoteChars(raw) > PHOTO_DRAFT_LIMITS.maxLessonBodyChars) {
+        return fail(res, 400, 'bad_input', `Текст уроку — до ${PHOTO_DRAFT_LIMITS.maxLessonBodyChars} символів.`);
+      }
+      const changed = await mutateDraft(
+        String(req.params.draftId),
+        owner(req),
+        (d) => {
+          assertEditable(d);
+          const found = findLesson(d, lessonId);
+          if (!found) throw new DraftChangeError(404, 'lesson_not_found', 'Уроку немає в структурі.');
+          if (!found.lesson.suggestion) {
+            throw new DraftChangeError(409, 'wrong_status', 'Пропозиції до цього уроку немає: її вже прийнято, відхилено або ще не написано.');
+          }
+          if (action === 'accept') {
+            const text = (typeof raw === 'string' ? raw : found.lesson.suggestion.text).trim();
+            found.lesson.body = text || null;
+            // Викладач правив текст сам — поле його, а не ШІ: інакше наступний прохід 3 його перезапише.
+            const mine = typeof raw === 'string' && raw.trim() !== found.lesson.suggestion.text;
+            found.lesson.aiFields = found.lesson.aiFields.filter((f) => f !== 'body');
+            if (!mine && text) found.lesson.aiFields.push('body');
+            found.lesson.aiFields.sort();
+            found.module.written = found.module.lessons.every((l) => !!l.body);
+          }
+          found.lesson.suggestion = null;
+          if (d.status !== 'collecting' && d.structure) d.status = statusAfterStructure(d.structure);
+        },
+        { byTeacher: true, now }
+      );
+      if (!changed) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+      res.json({ draft: publicDraft(changed.draft) });
+    } catch (err) {
+      sendChangeError(res, err, 'suggestion');
     }
   });
 

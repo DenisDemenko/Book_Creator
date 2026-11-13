@@ -21,6 +21,7 @@ KIND_STATUS: dict[str, int] = {
     "photo_not_found": 404,
     "note_not_found": 404,
     "module_not_found": 404,
+    "lesson_not_found": 404,
     "book_not_found": 404,
     "wrong_status": 409,
     "job_running": 409,
