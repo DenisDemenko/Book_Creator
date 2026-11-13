@@ -115,6 +115,7 @@ import { parseAppPath, buildAppPath, isCorePageTab, type GraphStudioTab } from '
 import { GraphStudioPage } from './components/graphStudio/GraphStudioPage';
 import {
   STUDIO_ENTRY_PARAMS,
+  INITIAL_COURSE_LINK,
   INITIAL_EXPRESS_DRAFT,
   TECHNICAL_DRAFT_STORAGE_KEY,
   parseStudioEntry,
@@ -480,7 +481,9 @@ function StudioApp() {
       parseStudioEntry(window.location.search) ??
       (INITIAL_EXPRESS_DRAFT
         ? ({ tab: 'express', track: 'technical_instruction', draftId: INITIAL_EXPRESS_DRAFT.draftId } as StudioEntryIntent)
-        : null);
+        : null) ??
+      // `/courses/<id>` з GrabFusion: одразу на цей курс у «Створити курс», а не на дашборд книг.
+      (INITIAL_COURSE_LINK ? ({ tab: 'course-studio', courseId: INITIAL_COURSE_LINK.courseId } as StudioEntryIntent) : null);
     if (!intent) {
       if (project) {
         const url = new URL(window.location.href);
@@ -495,6 +498,9 @@ function StudioApp() {
     const url = new URL(window.location.href);
     for (const key of STUDIO_ENTRY_PARAMS) url.searchParams.delete(key);
     if (intent.draftId) url.pathname = url.pathname.replace(/\/express\/[^/]+\/?$/, '/');
+    // Курс відкрито — адресу чистимо так само: інакше «назад» відкриє той самий курс удруге,
+    // а синхронізація маршруту все одно замінить шлях на сторінку книги.
+    if (intent.courseId) url.pathname = url.pathname.replace(/\/courses\/[^/]+\/?$/, '/');
     window.history.replaceState({}, '', url.toString());
   }, []);
 
@@ -510,6 +516,8 @@ function StudioApp() {
     if (!canAccessTab(role, pendingEntry.tab)) return;
     setCurrentTab(pendingEntry.tab);
     setEntryIdea(pendingEntry.idea ?? null);
+    // Курс із GrabFusion: «Створити курс» відкривається одразу на ньому (CourseStudioView → initialCourseId).
+    if (pendingEntry.courseId) setInitialCourseId(pendingEntry.courseId);
     // Чернетка з GrabFusion: майстер бере її зі сховища браузера (див. TECHNICAL_DRAFT_STORAGE_KEY).
     if (pendingEntry.draftId) {
       try {

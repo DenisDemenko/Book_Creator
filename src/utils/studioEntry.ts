@@ -60,6 +60,8 @@ export interface StudioEntryIntent {
    * лише зі сховища браузера, тож вхід кладе туди цей id (`TECHNICAL_DRAFT_STORAGE_KEY`).
    */
   draftId?: string;
+  /** Курс, що приїхав із GrabFusion (`/courses/<id>`): відкриваємо саме його, а не перелік. */
+  courseId?: string;
   /**
    * Задум книги з маркетплейсу — лише для експрес-майстра: у нього поле
    * «Зерно» і є тим одним реченням, з якого починається план.
@@ -122,6 +124,22 @@ export function parseExpressDraftPath(pathname: string): { draftId: string } | n
  */
 export const INITIAL_EXPRESS_DRAFT: { draftId: string } | null =
   typeof window !== 'undefined' ? parseExpressDraftPath(window.location.pathname) : null;
+
+/**
+ * Адреса `/courses/<id>` (із префіксом `/studio` чи без): так GrabFusion посилає викладача на курс,
+ * створений із чернетки за фото (`photo-drafts` → `submit` → `studioUrl`). Це та сама пастка, що була
+ * з `/express/<id>` до 04.11.2026: маршрутизатор Студії таких шляхів не знає (`parseAppPath` розбирає
+ * лише `/projects/...`), тож перехід мовчки відкривав дашборд книг — автор бачив свої книги й шукав
+ * надісланий курс унизу сторінки. Id курсу Studio видає у вигляді літер, цифр, дефісів і підкреслень.
+ */
+export function parseCourseLinkPath(pathname: string): { courseId: string } | null {
+  const m = /^(?:\/studio)?\/courses\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/?$/.exec(pathname || '');
+  return m ? { courseId: m[1] } : null;
+}
+
+/** Як і з експрес-чернеткою: адресу читаємо на імпорті модуля, до роботи маршрутизатора. */
+export const INITIAL_COURSE_LINK: { courseId: string } | null =
+  typeof window !== 'undefined' ? parseCourseLinkPath(window.location.pathname) : null;
 
 export function studioEntrySection(slug: string): StudioEntrySection | undefined {
   const key = slug.trim().toLowerCase();

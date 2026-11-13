@@ -15,6 +15,7 @@ import {
   parseProjectEntry,
   STUDIO_ENTRY_PARAMS,
   studioEntrySection,
+  parseCourseLinkPath,
   parseExpressDraftPath,
   TECHNICAL_DRAFT_STORAGE_KEY,
 } from '../src/utils/studioEntry.ts';
@@ -94,6 +95,33 @@ console.log('\nПосилання GrabFusion на інструкцію: /express
   const app = read('../src/App.tsx');
   t('App кладе id у сховище й веде в майстер інструкцій', app.includes('INITIAL_EXPRESS_DRAFT') && app.includes("track: 'technical_instruction'") && app.includes('localStorage.setItem(TECHNICAL_DRAFT_STORAGE_KEY, pendingEntry.draftId)'));
   t('адресу з /express/<id> прибирають після входу', app.includes("replace(/\\/express\\/[^/]+\\/?$/, '/')"));
+}
+
+console.log('\nПосилання GrabFusion на курс: /courses/<id> (13.11.2026):');
+{
+  const id = 'CRS-9f1a2b';
+  t('розбирає /courses/<id>', eq(parseCourseLinkPath(`/courses/${id}`), { courseId: id }));
+  t('і з префіксом /studio, і з кінцевою скісною', eq(parseCourseLinkPath(`/studio/courses/${id}/`), { courseId: id }));
+  t('без id — null', parseCourseLinkPath('/courses/') === null && parseCourseLinkPath('/courses') === null);
+  t('глибший шлях, підйом і чужі адреси — null', parseCourseLinkPath(`/courses/${id}/lessons`) === null && parseCourseLinkPath('/courses/../projects/b/editor') === null && parseCourseLinkPath('/projects/BK-1/courses') === null);
+  t('символи поза [A-Za-z0-9._-] відхиляються', parseCourseLinkPath('/courses/a%2fb') === null && parseCourseLinkPath('/courses/a b') === null);
+  t('порожній вхід не падає', parseCourseLinkPath('') === null);
+
+  // Та сама пастка, що з /express/<id>: маршрутизатор знає лише /projects/..., тож
+  // без цього розбору посилання відкривало дашборд книг, а не надісланий курс.
+  t('маршрутизатор сам такого шляху не знає', parseAppPath(`/courses/${id}`) === null && parseAppPath(`/studio/courses/${id}`, '/studio') === null);
+
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const app = read('../src/App.tsx');
+  t('App веде курс у «Створити курс», а не на дашборд', app.includes('INITIAL_COURSE_LINK') && app.includes("tab: 'course-studio', courseId: INITIAL_COURSE_LINK.courseId"));
+  t('курс відкривається саме той', app.includes('if (pendingEntry.courseId) setInitialCourseId(pendingEntry.courseId)'));
+  t('адресу з /courses/<id> прибирають після входу', app.includes("replace(/\\/courses\\/[^/]+\\/?$/, '/')"));
+
+  // Другий бік прохання власника: надісланий курс видно окремим блоком, а не серед усіх.
+  const legacy = read('../src/components/CourseStudioLegacy.tsx');
+  t('у «Створити курс» є блок розпочатих курсів', legacy.includes('data-course-started') && legacy.includes('Розпочаті курси — продовжити роботу'));
+  t('у блоці — лише чернетки, найсвіжіші перші', legacy.includes(".filter((c) => c.status === 'draft')") && legacy.includes("localeCompare(String(a.updatedAt"));
+  t('курс із GrabFusion у блоці підписаний', legacy.includes('data-course-started-item') && legacy.includes('Створено за фото'));
 }
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
