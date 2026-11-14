@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { AdminReferralLinksPanel } from './AdminReferralLinksPanel';
 import { AlertTriangle, Ban, CheckCircle2, Info, Package, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { FurnitureProductEditor } from './adminOs/FurnitureProductEditor';
 import type { FurnitureProduct } from './adminOs/furnitureProduct';
@@ -429,6 +430,13 @@ export const AdminProductsView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/*
+        Реферальні посилання стоять поруч із журналом публікацій навмисно: обидва
+        про те, що вже лежить у вітрині. Посилання можна зробити лише на
+        опублікований товар, а перелік таких товарів бере саме цей журнал.
+      */}
+      <AdminReferralLinksPanel />
     </div>
   );
 };

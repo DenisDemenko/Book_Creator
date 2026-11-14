@@ -36,6 +36,7 @@ import {
 } from './store';
 import { listBooks } from './bookStore';
 import { withPublicationJournal, listPublications } from './storefrontPublications';
+import { createBridgePromoCode, listBridgePromoCodes } from './marketplaceBridge';
 import { listAllCourses, getCourse, updateCourse } from './courseStore';
 import { courseSubmitProblems } from '../src/utils/coursePublishRules';
 import { buildCoursePublishInput } from './courseMarketplacePayload';
@@ -200,6 +201,40 @@ function tcpProbe(host: string, port: number, timeoutMs = 5_000): Promise<{ ok: 
     });
   })();
 }
+
+/**
+ * Публічна адреса вітрини для посилань, які даємо людям.
+ *
+ * Це НЕ адреса мосту: міст веде на `api.fusionlab.in.ua` (службовий API), а
+ * покупець має потрапити на сторінку товару. Перевірено 14.11.2026:
+ * `www.fusionlab.in.ua/catalog/<slug>` → 200, а варіанти з префіксом мови
+ * (`/uk/catalog/...`) і домен `app.` віддають 307 — тобто редирект, який
+ * у листі чи месенджері виглядає як зайвий крок.
+ */
+function storefrontOrigin(): string {
+  const raw = String(process.env.MARKETPLACE_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  return raw || 'https://www.fusionlab.in.ua';
+}
+
+/** Код із назви посилання: «Блогери» → «BLOHERY-7F3A». Латиниця, цифри, дефіс. */
+function referralCode(label: string): string {
+  const base = label
+    .toUpperCase()
+    .replace(/[ІЇ]/g, 'I')
+    .replace(/[ЄE]/g, 'E')
+    .replace(/[А-ЯЁҐ]/g, (ch) => TRANSLIT[ch] ?? '')
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 20);
+  const tail = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${base || 'REF'}-${tail}`;
+}
+
+const TRANSLIT: Record<string, string> = {
+  А: 'A', Б: 'B', В: 'V', Г: 'H', Ґ: 'G', Д: 'D', Е: 'E', Ж: 'ZH', З: 'Z', И: 'Y',
+  Й: 'I', К: 'K', Л: 'L', М: 'M', Н: 'N', О: 'O', П: 'P', Р: 'R', С: 'S', Т: 'T',
+  У: 'U', Ф: 'F', Х: 'KH', Ц: 'TS', Ч: 'CH', Ш: 'SH', Щ: 'SHCH', Ь: '', Ю: 'IU', Я: 'IA',
+};
 
 export function registerAdminRoutes(app: Express): void {
   registerAgentHandoffRoutes(app);
@@ -519,6 +554,81 @@ export function registerAdminRoutes(app: Express): void {
       limit: Number(req.query.limit) || 200,
     });
     res.json({ publications });
+  });
+
+  // ── Реферальні посилання зі знижкою (запит власника 14.11.2026) ───────────────────────────────────
+  //
+  // Знижку рахує й гасить ВІТРИНА, за промокодом у кошику. Студія лише створює код через міст і
+  // складає посилання з ним. Власного обліку знижок тут немає свідомо: гроші рахують в одному місці,
+  // інакше два лічильники погашень розійдуться першого ж дня.
+  //
+  // Нуль відсотків — не знижка, а просто мітка джерела: тоді код не створюється взагалі, і
+  // посилання йде з `?ref=`, який вітрина вже вміє (запрошення). Створювати промокод «−0%» означало б
+  // засмічувати перелік кодами, що нічого не роблять.
+
+  app.get('/api/admin/referral-links', requireAdmin, async (_req, res) => {
+    try {
+      const [codes, publications] = await Promise.all([
+        listBridgePromoCodes(),
+        Promise.resolve(listPublications({ status: 'ok', limit: 200 })),
+      ]);
+      // Куди вести посилання: лише те, що справді лежить у вітрині (журнал публікацій #554).
+      const listings = publications
+        .filter((p) => p.slug)
+        .map((p) => ({ slug: p.slug as string, title: p.title, kind: p.kind, at: p.at }))
+        .filter((item, i, all) => all.findIndex((x) => x.slug === item.slug) === i);
+      res.json({ codes, listings, storefrontUrl: storefrontOrigin() });
+    } catch (err) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 503;
+      res.status(status).json({ error: String((err as Error).message) });
+    }
+  });
+
+  app.post('/api/admin/referral-links', requireAdmin, async (req, res) => {
+    try {
+      // Саме `typeof`, а не `Number(...)`: `null` (так JSON везе NaN) і порожній рядок
+      // перетворюються на 0, і «зіпсоване поле» тихо ставало б посиланням без знижки.
+      const rawPercent = req.body?.percent;
+      const percent = typeof rawPercent === 'number' ? rawPercent : typeof rawPercent === 'string' && rawPercent.trim() ? Number(rawPercent) : Number.NaN;
+      if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+        return res.status(400).json({ error: 'Знижка — ціле число від 0 до 100 відсотків.' });
+      }
+      const slug = String(req.body?.slug ?? '').trim();
+      if (!slug) return res.status(400).json({ error: 'Оберіть товар вітрини, на який веде посилання.' });
+      const label = String(req.body?.label ?? '').trim().slice(0, 40);
+      const code = String(req.body?.code ?? '').trim().toUpperCase() || referralCode(label);
+      if (!/^[A-Z0-9-]{3,32}$/.test(code)) {
+        return res.status(400).json({ error: 'Код — 3–32 символи: великі латинські літери, цифри або дефіс.' });
+      }
+      const maxRedemptions = Number(req.body?.maxRedemptions) || null;
+      const expiresAt = String(req.body?.expiresAt ?? '').trim() || null;
+
+      const base = `${storefrontOrigin()}/catalog/${encodeURIComponent(slug)}`;
+      if (percent === 0) {
+        return res.json({
+          percent,
+          code: null,
+          url: `${base}?ref=${encodeURIComponent(code)}`,
+          note: 'Знижки немає: посилання лише позначає джерело переходу.',
+        });
+      }
+
+      const created = await createBridgePromoCode({
+        code,
+        percent,
+        maxRedemptions: maxRedemptions && maxRedemptions > 0 ? maxRedemptions : null,
+        expiresAt,
+      });
+      res.json({
+        percent,
+        code: created.code,
+        promoCode: created,
+        url: `${base}?promo=${encodeURIComponent(created.code)}&ref=${encodeURIComponent(created.code)}`,
+      });
+    } catch (err) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 503;
+      res.status(status).json({ error: String((err as Error).message) });
+    }
   });
 
   // ── Копії бази (журнал #538) ───────────────────────────────────────────────────────────────────────

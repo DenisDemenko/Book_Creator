@@ -14,6 +14,7 @@ export type BookDesignThemeId =
   | 'children'
   | 'graphic-story'
   | 'experimental-art'
+  | 'skyfy'
   | 'studio-classic'
   | 'studio-editorial';
 
@@ -353,6 +354,29 @@ export const BOOK_DESIGN_THEMES: Record<BookDesignThemeId, BookDesignTheme> = {
     }),
     variants: VARIANTS,
   },
+  /**
+   * Skyfy — для ілюстрованих каталогів і довідників (запит власника 14.11.2026, каталог
+   * 375 стилів інтер'єру). Відрізняється від сусідніх візуальних тем тим, навколо чого
+   * побудована: `graphic-story` веде сценою, `experimental-art` — розворотом і цитатою,
+   * а тут головна одиниця — ФОТО З ПІДПИСОМ у довгому переліку позицій. Звідси рішення:
+   * підпис по центру під знімком і курсивом (щоб не плутався з назвою позиції), помітні
+   * заголовки розділів, нульовий абзацний відступ і багато повітря між рядками переліку.
+   */
+  skyfy: {
+    id: 'skyfy', labelUk: 'Skyfy', category: 'visual',
+    descriptionUk: 'Світла каталожна система: великі фотоприклади з підписами, помітні розділи й довгі переліки позицій, які легко переглядати.',
+    recommendedFor: ['ілюстрований каталог', 'довідник стилів', 'лукбук', 'добірка зразків'],
+    bodyFont: 'DejaVu Sans', headingFont: 'DejaVu Sans', monoFont: 'DejaVu Sans Mono',
+    bodyAlign: 'left', chapterAlign: 'left', bodySizeDelta: 0.3, chapterSizeDelta: 5, sectionSizeDelta: 2,
+    paragraphIndentMultiplier: 0, paragraphSpacingMultiplier: 1.9, sceneBreak: '◦ ◦ ◦', chapterNumberStyle: 'display',
+    chapterOpening: opening({ showNumber: true }),
+    semanticStyles: semantic({
+      Caption: { enabled: true, font: 'body', italic: true, align: 'center' },
+      KeyIdea: { enabled: true, font: 'heading', bold: true, border: 'left' },
+      Quote: { enabled: true, font: 'heading', align: 'left' },
+    }),
+    variants: VARIANTS,
+  },
   // Два шаблони Студії, згенеровані з колишніх тем «Класичний» і «Редакційний» розділу
   // «Верстка & Поля». Раніше ці назви збігалися з темою Classic і варіантом Editorial каталогу
   // DesignCraft, хоча це були різні речі. Тепер це окремі шаблони з унікальними назвами, які
@@ -394,6 +418,7 @@ export const BOOK_DESIGN_THEME_ORDER: readonly BookDesignThemeId[] = [
   'children',
   'graphic-story',
   'experimental-art',
+  'skyfy',
   'studio-classic',
   'studio-editorial',
 ];

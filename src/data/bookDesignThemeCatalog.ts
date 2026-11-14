@@ -16,6 +16,7 @@ export type BookDesignThemeId =
   | 'children'
   | 'graphic-story'
   | 'experimental-art'
+  | 'skyfy'
   | 'studio-classic'
   | 'studio-editorial';
 
@@ -75,6 +76,7 @@ export const BOOK_DESIGN_THEME_CARDS: readonly BookDesignThemeCard[] = [
   { id: 'children', label: 'Children', taglineUk: 'Великий дружній набір, короткі рядки та більше місця для ілюстрацій.', category: 'children', recommendedFor: ['дитяча книга', 'раннє читання', 'освітня історія'], preview: { chapterNumber: 'display', align: 'center', accent: 'sans', sceneBreak: '✦' } },
   { id: 'graphic-story', label: 'Graphic Story', taglineUk: 'Великі зображення, scene cards, captions і візуальний темп.', category: 'visual', recommendedFor: ['графічна історія', 'артбук', 'візуальний роман'], preview: { chapterNumber: 'display', align: 'left', accent: 'sans', sceneBreak: '▰' } },
   { id: 'experimental-art', label: 'Experimental / Art Book', taglineUk: 'Нестандартні розвороти, великі цитати й мінливий ритм сторінки.', category: 'visual', recommendedFor: ['артбук', 'фото-книга', 'експериментальна проза'], preview: { chapterNumber: 'display', align: 'left', accent: 'sans', sceneBreak: '○' } },
+  { id: 'skyfy', label: 'Skyfy', taglineUk: 'Світлий каталог: великі фотоприклади з підписами й довгі переліки позицій.', category: 'visual', recommendedFor: ['ілюстрований каталог', 'довідник стилів', 'лукбук', 'добірка зразків'], preview: { chapterNumber: 'display', align: 'left', accent: 'sans', sceneBreak: '◦ ◦ ◦' } },
   { id: 'studio-classic', label: 'Studio Classic', taglineUk: 'Просте книжкове оформлення без прикрас; однаково в експорті Студії й у DesignCraft.', category: 'fiction', recommendedFor: ['будь-яка проза', 'перша верстка'], preview: { chapterNumber: 'quiet', align: 'center', accent: 'serif', sceneBreak: '* * *' }, novaDesignTheme: 'classic' },
   { id: 'studio-editorial', label: 'Studio Editorial', taglineUk: 'Редакційний стиль: в експорті Студії «— РОЗДІЛ 01» і буквиці, у DesignCraft — великі заголовки ліворуч.', category: 'fiction', recommendedFor: ['видавничий макет', 'роман з розділами'], preview: { chapterNumber: 'display', align: 'left', accent: 'serif', sceneBreak: '— ⁂ —' }, novaDesignTheme: 'editorial' },
 ] as const;

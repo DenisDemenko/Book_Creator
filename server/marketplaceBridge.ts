@@ -909,6 +909,121 @@ export async function listBridgeBooks(
 }
 
 /**
+ * Реферальні промокоди вітрини (запит власника 14.11.2026).
+ *
+ * Знижку застосовує ВІТРИНА — у кошику, за промокодом. Студія лише створює
+ * код і складає посилання з ним: `…/catalog/<slug>?promo=КОД`. Тримати
+ * власний облік знижок у Студії було б другим джерелом правди про гроші,
+ * і розійшлися б вони першого ж дня, коли хтось погасить код у кошику.
+ */
+export interface BridgePromoCode {
+  id: string;
+  code: string;
+  type: 'percent' | 'fixed';
+  value: number;
+  maxRedemptions: number | null;
+  redemptionCount: number;
+  active: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+async function bridgePromoFetch(
+  path: string,
+  init: { method: 'GET' | 'POST'; body?: unknown },
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<unknown> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}${path}`, {
+      method: init.method,
+      headers: {
+        'x-bridge-key': settings.key,
+        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  // Приймач ще без цього маршруту: кажемо прямо, а не «щось пішло не так» —
+  // лікується деплоєм вітрини, і наступна сесія має це бачити.
+  if (response.status === 404) {
+    throw new MarketplaceBridgeError(
+      'Вітрина ще не вміє приймати промокоди через міст: розгорніть маркетплейс із маршрутом /bridge/promo-codes.',
+      'rejected',
+      502
+    );
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив промокод: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new MarketplaceBridgeError('Маркетплейс відповів не JSON.', 'rejected', 502);
+  }
+}
+
+export async function listBridgePromoCodes(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgePromoCode[]> {
+  const body = await bridgePromoFetch('/bridge/promo-codes', { method: 'GET' }, deps);
+  return Array.isArray(body) ? (body as BridgePromoCode[]) : [];
+}
+
+export interface CreateBridgePromoCodeInput {
+  code: string;
+  /** Відсоток знижки, 1–100. Нуль — не код, а посилання без знижки: його Студія не створює. */
+  percent: number;
+  maxRedemptions?: number | null;
+  expiresAt?: string | null;
+}
+
+export async function createBridgePromoCode(
+  input: CreateBridgePromoCodeInput,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgePromoCode> {
+  const body = await bridgePromoFetch(
+    '/bridge/promo-codes',
+    {
+      method: 'POST',
+      body: {
+        code: input.code,
+        type: 'percent',
+        value: input.percent,
+        ...(input.maxRedemptions ? { maxRedemptions: input.maxRedemptions } : {}),
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+      },
+    },
+    deps
+  );
+  return body as BridgePromoCode;
+}
+
+/**
  * Категорії, які насправді існують у вітрині. Студія показує саме їх у
  * списку вибору: вільний текст категорії приймач не розпізнає, а похідну
  * «Безкоштовні товари» (за ціною 0) не віддає взагалі.
