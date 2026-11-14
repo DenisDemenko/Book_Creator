@@ -168,6 +168,38 @@ console.log('\nЗастосування до курсу');
     withSummary.modules[0].summary === 'Вибір деревини.' && withSummary.modules[1].summary === 'Грубе вирізання й чаша.');
 }
 
+console.log('\nПункт про фото: «Додати фото», а не ШІ');
+{
+  // Прохання власника 13.11.2026. Фото ШІ не напише, тож цей рядок веде не в
+  // модель, а у вибір файлу — і мусить потрапити в ПОТРІБНИЙ модуль.
+  t('«Модуль 2: немає фото» → фото саме mo-B',
+    JSON.stringify(gapFill.photoTargetForProblem('Модуль 2: немає фото.', course)) === JSON.stringify({ kind: 'module-cover', moduleId: 'mo-B' }),
+    JSON.stringify(gapFill.photoTargetForProblem('Модуль 2: немає фото.', course)));
+  const first = gapFill.photoTargetForProblem('Модуль 1: немає фото.', course);
+  t('«Модуль 1: немає фото» → mo-A', first?.kind === 'module-cover' && first.moduleId === 'mo-A');
+  t('обкладинка курсу теж має ціль', gapFill.photoTargetForProblem('Немає обкладинки: без неї картка в каталозі — порожній прямокутник.', course)?.kind === 'course-cover');
+  t('зламане посилання на обкладинку — та сама ціль', gapFill.photoTargetForProblem('Обкладинка має бути посиланням http(s) на зображення або фото з медіатеки.', course)?.kind === 'course-cover');
+  t('номер поза межами — null', gapFill.photoTargetForProblem('Модуль 9: немає фото.', course) === null);
+  for (const line of ['Немає навичок курсу.', 'Урок 1.1: без мети.', 'Модуль 1: жодного уроку.', '']) {
+    t(`«${line || '(порожньо)'}» — не про фото`, gapFill.photoTargetForProblem(line, course) === null);
+  }
+  // Два розбори не мають накладатися: де є кнопка ШІ, там не має бути кнопки фото, і навпаки.
+  const both = ['Модуль 1: немає фото.', 'Модуль 1: без опису.', 'Немає навичок курсу.']
+    .filter((l) => !!gapFill.gapForProblem(l, course) && !!gapFill.photoTargetForProblem(l, course));
+  t('жоден рядок не дає обидві кнопки', both.length === 0, both.join(', '));
+
+  const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const legacy = read('../src/components/CourseStudioLegacy.tsx');
+  t('кнопка «Додати фото» є в блоці готовності', legacy.includes('data-photo-button') && legacy.includes('Додати фото'));
+  t('кнопки фото немає в приватному курсі', legacy.includes("access === 'view' || course.privateStore"));
+  t('фото лягає в обкладинку або в модуль', legacy.includes("target.kind === 'course-cover'") && legacy.includes('patchModule(target.moduleId, { coverPhotoUrl: url })'));
+
+  const modal = read('../src/components/CourseAddPhotoModal.tsx');
+  t('вікно дає обидва шляхи', modal.includes('Вибрати з медіатеки') && modal.includes('Завантажити нове фото'));
+  t('завантаження йде тим самим маршрутом, що й медіатека', modal.includes("'/api/media/upload'"));
+  t('тип і розмір перевіряються до читання файлу', modal.includes('ALLOWED.includes(file.type)') && modal.includes('file.size > MAX_BYTES'));
+}
+
 console.log('\nПідпис поля «Три вигоди на картку»');
 {
   // Прохання власника 13.11.2026. Поле особливе: це єдине, що покупець бачить ДО опису

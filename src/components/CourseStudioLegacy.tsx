@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Lock,
   Sparkles,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   CourseAssignment,
@@ -38,7 +39,8 @@ import { parsePriceMinor } from './adminOs/priceInput';
 import CourseGraduateStats from './CourseGraduateStats';
 import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
 import { CourseGapFillModal } from './CourseGapFillModal';
-import { gapForProblem, type CourseGap } from '../../shared/courseGapFill';
+import { CourseAddPhotoModal } from './CourseAddPhotoModal';
+import { gapForProblem, photoTargetForProblem, type CourseGap, type CoursePhotoTarget } from '../../shared/courseGapFill';
 import { PrivateBookBadge } from './PrivateBookBadge';
 import {
   PrivateStoreError,
@@ -653,6 +655,8 @@ export const CourseStudioView: React.FC<{
    * Тримаємо й текст пункту — у вікні видно, що саме доповнюємо.
    */
   const [gapFill, setGapFill] = useState<{ gap: CourseGap; problem: string } | null>(null);
+  /** Відкрите вікно «Додати фото»: куди саме ляже знімок. */
+  const [photoFill, setPhotoFill] = useState<{ target: CoursePhotoTarget; problem: string } | null>(null);
 
   const readiness = useMemo(
     () => (course ? collectReadiness(course, storefrontCategories.length > 0) : { blocking: [], polish: [] }),
@@ -665,6 +669,32 @@ export const CourseStudioView: React.FC<{
    * обіцяти доповнення там, де потрібен файл автора чи його рішення про гроші,
    * гірше, ніж не обіцяти нічого (див. shared/courseGapFill.ts).
    */
+  /** Куди кладе знімок вікно «Додати фото»: обкладинка курсу чи фото модуля. */
+  const applyPhoto = (target: CoursePhotoTarget, url: string) =>
+    target.kind === 'course-cover'
+      ? patch((c) => ({ ...c, coverUrl: url }))
+      : patchModule(target.moduleId, { coverPhotoUrl: url });
+
+  /**
+   * Пункт готовності про фото: ШІ його не закриє, тож замість «Доповнити це з ШІ»
+   * тут «Додати фото» — вибір із медіатеки або завантаження нового файлу.
+   */
+  const photoButton = (problem: string) => {
+    if (!course || access === 'view' || course.privateStore) return null;
+    const target = photoTargetForProblem(problem, course);
+    if (!target) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => setPhotoFill({ target, problem })}
+        className="mt-1 flex items-center gap-1 text-[10px] font-bold text-sky-300 hover:text-sky-200"
+        data-photo-button={target.kind}
+      >
+        <ImageIcon className="w-3 h-3" /> Додати фото
+      </button>
+    );
+  };
+
   const gapButton = (problem: string) => {
     if (!course || access === 'view') return null;
     const gap = gapForProblem(problem, course);
@@ -1465,6 +1495,7 @@ export const CourseStudioView: React.FC<{
                         <li key={i} className="text-[11px] text-slate-300 leading-relaxed border-l-2 border-rose-500/50 pl-2">
                           {item}
                           {gapButton(item)}
+                          {photoButton(item)}
                         </li>
                       ))}
                     </ul>
@@ -1481,6 +1512,7 @@ export const CourseStudioView: React.FC<{
                         <li key={i} className="text-[11px] text-slate-400 leading-relaxed border-l-2 border-amber-500/40 pl-2">
                           {item}
                           {gapButton(item)}
+                          {photoButton(item)}
                         </li>
                       ))}
                     </ul>
@@ -1491,6 +1523,18 @@ export const CourseStudioView: React.FC<{
           </div>
         </div>
       </div>
+      {photoFill && course && (
+        <CourseAddPhotoModal
+          target={photoFill.target}
+          problem={photoFill.problem}
+          onPicked={(url) => applyPhoto(photoFill.target, url)}
+          onOpenLibrary={() => {
+            const target = photoFill.target;
+            setPicker({ onPick: (url) => applyPhoto(target, url) });
+          }}
+          onClose={() => setPhotoFill(null)}
+        />
+      )}
       {gapFill && course && (
         <CourseGapFillModal
           course={course}

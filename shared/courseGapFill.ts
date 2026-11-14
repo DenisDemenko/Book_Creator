@@ -133,6 +133,37 @@ export function gapForProblem(text: string, course: GapCourseShape): CourseGap |
   return null;
 }
 
+/**
+ * Фото — окремо від прогалин ШІ (прохання власника 13.11.2026).
+ *
+ * «Модуль 1: немає фото» ШІ не закриє: потрібен файл автора. Але й лишати цей
+ * рядок зовсім без дії незручно — автор читає його в «Готовності», а йти по
+ * фото мусить у форму модуля. Тому тут свій розбір: той самий рядок → куди
+ * покласти знімок, а поруч із ним у редакторі стоїть «Додати фото» з вибором
+ * «з медіатеки» або «завантажити нове».
+ */
+export type CoursePhotoTarget =
+  | { kind: 'course-cover' }
+  | { kind: 'module-cover'; moduleId: string };
+
+export function photoTargetForProblem(text: string, course: GapCourseShape): CoursePhotoTarget | null {
+  const line = String(text || '').trim();
+  if (!line) return null;
+  if (line.startsWith('Немає обкладинки') || line.startsWith('Обкладинка має бути посиланням')) {
+    return { kind: 'course-cover' };
+  }
+  const m = /^Модуль (\d+): немає фото/.exec(line);
+  if (!m) return null;
+  const module = course.modules[Number(m[1]) - 1];
+  return module ? { kind: 'module-cover', moduleId: module.id } : null;
+}
+
+/** Підпис місця — у заголовку вікна, щоб було видно, куди саме ляже знімок. */
+export const PHOTO_TARGET_LABELS: Record<CoursePhotoTarget['kind'], string> = {
+  'course-cover': 'обкладинка курсу',
+  'module-cover': 'фото модуля',
+};
+
 /** Чи описує об'єкт справжню прогалину цього курсу (перевіряє й сервер, не лише редактор). */
 export function isValidGap(gap: unknown, course: GapCourseShape): gap is CourseGap {
   const g = gap as CourseGap;
