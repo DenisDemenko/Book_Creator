@@ -211,5 +211,51 @@ console.log('\nТекст для DesignCraft: локальні перекрит�
   t('власний шаблон: розмір Body із шаблону потрапляє в локальні теги', /<cSize:13>/.test(cText), cText.match(/<cSize:[^>]*>/)?.[0] || '');
 }
 
+console.log('\nПідпис під ілюстрацією доїжджає до верстки');
+{
+  /*
+    Рушій вирізає службовий проміжок BEGIN…END разом з усім, що в ньому, і
+    ставить туди прикріплену картинку. Тому підпис мусить стояти ОКРЕМИМ
+    абзацом ПІСЛЯ END — інакше він зникає разом із проміжком, і саме так у
+    PDF DesignCraft не виходило жодного підпису.
+  */
+  const withPhoto: any = {
+    title: 'З фото',
+    chapters: [
+      {
+        id: 'ch-1',
+        title: 'Розділ',
+        sections: [
+          {
+            id: 'se-1',
+            title: 'Кадри',
+            content:
+              'Текст до фото.\n\n[IMG: ill-1 \"Japandi: tatami and shoji\" wrap=none]\n\nТекст після фото.',
+          },
+        ],
+      },
+    ],
+    illustrations: [{ id: 'ill-1', url: '/api/media/file/md-test', caption: 'Запасний підпис' }],
+  };
+
+  const themed = buildDesigncraftRtf(withPhoto, { ...DEFAULT_LAYOUT_SPEC, themeId: 'skyfy' } as any);
+  const themedText = String((themed as any).rtf ?? '');
+  t('підпис є в тексті верстки', themedText.includes('Japandi'));
+  const endAt = themedText.indexOf(':END]]');
+  const capAt = themedText.indexOf('Japandi');
+  t('підпис стоїть ПІСЛЯ службового кінця ілюстрації', endAt >= 0 && capAt > endAt, `END=${endAt}, підпис=${capAt}`);
+  t('підпис має стиль Caption', /<ParaStyle:Caption>[^<]*Japandi/.test(themedText));
+  t('Caption увійшов до переліку вжитих стилів', (themed.semanticStylesUsed as string[]).includes('Caption'));
+
+  // Книга без шаблону: стилю Caption у документі немає взагалі, тож підпис
+  // друкується тілом. Втратити підпис удруге гірше, ніж віддати його Body.
+  const plain = buildDesigncraftRtf(withPhoto, { ...DEFAULT_LAYOUT_SPEC } as any);
+  const plainText = String((plain as any).rtf ?? '');
+  t(
+    'без шаблону підпис лишається, але тілом',
+    plainText.includes('Japandi') && !/<ParaStyle:Caption>/.test(plainText)
+  );
+}
+
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало.`);
 if (fail) process.exit(1);

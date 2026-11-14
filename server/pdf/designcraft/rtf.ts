@@ -218,14 +218,35 @@ export function buildDesigncraftRtf(
   const semanticStylesUsed = new Set<SemanticParagraphStyle>();
 
   const lines: string[] = ['<ASCII-WIN>', '<Version:7>'];
-  const imageRe = /^!\[[^\]]*\]\((nova-image-\d+)\)$/;
+  // Підпис береться з alt: саме туди `bookToMarkdown` кладе текст із маркера `[IMG: … "підпис"]`.
+  const imageRe = /^!\[([^\]]*)\]\((nova-image-\d+)\)$/;
   const blocks = doc.markdown.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
   let chapterSeen = false;
 
   for (const block of blocks) {
     const image = imageRe.exec(block);
     if (image) {
-      lines.push(...imagePlaceholder(image[1]));
+      lines.push(...imagePlaceholder(image[2]));
+      /*
+        ПІДПИС ПІД ІЛЮСТРАЦІЄЮ — ОКРЕМИМ АБЗАЦОМ ПІСЛЯ МАРКЕРА.
+
+        Рушій вирізає з розповіді весь проміжок BEGIN…END і ставить на його
+        місце прикріплену картинку, тож усе, що написано ВСЕРЕДИНІ проміжку,
+        зникає разом із ним. Доки підпис жив лише в маркері `[IMG: …]`, у
+        PDF DesignCraft не виходило жодного підпису взагалі — знайдено на
+        каталозі стилів, де підпис під фото і є змістом сторінки.
+
+        Абзац після END переживає вирізання й лишається рівно під
+        картинкою. Стиль `Caption` беремо тільки тоді, коли шаблон його
+        справді описує: інакше посилання було б на неіснуючий стиль, а
+        втратити підпис удруге гірше, ніж надрукувати його тілом.
+      */
+      const captionText = image[1].trim();
+      if (captionText) {
+        const captionStyle: SemanticParagraphStyle = semanticRule(theme, 'Caption') ? 'Caption' : 'Body';
+        lines.push(paragraph(captionStyle, captionText));
+        semanticStylesUsed.add(captionStyle);
+      }
       continue;
     }
 
