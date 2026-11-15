@@ -6,6 +6,11 @@
 - Перевірки: Studio bridge 9/9, типи й production build; суміжні API/Chromium/конструктори — #570. Модель платно не викликалась.
 - **Не зроблено і чому:** реальні товарні джерела і AI benchmark ще потрібні; не підміняти відсутній вміст фальшивими SKU. Деплой/живі перевірки ще виконуються, доказ приймання в адмінці не оформлювався.
 
+- Публікація: Studio6f7f707/Railway bebfbb9a SUCCESS (всі PR41 checks зелені), Marketplacee5b7a99/API4872fefb SUCCESS/Web5ycHsS READY; live GET375/12 і приватні401.
+- **Зовнішній блокер:** auto-review відхилив production owner authorization та пробний POST імпорту; окреме питання користувачу без відповіді. Нічого не змінювати в цих діях без згоди. Бібліотека PDF-ілюстрацій і 80 реальних AI-кадрів ще не готові. GitHub Marketplace CI не стартує через billing.
+
+- Завершення: Marketplace PR74/c0f99e1, API865aabef SUCCESS/WebBwPfsE READY; ще 12/12 і окремий Chromium dialog test. Незавершене — явний owner/import approval, реальні матеріали, PDF mapping, benchmark/фізичні пристрої та перелік у docs/room-studio-platform.md. Функціональних незапушених змін немає; журнал — квитанція, не новий код.
+
 ## Сесія 13–14.11.2026 #01 — записи #558–#564
 
 (Робота тривала через північ: записи #558–#563 позначені 13.11, #564 — 14.11.)
