@@ -6,7 +6,7 @@ export function constructorCard(p: any): FurnitureProduct {
   return {
     ...blankFurnitureProduct(),
     id: "CP-" + p.id,
-    sku: "CP-" + p.id.slice(0, 12),
+    sku: p.details.publicAttributes?.sku || "CP-" + p.id.slice(0, 12),
     name: p.details.title,
     teaser: p.details.summary || p.details.description.slice(0, 300),
     description: p.details.description,

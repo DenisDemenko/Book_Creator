@@ -71,6 +71,7 @@ export async function saveConstructorCard(req: Request, p: FurnitureProduct) {
         commercial: source.commercial,
         publicAttributes: Object.fromEntries(
           [
+            "sku",
             "material",
             "finish",
             "warranty",
