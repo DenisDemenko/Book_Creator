@@ -19,8 +19,17 @@ import { countLive, orderByShelf, shelfState } from './adminOs/shelfState';
  * для цього тут зʼявилась кнопка «Додати виріб» і редактор картки виробу.
  */
 
-/** Рядок вітрини — той самий, що віддає `/api/admin/marketplace-bridge/books`. */
+/**
+ * Рядок вітрини. Основне джерело — `/api/admin/marketplace-bridge/listings`
+ * (УВЕСЬ каталог: книги, курси, вироби й те, що завели в самому маркетплейсі).
+ * Якщо вітрина ще без цього маршруту, лишається старий `/books`, і тоді рядок
+ * приходить без `id` та `listingKind`.
+ */
 interface ShelfRow {
+  /** id лістинга в маркетплейсі; без нього знімаємо за `externalId`, як раніше. */
+  id?: string | null;
+  /** Вид із маркетплейсу: book / course / product. */
+  listingKind?: string | null;
   externalId: string;
   slug: string;
   title: string;
@@ -65,6 +74,13 @@ const pubWhen = (at: string) => {
 const pubVersionLabel = (p: PublicationRow) =>
   p.version ? `версія ${p.version}` : `публікація №${p.publicationNo}`;
 
+/** Вид лістинга у маркетплейсі → той самий словник позначок, що й для книг Студії. */
+const MARKETPLACE_KIND: Record<string, 'digital' | 'print' | 'course' | 'product'> = {
+  book: 'digital',
+  course: 'course',
+  product: 'product',
+};
+
 const money = (priceMinor: number) =>
   priceMinor > 0 ? `${(priceMinor / 100).toLocaleString('uk-UA', { maximumFractionDigits: 2 })} ₴` : 'Безкоштовно';
 
@@ -75,6 +91,8 @@ export const AdminProductsView: React.FC = () => {
   const [pubs, setPubs] = useState<PublicationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Чому перелік неповний, коли вітрина ще без маршруту `/bridge/listings`. */
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Який саме лістинг чекає підтвердження — щоб не зняти чуже одним кліком. */
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -85,7 +103,7 @@ export const AdminProductsView: React.FC = () => {
     setError(null);
     try {
       const [shelfRes, draftRes, pubRes] = await Promise.all([
-        fetch('/api/admin/marketplace-bridge/books', { credentials: 'same-origin' }),
+        fetch('/api/admin/marketplace-bridge/listings', { credentials: 'same-origin' }),
         fetch('/api/admin/furniture-products', { credentials: 'same-origin' }),
         // Журнал читається окремо й НЕ впливає на решту: він живе в Studio, а не
         // за мостом, тож має показуватись навіть тоді, коли вітрина недоступна.
@@ -95,11 +113,46 @@ export const AdminProductsView: React.FC = () => {
       // вітрини не налаштований: це два незалежні джерела, і відмова одного
       // не має ховати інше.
       const data = await shelfRes.json().catch(() => ({}));
-      if (!shelfRes.ok) {
-        setRows(null);
-        setError(data?.error || 'Не вдалося прочитати перелік товарів.');
+      if (shelfRes.ok && Array.isArray(data.listings)) {
+        setRows(
+          data.listings.map((l: any) => ({
+            id: l.id,
+            listingKind: l.kind,
+            externalId: String(l.externalId || l.id || l.slug),
+            slug: l.slug,
+            title: l.title,
+            status: l.status,
+            priceMinor: Number(l.priceMinor) || 0,
+            sellerSlug: l.sellerSlug ?? null,
+            publishedAt: l.publishedAt ?? null,
+            hasFile: Boolean(l.hasFile),
+            fileName: null,
+            categorySlug: l.categorySlug ?? null,
+            categoryName: l.categoryName ?? null,
+          }))
+        );
+        setFallbackNote(null);
       } else {
-        setRows(Array.isArray(data.books) ? data.books : []);
+        /*
+          Студія й вітрина деплояться окремо, тож «маршруту ще немає» —
+          звичайний стан між двома деплоями, а не поломка. Тоді показуємо те,
+          що вміє старий маршрут (книги Студії), і прямо кажемо, чого в
+          переліку бракує: мовчазний короткий список і був тим, через що
+          власник не знаходив половини своїх товарів.
+        */
+        const legacy = await fetch('/api/admin/marketplace-bridge/books', { credentials: 'same-origin' });
+        const legacyData = await legacy.json().catch(() => ({}));
+        if (legacy.ok && Array.isArray(legacyData.books)) {
+          setRows(legacyData.books);
+          setFallbackNote(
+            'Вітрина ще без маршруту повного переліку — показано лише книги зі Студії. ' +
+              'Курси, вироби й товари, заведені в самому маркетплейсі, зʼявляться після його деплою.'
+          );
+        } else {
+          setRows(null);
+          setFallbackNote(null);
+          setError(data?.error || legacyData?.error || 'Не вдалося прочитати перелік товарів.');
+        }
       }
       const draftData = await draftRes.json().catch(() => ({}));
       if (draftRes.ok && Array.isArray(draftData.products)) setDrafts(draftData.products);
@@ -166,12 +219,24 @@ export const AdminProductsView: React.FC = () => {
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch('/api/admin/marketplace-bridge/unpublish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ externalId: row.externalId }),
-      });
+      /*
+        За id лістинга, коли він є: у товару, заведеного в самому
+        маркетплейсі, немає пари (джерело, externalId), якою його знаходив
+        старий маршрут, — саме тому такі товари й не знімались.
+      */
+      const res = row.id
+        ? await fetch('/api/admin/marketplace-bridge/listings/archive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ id: row.id }),
+          })
+        : await fetch('/api/admin/marketplace-bridge/unpublish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ externalId: row.externalId }),
+          });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Не вдалося зняти лістинг.');
       setNotice(`«${row.title}» знято з вітрини.`);
@@ -307,13 +372,21 @@ export const AdminProductsView: React.FC = () => {
             {rows ? `у вітрині ${liveCount} · знято ${rows.length - liveCount}` : 'те, що опубліковано зі Студії'}
           </span>
         </div>
+        {fallbackNote && (
+          <p className="mb-2 text-[11px] leading-relaxed text-amber-300/80">{fallbackNote}</p>
+        )}
         {rows === null && !error && <p className="text-xs text-slate-500">Завантаження…</p>}
         {rows?.length === 0 && <p className="text-xs text-slate-500">У вітрині порожньо.</p>}
 
         {rows && rows.length > 0 && (
           <div className="space-y-2">
             {shelfOrdered.map((row) => {
-              const { kind, id: bookId, engineId } = parseExternalId(row.externalId);
+              const parsed = parseExternalId(row.externalId);
+              // Вид із маркетплейсу точніший за розбір externalId: у товару,
+              // заведеного там, externalId може не бути взагалі.
+              const kind = MARKETPLACE_KIND[String(row.listingKind || '')] ?? parsed.kind;
+              const bookId = row.externalId || row.slug;
+              const engineId = parsed.engineId;
               const waiting = confirming === row.externalId;
               const pub = lastByExternal.get(row.externalId);
               const state = shelfState(row.status);

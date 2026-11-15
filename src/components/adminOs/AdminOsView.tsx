@@ -30,6 +30,7 @@ import { PrivateStoresPanel } from './PrivateStoresPanel';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
+import { iconForNode } from './nodeIcons';
 import { AdminPanelView } from '../AdminPanelView';
 import { AdminModerationView } from '../AdminModerationView';
 import { AdminProductsView } from '../AdminProductsView';
@@ -91,22 +92,33 @@ const NodePill: React.FC<{
   active?: boolean;
   onClick: () => void;
   compact?: boolean;
-}> = ({ node, active, onClick, compact }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    title={`${node.title} — ${node.hint}`}
-    aria-label={`${node.title}. ${node.hint}`}
-    className={`os-pill w-full focus:outline-none ${node.tone === 'danger' ? 'os-pill--danger' : ''} ${
-      active ? 'os-pill--active' : ''
-    }`}
-  >
-    <span className={`os-pill-inner flex flex-col items-center gap-0.5 px-4 text-center ${compact ? 'py-2' : 'py-3'}`}>
-      <span className={`${H} text-[11px] font-semibold uppercase tracking-[0.1em] text-[#eef6ff]`}>{node.title}</span>
-      {!compact && <span className={`${B} text-[9.5px] leading-tight text-[rgba(214,235,255,.6)]`}>{node.hint}</span>}
-    </span>
-  </button>
-);
+}> = ({ node, active, onClick, compact }) => {
+  const Icon = iconForNode(node.id);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${node.title} — ${node.hint}`}
+      aria-label={`${node.title}. ${node.hint}`}
+      className={`os-pill w-full focus:outline-none ${node.tone === 'danger' ? 'os-pill--danger' : ''} ${
+        active ? 'os-pill--active' : ''
+      }`}
+    >
+      <span className={`os-pill-inner flex flex-col items-center gap-0.5 px-4 text-center ${compact ? 'py-2' : 'py-3'}`}>
+        {/*
+          Емблема перед назвою, а не замість неї: знак упізнається швидше за
+          рядок великих літер, але сам по собі він двозначний. `aria-hidden`
+          — підпис уже є в `aria-label` кнопки, і читати його двічі зайве.
+        */}
+        <span className="flex items-center justify-center gap-1.5">
+          <Icon className="h-3.5 w-3.5 shrink-0 text-cyan-300/90" aria-hidden />
+          <span className={`${H} text-[11px] font-semibold uppercase tracking-[0.1em] text-[#eef6ff]`}>{node.title}</span>
+        </span>
+        {!compact && <span className={`${B} text-[9.5px] leading-tight text-[rgba(214,235,255,.6)]`}>{node.hint}</span>}
+      </span>
+    </button>
+  );
+};
 
 /** Плитка смуги «Памʼять і сутності» — не кнопка, а склад системи. */
 const BandTile: React.FC<{ label: string; value?: string }> = ({ label, value }) => (
@@ -574,7 +586,8 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
             <span className={`${H} text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[rgba(181,217,253,.7)]`}>
               Інспектор вузла
             </span>
-            <span className={`${H} text-[24px] font-semibold uppercase leading-[1.05] tracking-[0.03em] text-white`}>
+            <span className={`${H} flex items-center gap-2 text-[24px] font-semibold uppercase leading-[1.05] tracking-[0.03em] text-white`}>
+              {React.createElement(iconForNode(active.id), { className: 'h-6 w-6 shrink-0 text-cyan-300' })}
               {active.title}
             </span>
             <p className={`${B} text-[11.5px] leading-[1.5] text-[rgba(214,235,255,.62)]`}>{active.description}</p>

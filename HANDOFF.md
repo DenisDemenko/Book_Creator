@@ -814,5 +814,7 @@ Caption», а не статус деплою.
 «Управління товарами» → «Реферальні посилання зі знижкою») і перевірити його живим кошиком.
 
 
-## Приймання й робота — Codex 15.11.2026 #03, Room Studio #569
-AGENTS/HANDOFF і реальні origin перевірено. Власні worktree /workspace/book-room-platform та /workspace/fusion-room-platform, гілка feat/room-studio-platform. Studio origin/master 308cbac (#568) інтегрований без втрати чужих публікаційних змін. Нова передача не є доказом push/deploy. Реалізація/перевірки/межі — #569; Marketplace docs/room-studio-platform.md. Немає реального 20×4 AI benchmark або повного каталогу перевірених матеріалів; strict-режим залишається закритим без них. Наступний крок поточної сесії — закінчити перевірки, коміт/push/деплой у дозволеному власником обсязі, записати реальні SHA/статуси і прибрати тільки власний tmp/session.lock.
+## Приймання й робота — Codex 15.11.2026 #03, Room Studio #570
+AGENTS/HANDOFF і реальні origin перевірено. Власні worktree /workspace/book-room-platform та /workspace/fusion-room-platform, гілка feat/room-studio-platform. Studio origin/master 308cbac (#568) інтегрований без втрати чужих публікаційних змін. Нова передача не є доказом push/deploy. Реалізація/перевірки/межі — #570; Marketplace docs/room-studio-platform.md. Немає реального 20×4 AI benchmark або повного каталогу перевірених матеріалів; strict-режим залишається закритим без них. Наступний крок поточної сесії — закінчити перевірки, коміт/push/деплой у дозволеному власником обсязі, записати реальні SHA/статуси і прибрати тільки власний tmp/session.lock.
+
+Під час злиття прийнято новий origin/master a2dd5af: чужий запис #569 та адмінські зміни збережені, наш Room Studio перенумеровано у #570. Автоматична перевірка відхилила production CONSTRUCTOR_OWNER_EMAIL; чекає окремого підтвердження власника, налаштування не змінене.

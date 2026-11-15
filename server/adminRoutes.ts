@@ -77,6 +77,8 @@ import {
   readBridgeSettings,
   testBridgeConnection,
   listBridgeBooks,
+  listBridgeListings,
+  archiveBridgeListing,
   listBridgeCategories,
   assertFreePriceConfirmed,
   cleanCategorySlug,
@@ -1389,6 +1391,32 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Не вдалося прочитати перелік.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * УВЕСЬ ПЕРЕЛІК ВІТРИНИ — книги, курси, вироби й те, що завели в самому
+   * маркетплейсі. `/books` вище лишається вузьким навмисно: ним користується
+   * форма публікації, і їй потрібні саме книги Студії.
+   */
+  app.get('/api/admin/marketplace-bridge/listings', requireAdmin, async (_req, res) => {
+    try {
+      res.json({ listings: await listBridgeListings() });
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося прочитати перелік вітрини.', kind: err?.kind });
+    }
+  });
+
+  /** Зняти з вітрини будь-який лістинг за його id. Архів, не видалення. */
+  app.post('/api/admin/marketplace-bridge/listings/archive', requireAdmin, async (req, res) => {
+    const id = String(req.body?.id || '').trim();
+    if (!id) return res.status(400).json({ error: 'Не вказано id лістинга.', kind: 'bad_input' });
+    try {
+      res.json(await archiveBridgeListing(id));
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 500;
+      res.status(status).json({ error: err?.message || 'Не вдалося зняти лістинг.', kind: err?.kind });
     }
   });
 
