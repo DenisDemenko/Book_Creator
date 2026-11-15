@@ -158,7 +158,8 @@ console.log('✓ saved table quotes: independent axes, zero and legacy fallback,
 
 // ---- шаблони дизайну: ті самі теми, що й у книг Студії
 const templates = listDrawingsTemplates();
-assert.equal(templates.length, 17, 'усі дизайн-теми книг');
+assert.equal(templates.length, 18, 'усі дизайн-теми книг, включно з опублікованою Skyfy');
+assert.equal(resolveDrawingsTemplate('skyfy'), 'skyfy', 'каталог зберігає тему для креслень');
 assert.ok(templates.every((t) => t.id && t.label && t.description), 'кожен шаблон має назву й опис');
 assert.equal(templates.filter((t) => t.default).length, 1);
 assert.equal(templates.find((t) => t.default)!.id, DEFAULT_DRAWINGS_TEMPLATE);
