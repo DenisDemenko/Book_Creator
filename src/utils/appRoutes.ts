@@ -123,6 +123,16 @@ export function parseAppPath(pathname: string, base = ''): AppRoute | null {
     const tab = parts[2] && (GRAPH_STUDIO_TABS as readonly string[]).includes(parts[2]) ? (parts[2] as GraphStudioTab) : 'workflows';
     return { projectId: '', tab: 'graph-studio', graphTab: tab };
   }
+  /*
+    Гола /admin — вхід в адмінпанель без книги.
+
+    Потрібна тому, що зовні (меню маркетплейсу) книги ніхто не знає, а
+    `/projects/<книга>/admin` без справжнього id відкриває не ту книгу або
+    створює порожню. Вкладка «Адмінпанель» вмісту книги не показує
+    (`TABS_WITHOUT_OPEN_BOOK`), тож їй книга й не потрібна: лишається активна,
+    а адреса підлаштується під неї, як і для /admin/graph-studio вище.
+  */
+  if (parts[0] === 'admin' && parts.length === 1) return { projectId: '', tab: 'admin' };
   if (parts[0] !== 'projects' || !parts[1] || !ID_RE.test(parts[1])) return null;
   const projectId = parts[1];
   const page = parts[2];

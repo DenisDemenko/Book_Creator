@@ -63,6 +63,15 @@ t('невідома вкладка — процеси ШІ', parseAppPath('/admi
 t('побудова адреси не залежить від книги', buildAppPath({ projectId: 'BK-1', tab: 'graph-studio', graphTab: 'versions' }, '/studio') === '/studio/admin/graph-studio/versions');
 t('інші /admin/… — не наші', parseAppPath('/admin/other') === null);
 
+console.log('\nГола /admin — вхід в адмінпанель без книги:');
+// Меню маркетплейсу не знає, яка книга відкрита в Студії, а вкладка
+// «Адмінпанель» вмісту книги й не показує. Без цього маршруту зовнішнє
+// посилання мусило б вигадувати id книги — і відкривало б чужу або порожню.
+t('адреса без книги відкриває адмінпанель', eq(parseAppPath('/admin'), { projectId: '', tab: 'admin' }));
+t('те саме з префіксом Студії', eq(parseAppPath('/studio/admin', '/studio'), { projectId: '', tab: 'admin' }));
+t('скісна в кінці не заважає', eq(parseAppPath('/studio/admin/', '/studio'), { projectId: '', tab: 'admin' }));
+t('graph-studio лишився окремим маршрутом', parseAppPath('/studio/admin/graph-studio', '/studio')?.tab === 'graph-studio');
+
 t('creative access — прямий URL з префіксом', parseCreativeAccessPath('/studio/creative/access/project-1','/studio')==='project-1');
 t('creative access — інший префікс закрито', parseCreativeAccessPath('/other/creative/access/project-1','/studio')===null);
 t('creative access — небезпечний id закрито', parseCreativeAccessPath('/creative/access/..%2Fsecret')===null);
