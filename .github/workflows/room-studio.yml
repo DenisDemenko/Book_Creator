@@ -1,0 +1,16 @@
+name: Room Studio bridge
+on:
+  pull_request:
+  push:
+    branches: [master]
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:room-studio

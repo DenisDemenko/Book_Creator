@@ -570,6 +570,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           тоді, коли він не знає, де що шукати, тож вона мусить бути видима
           без жодної прокрутки. У згорнутому сайдбарі лишається іконка. */}
       <div className="border-t border-white/[0.06] p-2 pb-0">
+        <a href="https://www.fusionlab.in.ua/room-studio" target="_blank" rel="noreferrer" className="w-full flex items-center gap-2 py-2 px-3 rounded-lg text-slate-400 hover:text-cyan-200 text-xs font-semibold" title="Fusion Room Studio"><Compass className="w-4 h-4 shrink-0"/>{!collapsed&&<span>3D Інтер’єр</span>}</a>
         <button
           id="sidebar-help-btn"
           onClick={onOpenHelp}

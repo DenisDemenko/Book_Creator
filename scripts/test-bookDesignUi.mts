@@ -15,14 +15,15 @@ const expectedThemeIds = [
   'classic', 'modern-fiction', 'sci-fi', 'fantasy', 'dark-fantasy',
   'thriller', 'noir-detective', 'romance', 'poetry-literary', 'non-fiction',
   'academic-research', 'business-premium', 'children', 'graphic-story',
-  'experimental-art', 'studio-classic', 'studio-editorial',
+  'experimental-art', 'studio-classic', 'studio-editorial', 'skyfy',
 ];
 const actualThemeIds = BOOK_DESIGN_THEME_CARDS.map((theme) => theme.id);
 assert.deepEqual([...actualThemeIds].sort(), [...expectedThemeIds].sort(), 'Gallery must keep the complete built-in theme catalog.');
 assert.equal(new Set(actualThemeIds).size, actualThemeIds.length, 'Built-in theme ids must remain unique.');
 assert.equal(BOOK_DESIGN_THEME_CARDS.find((theme) => theme.id === 'studio-classic')?.novaDesignTheme, 'classic');
 assert.equal(BOOK_DESIGN_THEME_CARDS.find((theme) => theme.id === 'studio-editorial')?.novaDesignTheme, 'editorial');
-console.log('  ✓ all 17 built-in themes stay available, including both Studio export mappings');
+assert.equal(BOOK_DESIGN_THEME_CARDS.find((theme) => theme.id === 'skyfy')?.category, 'visual', 'Published interior catalog theme remains available in visual themes.');
+console.log('  ✓ all 18 built-in themes stay available, including both Studio export mappings');
 
 assert.match(gallery, /type StudioMode = 'author' \| 'designer'/);
 assert.match(gallery, />Автор<\/button>/);

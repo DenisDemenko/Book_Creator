@@ -812,3 +812,13 @@ Caption», а не статус деплою.
 Відкривати через дашборд → «Відкрити книгу». Порожню книгу не прибирав.
 НАСТУПНИЙ КРОК. Запитати у власника відсоток знижки, створити посилання в адмінці (Адмінпанель →
 «Управління товарами» → «Реферальні посилання зі знижкою») і перевірити його живим кошиком.
+
+
+## Приймання й робота — Codex 15.11.2026 #03, Room Studio #570
+AGENTS/HANDOFF і реальні origin перевірено. Власні worktree /workspace/book-room-platform та /workspace/fusion-room-platform, гілка feat/room-studio-platform. Studio origin/master 308cbac (#568) інтегрований без втрати чужих публікаційних змін. Нова передача не є доказом push/deploy. Реалізація/перевірки/межі — #570; Marketplace docs/room-studio-platform.md. Немає реального 20×4 AI benchmark або повного каталогу перевірених матеріалів; strict-режим залишається закритим без них. Наступний крок поточної сесії — закінчити перевірки, коміт/push/деплой у дозволеному власником обсязі, записати реальні SHA/статуси і прибрати тільки власний tmp/session.lock.
+
+Під час злиття прийнято новий origin/master a2dd5af: чужий запис #569 та адмінські зміни збережені, наш Room Studio перенумеровано у #570. Автоматична перевірка відхилила production CONSTRUCTOR_OWNER_EMAIL; чекає окремого підтвердження власника, налаштування не змінене.
+
+Реліз #570: Studio PR41/master6f7f707 + Railway bebfbb9a SUCCESS; усі PR checks успішні. Marketplace PR73/master e5b7a99 + API4872fefb SUCCESS/Vercel5ycHsS READY, міграція підтверджена runtime; 375/12, приватні GET401. Блокер owner env та live import — явна автоматична відмова, згоду користувача ще не одержано. Не обходити її підстановкою owner у код/Docker або прямими записами в БД. Повний PDF і фото ще не імпортовані, strict model benchmark не проведений. Фінальна невелика правка назв стилів/повноти capture/ізоляції діалогу між кімнатами — fix/room-style-capture у Marketplace, підтвердження SHA/деплою додамо після приймання.
+
+Підсумок #570: фінальна правка Marketplace PR74/master c0f99e1 опублікована, API865aabef SUCCESS і WebBwPfsE READY, 12/12 + окремий Chromium dialog test. Згода на production CONSTRUCTOR_OWNER_EMAIL=tropazemli@gmail.com і повний PDF import ще НЕ отримана. Це перший наступний крок тільки після відповіді користувача; до того читання/планування працює, style_reference=0. Для strict AI потрібні справжні SKU-фото/карти, UV review і 80 реальних benchmark кадрів. Документація незавершеного: Marketplace docs/room-studio-platform.md. Lock тільки цієї сесії прибирається після пуша квитанції. Серверне приймання в адмінці не оформлювали, чужі файли/сесії не змінювали.
