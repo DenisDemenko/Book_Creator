@@ -172,6 +172,62 @@ console.log('\nЖивий бінарник: що експортер справд
   }
 }
 
+console.log('\nПорожній хвіст після ілюстрацій');
+if (!cli) {
+  skip('обсяг перераховується після вставлення картинок', 'бінарника немає');
+} else {
+  /*
+    Під кожну ілюстрацію рукопис везе службовий проміжок із порожніх рядків —
+    місце, у яке потім стане картинка. Доки обсяг рахувався ДО заміни, у кінці
+    книги лишалися аркуші, виділені під цей резерв: на каталозі 375 стилів
+    текст закінчувався на 107-й сторінці, а аркушів було 119.
+
+    Три картинки по 28 резервних рядків — це понад дві сторінки резерву на
+    кілька абзаців тексту, тож без другого проходу хвіст буде видно.
+  */
+  const dot =
+    'data:image/png;base64,' +
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const withImages: any = {
+    id: 'TAIL-TEST',
+    title: 'Перевірка хвоста',
+    author: 'Fusion Lab Studio',
+    illustrations: [1, 2, 3].map((n) => ({ id: `ill-${n}`, url: dot, caption: `Кадр ${n}` })),
+    chapters: [
+      {
+        id: 'c1',
+        order: 1,
+        title: 'Розділ перший',
+        sections: [
+          {
+            id: 's1',
+            order: 1,
+            title: 'Кадри',
+            content:
+              'Короткий абзац перед кадрами.\n\n[IMG: ill-1 "Кадр один" wrap=none]\n\n' +
+              '[IMG: ill-2 "Кадр два" wrap=none]\n\n[IMG: ill-3 "Кадр три" wrap=none]\n\nКороткий абзац після.',
+          },
+        ],
+      },
+    ],
+  };
+
+  const out = await designcraftEngineV3.render({
+    book: withImages,
+    kind: 'book',
+    spec: { pdfExport: { ...DEFAULT_LAYOUT_SPEC.pdfExport } } as never,
+    print: false,
+    ownerId: null,
+    ownerRole: 'admin',
+  });
+  const notes = out.notesUk.join(' | ');
+  const allocated = Number(/первинно виділено (\d+)/.exec(notes)?.[1] || 0);
+
+  t('усі три кадри вставлено', /3 ілюстрацій перевірено/.test(notes), notes.slice(0, 160));
+  t('другий прохід відбувся й сказав про себе', /Порожній хвіст після вставлення ілюстрацій прибрано/.test(notes), notes.slice(0, 200));
+  t('аркушів менше, ніж виділяв резерв', allocated > 0 && out.pageCount < allocated, `${out.pageCount} з ${allocated}`);
+}
+
 console.log(`\nDesignCraft export: ${pass} пройдено, ${fail} провалено${skipped ? `, ${skipped} пропущено` : ''}.`);
 if (skipped) console.log('  Пропущене НЕ покрито: без бінарника поведінка експортера не перевіряється, лише побудова параметрів.');
 if (fail > 0) process.exit(1);

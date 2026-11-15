@@ -812,6 +812,41 @@ async function renderInSession(request: PdfRenderRequest, specIn: PdfLayoutSpec)
       if (!accepted) {
         throw new PdfEngineError('designcraft', 'engine', 'Ілюстрації спричинили overset навіть після автоматичного зменшення.');
       }
+
+      /*
+        ОБСЯГ ПЕРЕРАХОВУЄТЬСЯ ПІСЛЯ КАРТИНОК, А НЕ ДО НИХ.
+
+        Під кожну ілюстрацію рукопис везе службовий проміжок із
+        `IMAGE_RESERVE_LINES` порожніх рядків — місце, у яке потім стане
+        прикріплена картинка. Бінарний пошук вище рахував сторінки САМЕ для
+        цього роздутого тексту, а далі `story.replaceRange` викидав усі
+        резервні рядки й ставив замість них картинку, яка займає менше. Обсяг
+        документа при цьому не змінювався — і хвіст лишався порожнім.
+
+        На каталозі 375 стилів це 31 ілюстрація по 28 рядків: текст
+        закінчувався на 109-й сторінці, а в PDF їх було 122. Тринадцять
+        порожніх аркушів поїхали покупцеві (скарга власника 15.11.2026).
+
+        Другий прохід шукає мінімум уже для справжнього тексту з картинками.
+        Межа згори — те, що вийшло з першого проходу: більшим обсяг стати не
+        може, бо картинки менші за резерв, який вони заміщають.
+      */
+      const tightened = await minimizePagesInSession(session, story, bodyPage, minimized.pageCount);
+      if (tightened.pageCount < minimized.pageCount) {
+        notesUk.push(
+          `Порожній хвіст після вставлення ілюстрацій прибрано: ${minimized.pageCount} → ${tightened.pageCount} стор.`
+        );
+        minimized.pageCount = tightened.pageCount;
+        // Корінець KDP залежить від обсягу. Менший обсяг вимагає не більшого
+        // корінця, ніж уже узгоджений, тож прохід завершиться одразу — але
+        // примітка про узгодження має називати справжнє число сторінок.
+        if (kdp) {
+          const agreed = { pageCount: minimized.pageCount, spec, gutterMm: kdp.gutterMm };
+          await agreeKdpGutter(session, request, specIn, story, agreed, notesPrint);
+          spec = agreed.spec;
+          minimized.pageCount = agreed.pageCount;
+        }
+      }
     }
 
     const frontPages = Array.from({ length: bodyPage - 1 }, (_, i) => i);
@@ -1036,6 +1071,33 @@ export const designcraftEngineV3: PdfEngine = {
           }
         }
         if (!accepted) throw new PdfEngineError('designcraft', 'engine', 'Ілюстрації спричинили overset навіть після автоматичного зменшення.');
+
+        /*
+          ОБСЯГ ПЕРЕРАХОВУЄТЬСЯ ПІСЛЯ КАРТИНОК, А НЕ ДО НИХ.
+
+          Під кожну ілюстрацію рукопис везе службовий проміжок із
+          `IMAGE_RESERVE_LINES` порожніх рядків — місце, у яке стане
+          прикріплена картинка. Пошук мінімуму вище рахував сторінки саме для
+          цього роздутого тексту, а `story.replaceRange` далі викидав резервні
+          рядки й ставив картинку, яка займає менше. Обсяг документа при цьому
+          не змінювався — і хвіст лишався порожнім.
+
+          На каталозі 375 стилів це 31 ілюстрація по 28 рядків: текст
+          закінчувався на 107-й сторінці, а аркушів було 119, тобто дванадцять
+          порожніх поїхали покупцеві (скарга власника 15.11.2026).
+
+          Другий прохід шукає мінімум уже для справжнього тексту з картинками.
+          Межа згори — результат першого проходу: більшим обсяг стати не може,
+          бо картинка менша за резерв, який вона заміщає.
+        */
+        const tightened = await minimizePages(workDir, contentDoc, story, bodyPage, minimized.pageCount, 'images');
+        if (tightened.pageCount < minimized.pageCount) {
+          notesUk.push(
+            `Порожній хвіст після вставлення ілюстрацій прибрано: ${minimized.pageCount} → ${tightened.pageCount} стор.`
+          );
+          minimized.pageCount = tightened.pageCount;
+          contentDoc = tightened.doc;
+        }
       }
 
       const companion = companionSteps(spec, request, workDir);
