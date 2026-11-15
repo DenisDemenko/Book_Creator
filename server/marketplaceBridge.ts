@@ -987,6 +987,119 @@ async function bridgePromoFetch(
   }
 }
 
+/**
+ * УСЯ ВІТРИНА, А НЕ ЛИШЕ ТЕ, ЩО ШТОВХНУЛА СТУДІЯ.
+ *
+ * `listBridgeBooks` питає `/bridge/books`, а той фільтрує лістинги за своїм
+ * джерелом — тобто показує самі книги Студії. Для форми публікації це
+ * правильна відповідь, для адміністратора — ні: у вітрині стоять ще курси,
+ * фізичні вироби й усе, що завели в самому маркетплейсі, і жодного з них не
+ * було видно в «Управлінні товарами». Власник бачив у вітрині товари, яких
+ * адмінка не перелічувала й не давала зняти (скарга 15.11.2026).
+ */
+export interface BridgeListingRow {
+  id: string;
+  slug: string;
+  title: string;
+  kind: string;
+  status: string;
+  priceMinor: number;
+  currency?: string | null;
+  stock?: number | null;
+  sellerSlug: string | null;
+  sellerName?: string | null;
+  categorySlug: string | null;
+  categoryName: string | null;
+  externalSource: string | null;
+  externalId: string | null;
+  publishedAt: string | null;
+  hasFile: boolean;
+}
+
+async function bridgeListingFetch(
+  path: string,
+  method: 'GET' | 'DELETE',
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<unknown> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}${path}`, {
+      method,
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  const text = await response.text().catch(() => '');
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  // Студія й вітрина деплояться окремо, тож «маршруту ще немає» — звичайний
+  // стан, а не поломка. Кажемо прямо, що лікується деплоєм вітрини.
+  if (response.status === 404 && method === 'GET') {
+    throw new MarketplaceBridgeError(
+      'Вітрина ще не вміє віддавати повний перелік через міст: розгорніть маркетплейс із маршрутом /bridge/listings.',
+      'rejected',
+      502
+    );
+  }
+  if (response.status === 404) {
+    throw new MarketplaceBridgeError('Такого лістинга у вітрині немає.', 'rejected', 404);
+  }
+  if (!response.ok) {
+    throw new MarketplaceBridgeError(
+      `Маркетплейс відхилив запит: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new MarketplaceBridgeError('Маркетплейс відповів не JSON.', 'rejected', 502);
+  }
+}
+
+export async function listBridgeListings(
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<BridgeListingRow[]> {
+  const body = (await bridgeListingFetch('/bridge/listings', 'GET', deps)) as {
+    listings?: unknown;
+  } | null;
+  return Array.isArray(body?.listings) ? (body!.listings as BridgeListingRow[]) : [];
+}
+
+/** Зняття з вітрини за id лістинга: у створеного в маркетплейсі товару externalId немає. */
+export async function archiveBridgeListing(
+  id: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<{ archived: boolean; slug: string | null; alreadyArchived: boolean }> {
+  const body = (await bridgeListingFetch(
+    `/bridge/listings/${encodeURIComponent(id)}`,
+    'DELETE',
+    deps
+  )) as { archived?: unknown; slug?: unknown; alreadyArchived?: unknown } | null;
+  return {
+    archived: Boolean(body?.archived),
+    slug: typeof body?.slug === 'string' ? body.slug : null,
+    alreadyArchived: Boolean(body?.alreadyArchived),
+  };
+}
+
 export async function listBridgePromoCodes(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<BridgePromoCode[]> {

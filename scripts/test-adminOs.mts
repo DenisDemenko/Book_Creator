@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const { ADMIN_NODES, ENTITY_BAND, findNode } = await import('../src/components/adminOs/nodes');
+const { iconForNode, hasOwnIcon } = await import('../src/components/adminOs/nodeIcons');
 
 let pass = 0;
 let fail = 0;
@@ -127,6 +128,20 @@ console.log('\nСмуга «Памʼять і сутності»:');
   for (const expected of ['users', 'books', 'subscriptions', 'payments', 'keys', 'prompts', 'usage', 'listings']) {
     t(`плитка «${expected}» має джерело даних на екрані`, new RegExp(`\\n\\s*${expected}: stats\\.`).test(ADMIN_OS));
   }
+}
+
+console.log('\nЕмблеми вузлів');
+{
+  // Вузол без емблеми не ламає збірку — він просто виглядає як діра поруч із
+  // сусідами. Тому повнота перевіряється тут, а не оком.
+  const without = ADMIN_NODES.filter((n: any) => !hasOwnIcon(n.id)).map((n: any) => n.id);
+  t('у кожного вузла карти є власна емблема', without.length === 0, without.join(', '));
+  const spare = iconForNode('такого-вузла-немає');
+  t('невідомий id дістає запасну, а не порожнечу', Boolean(spare) && spare === iconForNode('і-такого-теж'));
+  t('запасна не підміняє справжню', spare !== iconForNode('providers'));
+  t('емблема стоїть у пігулці карти', ADMIN_OS.includes('iconForNode(node.id)'));
+  t('та сама емблема — у заголовку інспектора', ADMIN_OS.includes('iconForNode(active.id)'));
+  t('емблему сховано від читалки екрана', /Icon className=[^>]*aria-hidden/.test(ADMIN_OS));
 }
 
 console.log(`\nРезультат: ${pass} пройшло, ${fail} впало.`);

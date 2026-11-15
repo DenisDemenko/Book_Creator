@@ -204,5 +204,28 @@ console.log('\nСтан лістинга видно, і знятий не вда
   t('знятому лістингу кнопки зняття не дають', view.includes('!state.live ?') && view.includes('у вітрині немає'));
 }
 
+console.log('\nУ переліку вся вітрина, а не лише книги Студії');
+{
+  // `/bridge/books` фільтрує лістинги за джерелом Студії, тож курси, вироби
+  // й товари, заведені в самому маркетплейсі, в адмінку не потрапляли зовсім
+  // — власник бачив їх у вітрині й не мав чим зняти (скарга 15.11.2026).
+  t('адмінка просить повний перелік', view.includes("'/api/admin/marketplace-bridge/listings'"));
+  t('старий маршрут лишився запасним', view.includes("'/api/admin/marketplace-bridge/books'"));
+  t('неповний перелік супроводжується поясненням', view.includes('setFallbackNote(') && view.includes('лише книги зі Студії'));
+  t('зняття йде за id лістинга', view.includes("'/api/admin/marketplace-bridge/listings/archive'"));
+  t('без id лишається старий шлях за externalId', view.includes('row.id') && view.includes("'/api/admin/marketplace-bridge/unpublish'"));
+  t('вид беремо з маркетплейсу, а не лише з externalId', view.includes('MARKETPLACE_KIND'));
+
+  const routes = src('server/adminRoutes.ts');
+  t('маршрут повного переліку є і лише для адміна', routes.includes("app.get('/api/admin/marketplace-bridge/listings', requireAdmin"));
+  t('маршрут архівування є і лише для адміна', routes.includes("app.post('/api/admin/marketplace-bridge/listings/archive', requireAdmin"));
+  t('без id архівування відмовляє', routes.includes("'Не вказано id лістинга.'"));
+
+  const bridge = src('server/marketplaceBridge.ts');
+  t('міст уміє читати весь перелік', bridge.includes("bridgeListingFetch('/bridge/listings', 'GET'"));
+  t('міст уміє архівувати за id', bridge.includes('export async function archiveBridgeListing'));
+  t('відсутній маршрут вітрини пояснюється деплоєм', bridge.includes('розгорніть маркетплейс із маршрутом /bridge/listings'));
+}
+
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail) process.exit(1);
