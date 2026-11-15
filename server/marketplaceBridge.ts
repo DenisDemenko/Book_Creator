@@ -1100,6 +1100,60 @@ export async function archiveBridgeListing(
   };
 }
 
+/**
+ * Файл лістинга — байтами, щоб адміністратор міг його відкрити.
+ *
+ * Повертаємо саму відповідь, а не буфер: PDF каталогу важить мегабайти, і
+ * тримати його цілком у памʼяті Студії лише для того, щоб переслати далі,
+ * марно. Маршрут Студії переливає потік у свою відповідь.
+ */
+export async function openBridgeListingFile(
+  id: string,
+  deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
+): Promise<Response> {
+  const settings = deps.settings ?? (await readBridgeSettings());
+  const doFetch = deps.fetch ?? fetch;
+
+  let response: Response;
+  try {
+    response = await doFetch(`${settings.url}/bridge/listings/${encodeURIComponent(id)}/file`, {
+      headers: { 'x-bridge-key': settings.key },
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (err: any) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс не відповідає — перевірте адресу API мосту.',
+      'unreachable',
+      502,
+      err?.message
+    );
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new MarketplaceBridgeError(
+      'Маркетплейс відхилив ключ мосту. Звірте BRIDGE_API_KEY з обох боків.',
+      'unauthorized',
+      401
+    );
+  }
+  if (response.status === 404) {
+    throw new MarketplaceBridgeError(
+      'Файла до цього лістинга у вітрині немає (або вітрина ще без маршруту /bridge/listings/:id/file).',
+      'rejected',
+      404
+    );
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new MarketplaceBridgeError(
+      `Маркетплейс не віддав файл: ${describeRejection(response.status, text)}`,
+      'rejected',
+      502
+    );
+  }
+  return response;
+}
+
 export async function listBridgePromoCodes(
   deps: { fetch?: typeof fetch; settings?: BridgeSettings } = {}
 ): Promise<BridgePromoCode[]> {

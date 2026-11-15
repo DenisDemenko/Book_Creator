@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AdminReferralLinksPanel } from './AdminReferralLinksPanel';
-import { AlertTriangle, Ban, CheckCircle2, Info, Package, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, FileText, Info, Package, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { FurnitureProductEditor } from './adminOs/FurnitureProductEditor';
 import type { FurnitureProduct } from './adminOs/furnitureProduct';
 import { KIND_LABELS, parseExternalId } from './adminOs/externalId';
@@ -438,6 +438,30 @@ export const AdminProductsView: React.FC = () => {
                   >
                     {pub ? `${pubVersionLabel(pub)} · ${pubWhen(pub.at)}` : 'версія невідома'}
                   </span>
+
+                  {/*
+                    ПОДИВИТИСЬ, ЩО САМЕ ЛЕЖИТЬ У ВІТРИНІ.
+
+                    Файл лістинга закритий правом покупки: адміністратор, який
+                    нічого не купував, не міг відкрити власний опублікований PDF
+                    інакше ніж купивши його або діставши з сховища руками. Тут
+                    він іде через міст під ключем — і відкривається в сусідній
+                    вкладці переглядачем браузера, а не падає в «Завантаження».
+
+                    Кнопки немає там, де немає файла: курс чи виріб без
+                    вкладення нічим показувати.
+                  */}
+                  {row.hasFile && row.id && (
+                    <a
+                      href={`/api/admin/marketplace-bridge/listings/${encodeURIComponent(row.id)}/file`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-sky-500/20 border border-slate-700 hover:border-sky-500/40 text-slate-300 hover:text-sky-300 text-[11px] font-semibold shrink-0"
+                      title={`Відкрити файл лістинга «${row.title}» у новій вкладці`}
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Переглянути PDF
+                    </a>
+                  )}
 
                   {!state.live ? (
                     // Знятий лістинг знімати нічим. Кнопка, яка нічого не

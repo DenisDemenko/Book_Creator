@@ -227,5 +227,24 @@ console.log('\nУ переліку вся вітрина, а не лише кн�
   t('відсутній маршрут вітрини пояснюється деплоєм', bridge.includes('розгорніть маркетплейс із маршрутом /bridge/listings'));
 }
 
+console.log('\nАдміністратор відкриває файл лістинга');
+{
+  // Файл закритий правом покупки, тож без цього шляху адміністратор не міг
+  // подивитись власний опублікований PDF інакше ніж купивши його.
+  t('кнопка веде на маршрут файла', view.includes('/api/admin/marketplace-bridge/listings/${encodeURIComponent(row.id)}/file'));
+  t('кнопка підписана зрозуміло', view.includes('Переглянути PDF'));
+  t('відкривається в сусідній вкладці', view.includes('target="_blank"') && view.includes('rel="noopener noreferrer"'));
+  t('без файла кнопки немає', view.includes('{row.hasFile && row.id && ('));
+
+  const routes = src('server/adminRoutes.ts');
+  t('маршрут файла є і лише для адміна', routes.includes("app.get('/api/admin/marketplace-bridge/listings/:id/file', requireAdmin"));
+  t('тип і назва приходять із вітрини', routes.includes("'content-type', 'content-length', 'content-disposition'"));
+
+  const bridge = src('server/marketplaceBridge.ts');
+  t('міст уміє відкривати файл', bridge.includes('export async function openBridgeListingFile'));
+  t('ключ сховища не їде в Студію', bridge.includes('/bridge/listings/${encodeURIComponent(id)}/file'));
+  t('окремо пояснюється відсутність файла', bridge.includes('Файла до цього лістинга у вітрині немає'));
+}
+
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail) process.exit(1);

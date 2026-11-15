@@ -78,6 +78,7 @@ import {
   testBridgeConnection,
   listBridgeBooks,
   listBridgeListings,
+  openBridgeListingFile,
   archiveBridgeListing,
   listBridgeCategories,
   assertFreePriceConfirmed,
@@ -1405,6 +1406,28 @@ export function registerAdminRoutes(app: Express): void {
     } catch (err: any) {
       const status = err instanceof MarketplaceBridgeError ? err.status : 502;
       res.status(status).json({ error: err?.message || 'Не вдалося прочитати перелік вітрини.', kind: err?.kind });
+    }
+  });
+
+  /**
+   * Файл лістинга для перегляду адміністратором.
+   *
+   * Переливаємо потік, а не віддаємо посилання на сховище: ключ сховища не
+   * має залишати маркетплейс, а ключ мосту — Студію. Браузер відкриває PDF
+   * у переглядачі, бо `Content-Disposition: inline` приходить із вітрини.
+   */
+  app.get('/api/admin/marketplace-bridge/listings/:id/file', requireAdmin, async (req, res) => {
+    try {
+      const upstream = await openBridgeListingFile(String(req.params.id));
+      for (const header of ['content-type', 'content-length', 'content-disposition']) {
+        const value = upstream.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+      const body = Buffer.from(await upstream.arrayBuffer());
+      res.end(body);
+    } catch (err: any) {
+      const status = err instanceof MarketplaceBridgeError ? err.status : 502;
+      res.status(status).json({ error: err?.message || 'Не вдалося відкрити файл.', kind: err?.kind });
     }
   });
 
