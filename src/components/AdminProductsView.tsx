@@ -4,6 +4,7 @@ import { AlertTriangle, Ban, CheckCircle2, Info, Package, Pencil, Plus, RefreshC
 import { FurnitureProductEditor } from './adminOs/FurnitureProductEditor';
 import type { FurnitureProduct } from './adminOs/furnitureProduct';
 import { KIND_LABELS, parseExternalId } from './adminOs/externalId';
+import { countLive, orderByShelf, shelfState } from './adminOs/shelfState';
 
 /**
  * «Управління товарами» — що зараз стоїть у вітрині маркетплейсу.
@@ -157,6 +158,9 @@ export const AdminProductsView: React.FC = () => {
     if (pr.status === 'ok' && pr.externalId && !lastByExternal.has(pr.externalId)) lastByExternal.set(pr.externalId, pr);
   }
 
+  const liveCount = countLive(rows || []);
+  const shelfOrdered = orderByShelf(rows || []);
+
   const remove = async (row: ShelfRow) => {
     setBusy(true);
     setError(null);
@@ -298,22 +302,27 @@ export const AdminProductsView: React.FC = () => {
 
       <div className="rounded-2xl bg-slate-900/60 border border-white/[0.06] p-5">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">У вітрині (книги й курси)</h4>
-          <span className="text-[10px] text-slate-500">те, що опубліковано зі Студії</span>
+          <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Книги й курси у вітрині</h4>
+          <span className="text-[10px] text-slate-500">
+            {rows ? `у вітрині ${liveCount} · знято ${rows.length - liveCount}` : 'те, що опубліковано зі Студії'}
+          </span>
         </div>
         {rows === null && !error && <p className="text-xs text-slate-500">Завантаження…</p>}
         {rows?.length === 0 && <p className="text-xs text-slate-500">У вітрині порожньо.</p>}
 
         {rows && rows.length > 0 && (
           <div className="space-y-2">
-            {rows.map((row) => {
+            {shelfOrdered.map((row) => {
               const { kind, id: bookId, engineId } = parseExternalId(row.externalId);
               const waiting = confirming === row.externalId;
               const pub = lastByExternal.get(row.externalId);
+              const state = shelfState(row.status);
               return (
                 <div
                   key={row.externalId}
-                  className="flex items-center gap-3 rounded-xl bg-slate-950/50 border border-slate-800 p-3 flex-wrap"
+                  className={`flex items-center gap-3 rounded-xl border p-3 flex-wrap ${
+                    state.live ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-950/20 border-slate-800/60 opacity-60'
+                  }`}
                 >
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 bg-slate-800 text-slate-300 border-slate-700">
                     {KIND_LABELS[kind]}
@@ -338,7 +347,16 @@ export const AdminProductsView: React.FC = () => {
                   >
                     {row.hasFile ? 'Файл є' : 'Без файла'}
                   </span>
-                  <span className="text-[10px] text-slate-500 shrink-0">{row.status}</span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${
+                      state.live
+                        ? 'bg-sky-500/10 text-sky-300 border-sky-500/30'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                    title={`Стан у маркетплейсі: ${row.status}`}
+                  >
+                    {state.label}
+                  </span>
                   {/* Версія й дата з журналу Studio (#554), а не з вітрини: там `publishedAt`
                       ставиться один раз, при створенні лістинга, і далі не змінюється. */}
                   <span
@@ -348,7 +366,13 @@ export const AdminProductsView: React.FC = () => {
                     {pub ? `${pubVersionLabel(pub)} · ${pubWhen(pub.at)}` : 'версія невідома'}
                   </span>
 
-                  {waiting ? (
+                  {!state.live ? (
+                    // Знятий лістинг знімати нічим. Кнопка, яка нічого не
+                    // робить, і була тим, що власник читав як поламану.
+                    <span className="text-[10px] text-slate-500 shrink-0">
+                      у вітрині немає · повертають публікацією зі Студії
+                    </span>
+                  ) : waiting ? (
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         onClick={() => void remove(row)}

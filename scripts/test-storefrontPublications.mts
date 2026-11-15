@@ -21,6 +21,7 @@ process.env.DATA_DIR = DIR;
 process.env.DATABASE_PATH = `${DIR}/nova-studio.db`;
 
 import fs from 'node:fs';
+import { countLive, orderByShelf, shelfState } from '../src/components/adminOs/shelfState';
 fs.rmSync(DIR, { recursive: true, force: true });
 fs.mkdirSync(DIR, { recursive: true });
 
@@ -175,6 +176,33 @@ t('журнал показано окремим розділом', view.includes
 t('у рядку вітрини видно версію й дату', view.includes('pubVersionLabel(pub)') && view.includes('pubWhen(pub.at)'));
 t('невдалі спроби видно в адмінці', view.includes("'Не вдалося'"));
 t('відмова журналу не ховає решти переліку', view.includes('if (pubRes.ok && Array.isArray(pubData.publications))'));
+
+console.log('\nСтан лістинга видно, і знятий не вдає живого');
+{
+  t('опубліковане читається як «у вітрині»', shelfState('published').label === 'у вітрині' && shelfState('published').live);
+  t('archived читається як «знято з вітрини»', shelfState('archived').label === 'знято з вітрини');
+  t('знятий лістинг не вважається живим', shelfState('archived').live === false);
+  t('регістр і проміжки не ламають розбір', shelfState('  ARCHIVED ').live === false);
+  // Невідомий стан лишається живим навмисно: інакше новий стан маркетплейсу
+  // тихо забрав би єдину кнопку, якою товар знімають із вітрини.
+  t('невідомий стан лишає кнопку зняття', shelfState('whatever').live === true);
+  t('порожній стан не друкує порожнечу', shelfState('').label === 'невідомо');
+
+  const sample = [
+    { status: 'archived', id: 'a' },
+    { status: 'published', id: 'b' },
+    { status: 'archived', id: 'c' },
+    { status: 'active', id: 'd' },
+  ];
+  t('рахуються лише ті, що справді у вітрині', countLive(sample) === 2);
+  t('живі підіймаються вгору', orderByShelf(sample).map((r) => r.id).join('') === 'bdac');
+  t('порядок усередині групи збережено', orderByShelf(sample).slice(2).map((r) => r.id).join('') === 'ac');
+  t('початковий масив не змінено', sample.map((r) => r.id).join('') === 'abcd');
+
+  t('адмінка бере правила зі спільного модуля', view.includes("from './adminOs/shelfState'"));
+  t('у рядку стоїть підпис стану, а не сире поле', view.includes('{state.label}') && !view.includes('>{row.status}<'));
+  t('знятому лістингу кнопки зняття не дають', view.includes('!state.live ?') && view.includes('у вітрині немає'));
+}
 
 console.log(`\nПідсумок: ${pass} пройшло, ${fail} впало`);
 if (fail) process.exit(1);
