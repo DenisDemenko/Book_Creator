@@ -44,9 +44,9 @@ const expectedBookThemeIds = [
   'classic', 'modern-fiction', 'sci-fi', 'fantasy', 'dark-fantasy',
   'thriller', 'noir-detective', 'romance', 'poetry-literary', 'non-fiction',
   'academic-research', 'business-premium', 'children', 'graphic-story',
-  'experimental-art', 'studio-classic', 'studio-editorial',
+  'experimental-art', 'studio-classic', 'studio-editorial', 'skyfy',
 ];
-assert.deepEqual([...bookThemeIds].sort(), [...expectedBookThemeIds].sort(), 'educational templates must preserve all 17 built-in book themes');
+assert.deepEqual([...bookThemeIds].sort(), [...expectedBookThemeIds].sort(), 'educational templates must preserve all 18 built-in book themes');
 assert.equal(bookThemeIds.size, BOOK_DESIGN_THEME_CARDS.length, 'book theme ids must remain unique');
 assert(EDUCATIONAL_PDF_TEMPLATES.every((template) => !bookThemeIds.has(template.id as BookDesignThemeId)), 'educational template ids must remain separate from book theme ids');
 
