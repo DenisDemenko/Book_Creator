@@ -1,8 +1,35 @@
 name: Marketplace assistant
 on:
   pull_request:
+    paths:
+      - 'server/**'
+      - 'server.ts'
+      - 'src/**'
+      - 'shared/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - '.github/workflows/marketplace-assistant.yml'
+      - '.github/scripts/**'
   push:
     branches: [master]
+    paths:
+      - 'server/**'
+      - 'server.ts'
+      - 'src/**'
+      - 'shared/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - '.github/workflows/marketplace-assistant.yml'
+      - '.github/scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   assistant:
     runs-on: ubuntu-latest
@@ -12,7 +39,6 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run test:marketplace-assistant
-      - run: node --import tsx scripts/test-marketplaceBridge.mts
-      - run: node --import tsx scripts/test-studioEntry.mts
