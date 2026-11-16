@@ -822,3 +822,26 @@ AGENTS/HANDOFF і реальні origin перевірено. Власні workt
 Реліз #570: Studio PR41/master6f7f707 + Railway bebfbb9a SUCCESS; усі PR checks успішні. Marketplace PR73/master e5b7a99 + API4872fefb SUCCESS/Vercel5ycHsS READY, міграція підтверджена runtime; 375/12, приватні GET401. Блокер owner env та live import — явна автоматична відмова, згоду користувача ще не одержано. Не обходити її підстановкою owner у код/Docker або прямими записами в БД. Повний PDF і фото ще не імпортовані, strict model benchmark не проведений. Фінальна невелика правка назв стилів/повноти capture/ізоляції діалогу між кімнатами — fix/room-style-capture у Marketplace, підтвердження SHA/деплою додамо після приймання.
 
 Підсумок #570: фінальна правка Marketplace PR74/master c0f99e1 опублікована, API865aabef SUCCESS і WebBwPfsE READY, 12/12 + окремий Chromium dialog test. Згода на production CONSTRUCTOR_OWNER_EMAIL=tropazemli@gmail.com і повний PDF import ще НЕ отримана. Це перший наступний крок тільки після відповіді користувача; до того читання/планування працює, style_reference=0. Для strict AI потрібні справжні SKU-фото/карти, UV review і 80 реальних benchmark кадрів. Документація незавершеного: Marketplace docs/room-studio-platform.md. Lock тільки цієї сесії прибирається після пуша квитанції. Серверне приймання в адмінці не оформлювали, чужі файли/сесії не змінювали.
+
+## CI маркетплейсу — Claude Opus 5, 16.11.2026 (сесія 15.11 #02)
+- Робота велась у `D:\Rama\Fusion-Lab-Marketplaes-version`, гілка
+  `claude/referral-promo-2`; Студія — `D:\Rama\gf-studio-local`, гілка
+  `claude/scan-vision-failover`.
+- Добу червоних прогонів GitHub Actions пояснює банер самого GitHub: «The job
+  was not started because recent account payments have failed or your spending
+  limit needs to be increased». Код не виконувався, прогони тривали 3–4 с.
+  Повний розбір — запис журналу #575.
+- Запушено `070ddb7` у master маркетплейсу: concurrency з cancel-in-progress
+  (крім master), paths-ignore на документацію, room-шляхи для
+  fusion-room-browser, злиття чотирьох завдань `ci.yml` в одне `evidence`,
+  кеш бінарників LibreDWG.
+- Паралельна сесія злила PR #77 поверх і переписала ці ж файли. На master
+  тепер її версія; мого `evidence` немає, `cancel-in-progress: true` без
+  умови — прогони master обриваються наступним пушем.
+- Перевірено: `Furniture CAD #68` і `Fusion Room Studio #79` — успіх;
+  `CI #454` скасовано посеред роботи; `CI #458` (чужий, `3310eac`) — успіх
+  22 хв 11 с.
+- Не зроблено: не вимірював, чи їхня схема дешевша за мою; не відновлював
+  захист master від скасування — це рішення власника, бо зачіпає чужу роботу.
+- Журнал Студії (`log.md`, `log/301-350.md`) закомічено локально і **не
+  запушено**: пуш Студії власник не просив.
