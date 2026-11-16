@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-Поточний release #575: власник дозволив commit/push/deploy 16.11.2026; гілка `chore/ci-efficiency-room-clearance`. Коміт CI буде зазначено після створення; remote/deploy поки не підтверджені.
+Release #575: функціональні зміни запушено й розгорнуто. Studio PR42/master `a3df233` → Railway `207aea4c` SUCCESS; Marketplace PR77/master `80c9d8e` → Railway API `0fa7e66b` SUCCESS / Vercel `F2p4EiHK` READY. Нових незапушених змін коду немає; поточний коміт — лише квитанція журналу. Перевірки/межі — #575; після push квитанції звірити remote SHA, без повторного runtime-деплою.
 
 
 15.11 #570 Room Studio: функціональний код запушено й опубліковано — Studio PR41/master `6f7f707`, Railway bebfbb9a SUCCESS; Marketplace PR73/74/master `c0f99e1`, API865aabef SUCCESS/WebBwPfsE READY. Усі 8 PR41 перевірок зелені. Функціональних незапушених змін немає; поточний коміт — лише файлова квитанція. Ціль push квитанції: origin/master Book_Creator, без force. Owner env і PDF import не змінені після auto-review відмови, згода користувача ще потрібна. Джерела/перевірки/залишок — #570.

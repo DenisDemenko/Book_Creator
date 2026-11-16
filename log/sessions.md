@@ -3938,3 +3938,5 @@ Codex, #545: BD-контракт, приватні PDF ліжок у Книга�
 ## Журнал сесій · 16.11.2026 #01 · CI та Room Studio
 - Запис #575: локальна оптимізація CI двох репозиторіїв, geometry clearance Room Studio, перевірки й патчі.
 - Не зроблено і чому: commit/push/deploy потребують прямого прохання за AGENTS; production імпорт/owner env і AI benchmark не виконані, реальних матеріалів немає. Повний набір виробничих/мобільних приймальних тестів ще потрібний.
+
+Release #575 завершено після прямого дозволу власника: Studio PR42/a3df233 + Railway207aea4c SUCCESS; Marketplace PR77/80c9d8e + API0fa7e66b SUCCESS/WebF2p4EiHK READY. Перевірки коду пройшли, один flaky constructor job пройшов після адресного повтору без зміни очікувань. Live page/new JS/health/styles/401 перевірені. Незавершені вимоги ТЗ перелічено в #575; paid AI, owner env та PDF import не виконувалися.
