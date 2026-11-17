@@ -3959,3 +3959,10 @@ Release #575 завершено після прямого дозволу вла�
 - Прийнято AGENTS/HANDOFF, origin Book_Creator, master 13ff4bc після синхронізації; власний lock geohome-room-source.
 - Зроблено: read-only джерело GeoHome через міст, перевірки чинного тарифу/власника/версії та суміжний адаптер оболонки Marketplace. Перевірки й межі — #577.
 - **Не зроблено і чому:** кілька поверхів, кімнатні перегородки й товарні матеріали оболонки — окремі етапи; реальні paid AI/FPS/content QA не виконуються тестовими fixtures. Випуск #577 завершено: Studio PR43/f64d5a9/Railwayf7f838f6 SUCCESS; Marketplace PR81/db848b4/APIbdb2edd8 SUCCESS/Web33Q3S9q READY. CI й live read-only smoke успішні, журнали без application errors. Точний authenticated production import з реальною передплатою, paid AI і фізичний FPS не перевірені.
+
+
+## Сесія 17.11.2026 #02 — Codex, перегородки/перекриття GeoHome, запис #578
+- Зроблено: перегородки ground/upper, реальний наявний настил/балки/атріум, серверний вибір рівня, окремі кімнати, колізії/історія/план/PDF/GLB. Studio runtime незмінний.
+- Перевірки: 146 native, 31 Room HTTP/PostgreSQL/browser, дев’ять CI selection; типи/lint/build; native browser і 390px.
+- Випуск: Marketplace PR83/master `5634d9c70ccb2d1728e92887ded5c771f517f979`; API Railway `3478fe4e-01a5-4103-a02a-1b1fc11a9aec` SUCCESS; Web Vercel `dpl_9qPfrbRWjmno1mhrU8F8yWH2Xkon` READY, обидва exact source SHA. CI44178486010, browser44178485629, CAD44178485746 успішні. Live read-only smoke: сторінки200, нові room/native JS-маркери рівнів і перегородок, health200, приватні GET401, source bridge403, styles375/12. Production проєкти/товари/замовлення не створювались; платних AI не було.
+- **Не зроблено і чому:** сходи/перехід між рівнями, балкони, іменовані зони, конструктив/сертифікація, затверджені матеріали/SKU, реальний AI/FPS benchmark — наступні етапи. Production owner-env/PDF import не змінені, production content/paid AI немає.
