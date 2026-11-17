@@ -2,8 +2,24 @@ name: Gate B DesignCraft
 
 on:
   pull_request:
-    branches: [master]
+    paths:
+      - 'server/**'
+      - 'server.ts'
+      - 'src/**'
+      - 'shared/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - 'Dockerfile'
+      - '.github/workflows/gate-b-designcraft.yml'
+      - '.github/scripts/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gate-b:
@@ -22,10 +38,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
+      - uses: actions/cache@v4
+        id: designcraft
+        with:
+          path: /tmp/designcraft
+          key: designcraft-0.7.1-ubuntu22-${{ runner.arch }}-05a2b253-v1
       - name: Install pinned DesignCraft CLI
+        if: steps.designcraft.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -35,15 +58,14 @@ jobs:
           echo "05a2b2531f6f26746b4a743081fd00f9ea77822fa178663802a0eaeced6c1437  /tmp/designcraft.tar.gz" | sha256sum -c -
           mkdir -p /tmp/designcraft
           tar -xzf /tmp/designcraft.tar.gz --strip-components=1 -C /tmp/designcraft
+      - name: Verify DesignCraft CLI and shim
+        run: |
           chmod +x ./scripts/designcraft-cli-compat.sh
           "$DESIGNCRAFT_REAL_PATH" --version
           "$DESIGNCRAFT_PATH" --version
 
       - name: Table AI bridge, wallet and provider input contracts
         run: node scripts/test-tableAiBilling.mjs
-
-      - name: TypeScript
-        run: npm run lint
 
       - name: Cabinet facade inventory and photo calibration
         env:

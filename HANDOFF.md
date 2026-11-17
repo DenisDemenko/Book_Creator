@@ -823,6 +823,21 @@ AGENTS/HANDOFF і реальні origin перевірено. Власні workt
 
 Підсумок #570: фінальна правка Marketplace PR74/master c0f99e1 опублікована, API865aabef SUCCESS і WebBwPfsE READY, 12/12 + окремий Chromium dialog test. Згода на production CONSTRUCTOR_OWNER_EMAIL=tropazemli@gmail.com і повний PDF import ще НЕ отримана. Це перший наступний крок тільки після відповіді користувача; до того читання/планування працює, style_reference=0. Для strict AI потрібні справжні SKU-фото/карти, UV review і 80 реальних benchmark кадрів. Документація незавершеного: Marketplace docs/room-studio-platform.md. Lock тільки цієї сесії прибирається після пуша квитанції. Серверне приймання в адмінці не оформлювали, чужі файли/сесії не змінювали.
 
+## Приймання й продовження — Codex 16.11.2026 #01, запис #575
+Звірено AGENTS/HANDOFF, origin, чисті нові клони та відсутність session.lock перед початком. Studio база 02c2c1e; Marketplace 443ca62. Власні гілки chore/ci-efficiency-room-clearance. Локальні зміни: workflow paths/if/concurrency/cache/dedup, класифікатор з тестами; у Marketplace — зіткнення зі схилами, headroom прогулянки, рекомендація door landing, UI/browser тести. Перевірки й межі — #575 та Marketplace docs/ci-efficiency.md. Комітів/push/PR/деплою немає. Раніше відхилені owner-env і live PDF import не виконувалися; не обходити. Дуги відкривання, загальні правила проходів, реальні SKU-матеріали й AI benchmark залишаються відкритими. Наступне: перегляд патчів, публікація за прямим дозволом, звірка required checks та Actions. Серверний журнал/адмінку не змінювали. Лок знімається наприкінці цієї сесії.
+
+Публікація #575 дозволена власником наступним повідомленням «коміт, пуш та деплой». Поточна сесія виконує release. Marketplace master синхронізовано з 070ddb7; збережено паралельний evidence/cache рефакторинг. Production owner env/PDF import не входять у цей release.
+
+
+**Квитанція release #575 — 16.11.2026.**
+- Studio: код `868b7e6`, PR42 merged у master `a3df2334b3d99e4123a1c09ab26eac51648b0f36`. Усі 9 PR checks пройшли, включно з повним validate (8m09s). Railway `207aea4c-da82-4992-9ea7-4c04093f24d4` SUCCESS, source commit a3df233.
+- Marketplace: код `cc07c20`, інтеграція паралельного CI `36b3793`, PR77 merged у master `80c9d8e1d3d19eeb753c8a0ca9de2206d3674801`; збережено паралельні 0b90b07 і 3310eac без відкату. CI integration, Room API/browser, CAD native і production image пройшли. constructor-checks спочатку впав через timeout очікування #parts tr у bed-settings; той самий тест пройшов локально й у master. Повтор лише job (без зміни тестів/допусків) пройшов, фінальний build gate зелений. Застарілі власні запуски 43825776737/43825776795 скасовані.
+- Railway API `0fa7e66b-3195-4131-9cb8-8cba017c8ee7` SUCCESS; Vercel `dpl_F2p4EiHKPqyEQA3zSPNW7oyehBE1` READY; обидва для 80c9d8e. Preview було заблоковано політикою доступу автора до Vercel, production після звичайного merge власником зібрався штатно; жодного обходу/зміни прав не робили.
+- Live: /room-studio 200, у 16 публічних JS bundles присутні slope-clearance/door-clearance/900 мм; API і Studio /api/health 200; styles 375/12; приватні rooms без авторизації 401. Vercel error/fatal scan точного deployment за останні 10 хв не знайшов записів. Це коротке smoke-приймання, а не гарантія всіх авторизованих production сценаріїв.
+- Не виконано: production owner env/PDF import, платний AI benchmark, повна кінематика дверей/шаф і загальні правила проходів. Дозвіл на release не використано як дозвіл на ці окремі зміни. Увесь ТЗ завершеним не оголошується.
+
+Функціональні зміни запушено й розгорнуто. Цей документаційний коміт — квитанція; він не змінює застосунок. Наступне: продовжити незавершені вимоги ТЗ з реальними каталогами/матеріалами та погодженим джерелом PDF. Власний lock прибирається перед завершенням.
+
 ## CI маркетплейсу — Claude Opus 5, 16.11.2026 (сесія 15.11 #02)
 - Робота велась у `D:\Rama\Fusion-Lab-Marketplaes-version`, гілка
   `claude/referral-promo-2`; Студія — `D:\Rama\gf-studio-local`, гілка
@@ -830,7 +845,7 @@ AGENTS/HANDOFF і реальні origin перевірено. Власні workt
 - Добу червоних прогонів GitHub Actions пояснює банер самого GitHub: «The job
   was not started because recent account payments have failed or your spending
   limit needs to be increased». Код не виконувався, прогони тривали 3–4 с.
-  Повний розбір — запис журналу #575.
+  Повний розбір — запис журналу #576 (писався як #575; той номер зайняла паралельна сесія).
 - Запушено `070ddb7` у master маркетплейсу: concurrency з cancel-in-progress
   (крім master), paths-ignore на документацію, room-шляхи для
   fusion-room-browser, злиття чотирьох завдань `ci.yml` в одне `evidence`,
@@ -851,5 +866,5 @@ AGENTS/HANDOFF і реальні origin перевірено. Власні workt
   захист не доведений — що другий пуш у master не обриває перший, покаже лише
   перша пара справжніх комітів поспіль (штучних пушів заради перевірки не
   робив).
-- Журнал Студії (`log.md`, `log/301-350.md`) закомічено локально і **не
-  запушено**: пуш Студії власник не просив.
+- Журнал Студії запушено на прохання власника у `bookcreator/master` разом
+  зі злиттям чужого #575; незапушеного в цій роботі не лишилось.

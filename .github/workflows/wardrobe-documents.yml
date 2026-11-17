@@ -1,8 +1,39 @@
 name: Wardrobe documents
 on:
   pull_request:
+    paths:
+      - 'server/**'
+      - 'server.ts'
+      - 'src/**'
+      - 'shared/**'
+      - 'public/wardrobe-studio/**'
+      - 'public/bed-studio/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - '.github/workflows/wardrobe-documents.yml'
+      - '.github/scripts/**'
   push:
     branches: [master]
+    paths:
+      - 'server/**'
+      - 'server.ts'
+      - 'src/**'
+      - 'shared/**'
+      - 'public/wardrobe-studio/**'
+      - 'public/bed-studio/**'
+      - 'scripts/**'
+      - 'package*.json'
+      - '.github/workflows/wardrobe-documents.yml'
+      - '.github/scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   documents:
     runs-on: ubuntu-latest
@@ -13,8 +44,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm run lint
       - run: npm run build
       - run: node --import tsx scripts/test-wardrobeDocuments.mts --browser
         env:
@@ -29,6 +60,7 @@ jobs:
         with:
           name: wardrobe-documents
           path: ${{ runner.temp }}/wardrobe-documents
+          retention-days: 7
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
@@ -36,4 +68,5 @@ jobs:
         with:
           name: bed-documents
           path: ${{ runner.temp }}/bed-documents
+          retention-days: 7
           if-no-files-found: ignore

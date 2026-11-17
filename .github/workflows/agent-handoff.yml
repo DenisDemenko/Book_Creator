@@ -1,9 +1,11 @@
 name: Agent handoff validation
 on:
-  push:
-    branches: [docs/agent-session-handoff-2026-10-20]
   pull_request:
     paths:
+      - 'package*.json'
+      - '.github/scripts/**'
+      - 'scripts/test-agentCompanion.mjs'
+      - 'scripts/agent-companion*'
       - 'server/agent*'
       - 'server/*History*'
       - 'server/githubHistory.ts'
@@ -20,6 +22,10 @@ on:
       - '.github/workflows/agent-handoff.yml'
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   companion:
     strategy:
@@ -45,11 +51,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npx tsx scripts/test-agentHandoff.mts
       - run: npx tsx scripts/test-githubHistory.mts
       - run: npx tsx scripts/test-githubWorkspace.mts
-      - run: npx tsx scripts/test-adminOs.mts
       - run: npm run lint
       - run: npm run journal:check
-      - run: npm run build
