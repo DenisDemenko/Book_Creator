@@ -868,3 +868,11 @@ AGENTS/HANDOFF і реальні origin перевірено. Власні workt
   робив).
 - Журнал Студії запушено на прохання власника у `bookcreator/master` разом
   зі злиттям чужого #575; незапушеного в цій роботі не лишилось.
+
+
+### Приймання — Codex, 17.11.2026, geohome-room-source
+Перевірено чистий стан, відсутність session.lock, origin DenisDemenko/Book_Creator і master b8dadd5 перед синхронізацією. Старі записи передачі не є квитанцією поточного деплою. Завдання: захищене читання власних версій GeoHome для Room Studio; політика активного Pro/Ultra зберігається. Робота у feat/geohome-room-source, без зміни production env/контенту.
+
+
+### Продовження #577 — Codex, GeoHome Room Studio
+Середовище відновлено, зміни збережено. Локально 68 GeoHome HTTP/SQLite + 9 bridge, tsc і build успішні; Marketplace 28 Room + 65 native geometry, PDF/GLB/mobile. Гілки feat/geohome-room-source та feat/room-geohome-interior. Не виконано: багаторівневий адаптер, окремі кімнати/перегородки, SKU-покриття, справжній paid AI benchmark/physical FPS. Push/deploy дозволений власником, але цей запис ще не квитанція hosting.

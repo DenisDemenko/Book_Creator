@@ -6,6 +6,13 @@ import { resolve, basename } from "node:path";
 import { readBridgeSettings } from "./marketplaceBridge";
 import { findUserByFirebaseUid } from "./store";
 import { resolveSubscription } from "./subscriptions";
+import { geoHomeAccess } from "./geohome/routes";
+import {
+  GeoHomeError,
+  initGeoHomeStore,
+  listProjects,
+  readProject,
+} from "./geohome/store";
 import { getDb, isAvailable } from "./db";
 import { listEngines, GENERATED_DIR } from "./imageGeneration";
 import { priceForImage } from "./pricing";
@@ -104,6 +111,36 @@ export function registerRoomStudioBridge(
           status: "completed",
           ...(await storedImage(JSON.parse(job.result), user.id)),
         });
+      }
+      if (action === "geohome-projects" || action === "geohome-project") {
+        // Preserve GeoHome's active Pro/Ultra rule, including for administrators.
+        if (!geoHomeAccess(sub))
+          return res
+            .status(403)
+            .json({
+              error:
+                "Проєкти GeoHome доступні за чинною передплатою Pro або Ultra.",
+            });
+        initGeoHomeStore();
+        if (action === "geohome-projects")
+          return res.json({ projects: listProjects(user.id) });
+        const { projectId, version } = req.body;
+        if (
+          typeof projectId !== "string" ||
+          !/^[a-zA-Z0-9-]{16,80}$/.test(projectId) ||
+          !Number.isInteger(version) ||
+          version < 1
+        )
+          return res
+            .status(400)
+            .json({ error: "Оберіть конкретну версію власного купола." });
+        try {
+          return res.json(readProject(user.id, projectId, version));
+        } catch (error) {
+          if (error instanceof GeoHomeError)
+            return res.status(error.status).json({ error: error.message });
+          throw error;
+        }
       }
       if (!["quote", "generate"].includes(action))
         return res.status(404).json({ error: "Невідома дія." });

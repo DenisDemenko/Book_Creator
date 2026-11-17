@@ -5,13 +5,17 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'studio-geohome-'));
 process.env.DATA_DIR=temp;process.env.DATABASE_PATH=path.join(temp,'test.db');
+process.env.USER_API_KEY_SECRET='geohome-room-fixture-secret-32-characters';
 const {initStore,saveUser,upsertSubscription,createSession}=await import('../server/store.ts');
 const {attachPrincipal}=await import('../server/auth.ts');
 const {registerGeoHomeRoutes}=await import('../server/geohome/routes.ts');
+const {registerRoomStudioBridge}=await import('../server/roomStudioBridge.ts');
+const {saveBridgeSettings}=await import('../server/marketplaceBridge.ts');
 const {getDb}=await import('../server/db.ts');
 const {default:express}=await import('express');
 const {default:JSZip}=await import('jszip');
 await initStore();
+await saveBridgeSettings({url:'http://localhost:39999',key:'fixture-room-bridge'});
 const until=new Date(Date.now()+86400000).toISOString(),now=new Date().toISOString();
 for(const [id,plan,status,end] of [
  ['pro','pro','active',until],['ultra','ultra','active',until],['free','free','active',until],
@@ -23,10 +27,12 @@ for(const [id,plan,status,end] of [
  await createSession({token:'session-'+id,userId:id,createdAt:now,expiresAt:until});
 }
 const app=express();app.use(express.json({limit:'10mb'}));app.use(attachPrincipal);registerGeoHomeRoutes(app);
+registerRoomStudioBridge(app);
 const server=app.listen(0,'127.0.0.1');await new Promise<void>(resolve=>server.once('listening',resolve));
 const port=(server.address() as {port:number}).port;
 const headers=(id:string)=>({'Content-Type':'application/json',Cookie:'nova_session=session-'+id,'X-GeoHome-Client':'marketplace-v1','X-GeoHome-Uid':'uid-'+id});
 const request=(id:string,route:string,body?:object,method?:string,custom?:Record<string,string>)=>fetch(`http://127.0.0.1:${port}/api/geohome`+route,{headers:custom??headers(id),method:method??(body?'POST':'GET'),body:body?JSON.stringify(body):undefined});
+const bridge=(id:string,action:string,body:object={},key='fixture-room-bridge')=>fetch(`http://127.0.0.1:${port}/api/room-studio/bridge/`+action,{method:'POST',headers:{'Content-Type':'application/json','X-Bridge-Key':key},body:JSON.stringify({...body,firebaseUid:'uid-'+id})});
 const pkg={schema:'fusion.geohome.project',version:1,units:'mm',settings:{params:{diameter:8000,height:4000,frequency:3,cutType:'1/2'},beamProfile:{},connectorParams:{},sheathingParams:{},windowParams:{},doorParams:{},solarParams:{},innerSheathingParams:{},displayLayers:{},windowFaceIds:[],doorFaceIds:[],solarFaceIds:[],fabricStripFaceIds:[]},model:{nodes:[{id:1,position:{x:0,y:0,z:0}},{id:2,position:{x:100,y:0,z:0}},{id:3,position:{x:0,y:100,z:0}}],edges:[{id:1,start:1,end:2,length:100}],faces:[{id:1,a:1,b:2,c:3}]},cad:{schema:'geohome.kumcad.interchange',version:1,units:'mm',coordinateSystem:'right-handed-z-up',vertices:[{id:1,position:{x:0,y:0,z:0}},{id:2,position:{x:100,y:0,z:0}},{id:3,position:{x:0,y:100,z:0}}],struts:[{id:1,startVertexId:1,endVertexId:2,nominalLengthMm:100}],triangles:[{id:1,vertexIds:[1,2,3]}]}};
 const body={id:randomUUID(),requestId:randomUUID(),name:'Мій купол',baseVersion:0,package:pkg};
 let passed=0;
@@ -42,6 +48,13 @@ try{
  check('session account binding required',(await request('pro','/projects',body,'POST',{...headers('pro'),'X-GeoHome-Uid':'uid-other'})).status===403);
  let response=await request('pro','/projects',body);check('Pro can save',response.status===200);
  const saved=await response.json();check('server checksum',saved.sha256===createHash('sha256').update(JSON.stringify(pkg)).digest('hex'));
+ check('room source rejects untrusted bridge',(await bridge('pro','geohome-projects',{},'wrong')).status===403);
+ for(const id of ['free','start','team','expired','cancelled','admin'])check('room source keeps GeoHome entitlement '+id,(await bridge(id,'geohome-projects',{plan:'ultra',role:'admin'})).status===403);
+ const roomSources=await (await bridge('pro','geohome-projects')).json();check('room source lists only own project',roomSources.projects.length===1&&roomSources.projects[0].id===body.id);
+ const roomVersion=await (await bridge('pro','geohome-project',{projectId:body.id,version:1})).json();check('room source returns immutable verified package',roomVersion.sha256===saved.sha256&&JSON.stringify(roomVersion.package)===JSON.stringify(pkg));
+ check('room source isolates other active Pro',(await bridge('other','geohome-project',{projectId:body.id,version:1})).status===404);
+ check('room source requires explicit version',(await bridge('pro','geohome-project',{projectId:body.id})).status===400);
+ check('room source rejects missing version',(await bridge('pro','geohome-project',{projectId:body.id,version:999})).status===404);
  check('full settings roundtrip',JSON.stringify(saved.package)===JSON.stringify(pkg));
  check('idempotent retry',(await (await request('pro','/projects',body)).json()).version===1);
  check('reused request ID conflicts',(await request('pro','/projects',{...body,name:'Changed'})).status===409);
@@ -104,6 +117,7 @@ try{
  await upsertSubscription({userId:'pro',plan:'free',billingCycle:'monthly',status:'active',currentPeriodStart:now,currentPeriodEnd:until,createdAt:now,updatedAt:now});
  check('downgrade blocks existing CAD export',(await request('pro','/projects/'+body.id+'/cad',{version:2})).status===403);
  check('downgrade blocks cloud reads',(await request('pro','/projects/'+body.id)).status===403);
+ check('downgrade blocks Room import source',(await bridge('pro','geohome-project',{projectId:body.id,version:1})).status===403);
  check('owner can delete after downgrade',(await request('pro','/projects/'+body.id,undefined,'DELETE')).status===204);
  check('deletion removes private versions',(getDb()!.prepare('SELECT COUNT(*) AS n FROM geohome_versions WHERE project_id=?').get(body.id) as any).n===0);
  console.log(`GeoHome cloud: ${passed} checks passed.`);
