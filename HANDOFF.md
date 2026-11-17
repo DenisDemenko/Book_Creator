@@ -876,3 +876,9 @@ AGENTS/HANDOFF і реальні origin перевірено. Власні workt
 
 ### Продовження #577 — Codex, GeoHome Room Studio
 Середовище відновлено, зміни збережено. Локально 68 GeoHome HTTP/SQLite + 9 bridge, tsc і build успішні; Marketplace 28 Room + 65 native geometry, PDF/GLB/mobile. Гілки feat/geohome-room-source та feat/room-geohome-interior. Не виконано: багаторівневий адаптер, окремі кімнати/перегородки, SKU-покриття, справжній paid AI benchmark/physical FPS. Push/deploy дозволений власником, але цей запис ще не квитанція hosting.
+
+
+### Release #577 — Codex, 17.11.2026
+Studio PR43/f64d5a9 уже в Railway f7f838f6 SUCCESS, health200/bridge403. Marketplace PR81/db848b4 merged після всіх code CI; source2feb39c, збережено новий master12b5fe0 без конфліктів. API bdb2edd8 SUCCESS і Web33Q3S9q READY, source db848b4. Live сторінки200/new JS присутні, health200/приватні GET401/bridge403/styles375/12; перевірені runtime журнали без application errors. Код і квитанція пушаться звичайним fast-forward у Book_Creator; функціональних незапушених змін немає. Native131, unit345, API459+1skip; окремо Room28/Studio68+9. Збережено наявний stash і чужі untracked work artifacts. Не готові: другий поверх/балкони/сходи, перегородки/окремі кімнати, SKU-матеріали оболонки, paid AI benchmark/physical FPS. Не обходити попередні production owner-env/PDF import відмови.
+
+Наступний етап #577: погоджений інженерний адаптер рівнів/перегородок і зв’язування поверхонь купола з перевіреними Marketplace SKU. Перший поточний етап завершено. Повний production user flow з реальною передплатою/платним AI ще не тестували; owner-env/PDF import попередньо заблоковані й не змінені. Лок цієї сесії зняти тільки після перевіреного push квитанції.

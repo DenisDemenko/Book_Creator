@@ -3958,4 +3958,4 @@ Release #575 завершено після прямого дозволу вла�
 ## Сесія 17.11.2026 #01 — Codex, GeoHome Room Studio, запис #577
 - Прийнято AGENTS/HANDOFF, origin Book_Creator, master 13ff4bc після синхронізації; власний lock geohome-room-source.
 - Зроблено: read-only джерело GeoHome через міст, перевірки чинного тарифу/власника/версії та суміжний адаптер оболонки Marketplace. Перевірки й межі — #577.
-- **Не зроблено і чому:** кілька поверхів, кімнатні перегородки й товарні матеріали оболонки — окремі етапи; реальні paid AI/FPS/content QA не виконуються тестовими fixtures. CI/push/deploy ще фіксуються за фактичним результатом.
+- **Не зроблено і чому:** кілька поверхів, кімнатні перегородки й товарні матеріали оболонки — окремі етапи; реальні paid AI/FPS/content QA не виконуються тестовими fixtures. Випуск #577 завершено: Studio PR43/f64d5a9/Railwayf7f838f6 SUCCESS; Marketplace PR81/db848b4/APIbdb2edd8 SUCCESS/Web33Q3S9q READY. CI й live read-only smoke успішні, журнали без application errors. Точний authenticated production import з реальною передплатою, paid AI і фізичний FPS не перевірені.

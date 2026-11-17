@@ -121,7 +121,7 @@ remote перевірити можна, запушити — ні**.
 
 # Що не запушено (для наступної сесії)
 
-GeoHome Room Studio #577: feat/geohome-room-source — новий захищений read-only міст і тести. Власник прямо дозволив commit/push/deploy; ціль origin = DenisDemenko/Book_Creator. SHA ще буде зафіксований після коміту. Після випуску перевірити Studio/API/Web та анонімні відмови, без створення production кімнати чи платного AI.
+GeoHome Room Studio #577: функціональний код запушено й розгорнуто за прямим дозволом власника. Studio PR43/master f64d5a9 → Railway f7f838f6 SUCCESS; Marketplace PR81/master db848b4 → API bdb2edd8 SUCCESS/Web33Q3S9q READY. CI й live smoke пройшли; SHA/межі — #577 і HANDOFF. Поточний коміт — лише журнальна квитанція для звичайного fast-forward push у origin DenisDemenko/Book_Creator; незапушеного функціонального коду немає. Після push звірити remote SHA, повторний runtime deploy не потрібен.
 
 Release #575: функціональні зміни запушено й розгорнуто. Studio PR42/master `a3df233` → Railway `207aea4c` SUCCESS; Marketplace PR77/master `80c9d8e` → Railway API `0fa7e66b` SUCCESS / Vercel `F2p4EiHK` READY. Нових незапушених змін коду немає; поточний коміт — лише квитанція журналу. Перевірки/межі — #575; після push квитанції звірити remote SHA, без повторного runtime-деплою.
 
@@ -218,7 +218,7 @@ Docker-сервер власника й його телефон.
 
 | # | Назва | Статус | Файл |
 |---:|---|---|---|
-| 577 | GeoHome → Room Studio: джерело архітектури | 🚧 У роботі | [301-350.md](log/301-350.md) |
+| 577 | GeoHome → Room Studio: джерело архітектури | ✅ Опубліковано; межі в записі | [301-350.md](log/301-350.md) |
 | 576 | Червоні прогони CI маркетплейсу: завдання не запускала оплата, а не код | ✅ Зроблено | [301-350.md](log/301-350.md) |
 | 575 | Оптимізація GitHub Actions та продовження Room Studio | 🚧 У роботі | [301-350.md](log/301-350.md) |
 | 574 | 502 й помилка ШІ в адмінці: це перезапуск Студії під час деплою | ✅ Зроблено | [301-350.md](log/301-350.md) |
