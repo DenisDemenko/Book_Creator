@@ -6,7 +6,7 @@ import {resolve,basename} from 'node:path';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const source=readFileSync(new URL('../server/roomStudioBridge.ts',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
+const source=readFileSync(new URL('../server/roomStudioBridge.ts',import.meta.url),'utf8').replace(/^import[\s\S]*?;\n/gm,'').replace(/export /g,'');
 function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false}={}){
  const db=new DatabaseSync(':memory:');let handler,calls=0,price=.01,fail=false;
  const engines=Object.fromEntries(['nano-banana-2','nano-banana-pro','nano-banana-2-lite','gpt-image'].map(id=>[id,{id,label:id,modelId:'test-model',maxSize:id==='gpt-image'?'1K':'4K'}]));
