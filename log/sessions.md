@@ -3971,3 +3971,8 @@ Release #575 завершено після прямого дозволу вла�
 - Прийнято release #578, чисті копії/власний lock; виконуються сходи й прогулянка між рівнями.
 - Випуск: Marketplace PR84/master `a31f687bdb78ed01c8ab7daee211b6b104e2b939`; Railway API `d36cea3b-7bb3-4279-a662-c0736219d4cc` SUCCESS; Vercel `dpl_AKHrYqrpXaNUVjFXzeiWSWw2um2E` READY, обидва exact source SHA. CI44261190608/browser44261190637/CAD44261190671 успішні. Live read-only smoke: сторінки200, stairs/native/room JS, health200, приватні rooms/projects/levels401, source bridge403, styles375/12. Application errors у перевірених API/Web журналах не виявлено. Production content і paid AI не створювалися.
 - **Не зроблено і чому:** інженерний проріз4/4, сертифікація, меблі суміжних кімнат, іменовані зони, балкони, SKU матеріалів і реальні AI/FPS — наступні етапи.
+
+
+## Сесія 18.11.2026 #02 — Codex, примикання перегородок, запис #580
+- Прийнято AGENTS/HANDOFF, Marketplace a31f687/Studio7d16fdf, власний lock geohome-partition-fit. Реалізація/перевірки — #580. PR85/master25bcc2c: CI158 native/34 Room/345 unit/473 general API успішні, API6951f14c SUCCESS/WebCfsALnYr READY, exact SHA та live smoke09:51 перевірені.
+- **Не зроблено і чому:** engineering fixing/certification/SKU/paid AI/FPS залишаються окремими етапами. Live authenticated private import не виконувався; read-only smoke та isolated HTTP/browser перевірені. Studio runtime без змін; production content не створювалося.
