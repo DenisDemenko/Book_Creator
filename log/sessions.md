@@ -3976,3 +3976,8 @@ Release #575 завершено після прямого дозволу вла�
 ## Сесія 18.11.2026 #02 — Codex, примикання перегородок, запис #580
 - Прийнято AGENTS/HANDOFF, Marketplace a31f687/Studio7d16fdf, власний lock geohome-partition-fit. Реалізація/перевірки — #580. PR85/master25bcc2c: CI158 native/34 Room/345 unit/473 general API успішні, API6951f14c SUCCESS/WebCfsALnYr READY, exact SHA та live smoke09:51 перевірені.
 - **Не зроблено і чому:** engineering fixing/certification/SKU/paid AI/FPS залишаються окремими етапами. Live authenticated private import не виконувався; read-only smoke та isolated HTTP/browser перевірені. Studio runtime без змін; production content не створювалося.
+
+## Сесія 18.11.2026 #03 — Codex, фото плану Room Studio, запис #581
+- Звірено AGENTS, HANDOFF та production реліз примикання перегородок із #580. Реалізація й тести мосту записані в #581.
+- Book_Creator `1767b51` вийшов у production через Railway `b7489a45-928b-41c9-9476-85e2c4539904`. Пройшли локальна збірка, 10 тестів і CI мосту. Маршрути перевірені в production з очікуваними 401/403.
+- **Не зроблено і чому.** Живий виклик GPT потребує автентифікованої сесії, а спільний браузер недоступний. Імпорт у настільному Fusion не перевіряли.
