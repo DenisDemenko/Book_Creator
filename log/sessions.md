@@ -3966,3 +3966,8 @@ Release #575 завершено після прямого дозволу вла�
 - Перевірки: 146 native, 31 Room HTTP/PostgreSQL/browser, дев’ять CI selection; типи/lint/build; native browser і 390px.
 - Випуск: Marketplace PR83/master `5634d9c70ccb2d1728e92887ded5c771f517f979`; API Railway `3478fe4e-01a5-4103-a02a-1b1fc11a9aec` SUCCESS; Web Vercel `dpl_9qPfrbRWjmno1mhrU8F8yWH2Xkon` READY, обидва exact source SHA. CI44178486010, browser44178485629, CAD44178485746 успішні. Live read-only smoke: сторінки200, нові room/native JS-маркери рівнів і перегородок, health200, приватні GET401, source bridge403, styles375/12. Production проєкти/товари/замовлення не створювались; платних AI не було.
 - **Не зроблено і чому:** сходи/перехід між рівнями, балкони, іменовані зони, конструктив/сертифікація, затверджені матеріали/SKU, реальний AI/FPS benchmark — наступні етапи. Production owner-env/PDF import не змінені, production content/paid AI немає.
+
+## Сесія 18.11.2026 #01 — Codex, сходи GeoHome, запис #579
+- Прийнято release #578, чисті копії/власний lock; виконуються сходи й прогулянка між рівнями.
+- Випуск: Marketplace PR84/master `a31f687bdb78ed01c8ab7daee211b6b104e2b939`; Railway API `d36cea3b-7bb3-4279-a662-c0736219d4cc` SUCCESS; Vercel `dpl_AKHrYqrpXaNUVjFXzeiWSWw2um2E` READY, обидва exact source SHA. CI44261190608/browser44261190637/CAD44261190671 успішні. Live read-only smoke: сторінки200, stairs/native/room JS, health200, приватні rooms/projects/levels401, source bridge403, styles375/12. Application errors у перевірених API/Web журналах не виявлено. Production content і paid AI не створювалися.
+- **Не зроблено і чому:** інженерний проріз4/4, сертифікація, меблі суміжних кімнат, іменовані зони, балкони, SKU матеріалів і реальні AI/FPS — наступні етапи.
