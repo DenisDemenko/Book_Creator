@@ -9,6 +9,7 @@ process.env.USER_API_KEY_SECRET='geohome-room-fixture-secret-32-characters';
 const {initStore,saveUser,upsertSubscription,createSession}=await import('../server/store.ts');
 const {attachPrincipal}=await import('../server/auth.ts');
 const {registerGeoHomeRoutes}=await import('../server/geohome/routes.ts');
+const {saveProject}=await import('../server/geohome/store.ts');
 const {registerRoomStudioBridge}=await import('../server/roomStudioBridge.ts');
 const {saveBridgeSettings}=await import('../server/marketplaceBridge.ts');
 const {getDb}=await import('../server/db.ts');
@@ -49,7 +50,16 @@ try{
  let response=await request('pro','/projects',body);check('Pro can save',response.status===200);
  const saved=await response.json();check('server checksum',saved.sha256===createHash('sha256').update(JSON.stringify(pkg)).digest('hex'));
  check('room source rejects untrusted bridge',(await bridge('pro','geohome-projects',{},'wrong')).status===403);
- for(const id of ['free','start','team','expired','cancelled','admin'])check('room source keeps GeoHome entitlement '+id,(await bridge(id,'geohome-projects',{plan:'ultra',role:'admin'})).status===403);
+ for(const id of ['free','start','team','expired','cancelled'])check('room source keeps GeoHome entitlement '+id,(await bridge(id,'geohome-projects',{plan:'ultra',role:'admin',marketplaceAdmin:'true'})).status===403);
+ for(const [id, role] of [['admin', {}], ['free', { marketplaceAdmin: true }]] as const) {
+  const own={...body,id:randomUUID(),requestId:randomUUID()};
+  saveProject(id,own);
+  const projects=await (await bridge(id,'geohome-projects',{...role,ownerId:'pro'})).json();
+  check('admin room source lists only owned project '+id,projects.projects?.length===1&&projects.projects[0].id===own.id);
+  check('admin room source reads owned version without subscription '+id,(await bridge(id,'geohome-project',{...role,projectId:own.id,version:1})).status===200);
+  check('admin room source isolates private projects '+id,(await bridge(id,'geohome-project',{...role,projectId:body.id,version:1})).status===404);
+ }
+ check('marketplace admin flag requires bridge authentication',(await bridge('free','geohome-projects',{marketplaceAdmin:true},'wrong')).status===403);
  const roomSources=await (await bridge('pro','geohome-projects')).json();check('room source lists only own project',roomSources.projects.length===1&&roomSources.projects[0].id===body.id);
  const roomVersion=await (await bridge('pro','geohome-project',{projectId:body.id,version:1})).json();check('room source returns immutable verified package',roomVersion.sha256===saved.sha256&&JSON.stringify(roomVersion.package)===JSON.stringify(pkg));
  check('room source isolates other active Pro',(await bridge('other','geohome-project',{projectId:body.id,version:1})).status===404);
