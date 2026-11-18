@@ -83,17 +83,29 @@ export function registerRoomStudioBridge(
         return res
           .status(403)
           .json({ error: "Потрібен чинний акаунт Студії." });
-      const sub = await resolveSubscription(user.id),
-        action = String(req.params.action);
-      if (action === "recognize-plan") return await recognizeRoomPlan(req, res, user);
+      const action = String(req.params.action);
+      // The Marketplace server sets this flag from its authenticated DB role.
+      // The bridge key and the linked, enabled Studio account are checked above.
+      if (
+        action === "recognize-plan" &&
+        (user.role === "admin" || req.body.marketplaceAdmin === true)
+      ) {
+        return await recognizeRoomPlan(req, res, user);
+      }
+      const sub = await resolveSubscription(user.id);
+      const activePaidPlan =
+        sub.status === "active" &&
+        Date.parse(sub.currentPeriodEnd) > Date.now() &&
+        ["pro", "ultra"].includes(sub.plan);
+      if (action === "recognize-plan") {
+        if (!activePaidPlan)
+          return res.status(403).json({
+            error: "Розпізнавання плану ШІ доступне адміністраторам і за чинною передплатою Pro або Ultra. План можна обвести вручну.",
+          });
+        return await recognizeRoomPlan(req, res, user);
+      }
       if (action === "access")
-        return res.json({
-          plan: sub.plan,
-          active:
-            sub.status === "active" &&
-            Date.parse(sub.currentPeriodEnd) > Date.now() &&
-            ["pro", "ultra"].includes(sub.plan),
-        });
+        return res.json({ plan: sub.plan, active: activePaidPlan });
       if (action === "result") {
         const jobKey = req.body.jobKey;
         if (typeof jobKey !== "string" || !/^room:[a-f0-9-]{36}$/.test(jobKey))

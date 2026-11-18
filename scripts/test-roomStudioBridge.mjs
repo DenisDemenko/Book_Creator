@@ -8,14 +8,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const loadBridgeModule=name=>readFileSync(new URL('../server/'+name+'.ts',import.meta.url),'utf8').replace(/^import[\s\S]*?;\n/gm,'').replace(/export /g,'');
 const source=loadBridgeModule('roomPlanRecognition')+'\n'+loadBridgeModule('roomStudioBridge');
-function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false}={}){
+function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false,role='writer'}={}){
  const db=new DatabaseSync(':memory:');let handler,calls=0,visionCalls=0,price=.01,fail=false;
  const engines=Object.fromEntries(['nano-banana-2','nano-banana-pro','nano-banana-2-lite','gpt-image'].map(id=>[id,{id,label:id,modelId:'test-model',maxSize:id==='gpt-image'?'1K':'4K'}]));
  const context={Buffer,Date,console,Number,platformKeyFor:async()=> 'fixture-provider-key',
  ChatProviderError: class extends Error {},generateText:async options=>{
   visionCalls++;assert.equal(options.engine,'gpt');assert.equal(options.images[0].mimeType,'image/jpeg');assert.equal(options.req.principal.id,'studio-owner');assert.equal(options.json,true);
   return {text:JSON.stringify({outline:[[100,100],[900,100],[900,900],[100,900]],partitions:[],openings:[]})};
- },createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,supportsReferenceImages:true,maxReferenceImages:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role:'writer',disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),priceForImage:()=>price,creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.equal(p.referenceImageUrls.length,1);if(fail)throw Error('provider uncertain');return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
+ },createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,supportsReferenceImages:true,maxReferenceImages:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role,disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),priceForImage:()=>price,creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.equal(p.referenceImageUrls.length,1);if(fail)throw Error('provider uncertain');return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
  vm.createContext(context);const register=vm.runInContext(stripTypeScriptTypes(source,{mode:'transform'})+'\nregisterRoomStudioBridge',context);register({post:(_path,fn)=>{handler=fn;}});
  const request=async(action,body={},key='fixture-key')=>{let code=200,data;const res={status:v=>{code=v;return res;},json:v=>{data=v;return res;}};await handler({get:()=>key,params:{action},body:{firebaseUid:'fixture-uid',...body}},res);return {code,data};};
  return {db,request,calls:()=>calls,visionCalls:()=>visionCalls,setPrice:v=>{price=v;},setFail:()=>{fail=true;}};
@@ -40,4 +40,48 @@ test('plan recognition accepts only a bounded JPEG from the trusted marketplace'
  assert.equal(f.visionCalls(),1);
  assert.equal(f.calls(),0);
  f.db.close();
+});
+
+test('room plan recognition allows active Pro and Ultra plus verified administrators', async () => {
+  const image = '/9j/fixtureJpeg';
+  for (const [account, bridgeBody] of [
+    [{ plan: 'pro' }, {}],
+    [{ plan: 'ultra' }, {}],
+    [{ plan: 'free', role: 'admin' }, {}],
+    [{ plan: 'free' }, { marketplaceAdmin: true }],
+  ]) {
+    const f = fixture(account);
+    try {
+      assert.equal((await f.request('recognize-plan', { image, ...bridgeBody })).code, 200);
+      assert.equal(f.visionCalls(), 1);
+    } finally {
+      f.db.close();
+    }
+  }
+});
+
+test('room plan recognition denies expired, inactive, free and disabled accounts before vision', async () => {
+  const image = '/9j/fixtureJpeg';
+  for (const [account, bridgeBody] of [
+    [{ plan: 'free' }, {}],
+    [{ plan: 'pro', end: '2000-01-01' }, {}],
+    [{ plan: 'ultra', status: 'canceled' }, {}],
+    [{ plan: 'free' }, { marketplaceAdmin: 'true', role: 'admin' }],
+    [{ plan: 'free', role: 'admin', disabled: true }, { marketplaceAdmin: true }],
+  ]) {
+    const f = fixture(account);
+    try {
+      assert.equal((await f.request('recognize-plan', { image, ...bridgeBody })).code, 403);
+      assert.equal(f.visionCalls(), 0);
+    } finally {
+      f.db.close();
+    }
+  }
+  const f = fixture({ plan: 'free' });
+  try {
+    assert.equal((await f.request('recognize-plan', { image, marketplaceAdmin: true }, 'wrong')).code, 403);
+    assert.equal(f.visionCalls(), 0);
+  } finally {
+    f.db.close();
+  }
 });
