@@ -6,14 +6,19 @@ import {resolve,basename} from 'node:path';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const source=readFileSync(new URL('../server/roomStudioBridge.ts',import.meta.url),'utf8').replace(/^import[\s\S]*?;\n/gm,'').replace(/export /g,'');
+const loadBridgeModule=name=>readFileSync(new URL('../server/'+name+'.ts',import.meta.url),'utf8').replace(/^import[\s\S]*?;\n/gm,'').replace(/export /g,'');
+const source=loadBridgeModule('roomPlanRecognition')+'\n'+loadBridgeModule('roomStudioBridge');
 function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false}={}){
- const db=new DatabaseSync(':memory:');let handler,calls=0,price=.01,fail=false;
+ const db=new DatabaseSync(':memory:');let handler,calls=0,visionCalls=0,price=.01,fail=false;
  const engines=Object.fromEntries(['nano-banana-2','nano-banana-pro','nano-banana-2-lite','gpt-image'].map(id=>[id,{id,label:id,modelId:'test-model',maxSize:id==='gpt-image'?'1K':'4K'}]));
- const context={Buffer,Date,console,Number,createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,supportsReferenceImages:true,maxReferenceImages:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role:'writer',disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),priceForImage:()=>price,creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.equal(p.referenceImageUrls.length,1);if(fail)throw Error('provider uncertain');return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
+ const context={Buffer,Date,console,Number,platformKeyFor:async()=> 'fixture-provider-key',
+ ChatProviderError: class extends Error {},generateText:async options=>{
+  visionCalls++;assert.equal(options.engine,'gpt');assert.equal(options.images[0].mimeType,'image/jpeg');assert.equal(options.req.principal.id,'studio-owner');assert.equal(options.json,true);
+  return {text:JSON.stringify({outline:[[100,100],[900,100],[900,900],[100,900]],partitions:[],openings:[]})};
+ },createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,supportsReferenceImages:true,maxReferenceImages:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role:'writer',disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),priceForImage:()=>price,creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.equal(p.referenceImageUrls.length,1);if(fail)throw Error('provider uncertain');return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
  vm.createContext(context);const register=vm.runInContext(stripTypeScriptTypes(source,{mode:'transform'})+'\nregisterRoomStudioBridge',context);register({post:(_path,fn)=>{handler=fn;}});
  const request=async(action,body={},key='fixture-key')=>{let code=200,data;const res={status:v=>{code=v;return res;},json:v=>{data=v;return res;}};await handler({get:()=>key,params:{action},body:{firebaseUid:'fixture-uid',...body}},res);return {code,data};};
- return {db,request,calls:()=>calls,setPrice:v=>{price=v;},setFail:()=>{fail=true;}};
+ return {db,request,calls:()=>calls,visionCalls:()=>visionCalls,setPrice:v=>{price=v;},setFail:()=>{fail=true;}};
 }
 test('bridge rejects untrusted requests, unknown and disabled accounts',async()=>{const f=fixture();assert.equal((await f.request('access',{},'wrong')).code,403);assert.equal((await f.request('access',{firebaseUid:'other'})).code,403);assert.equal(f.calls(),0);f.db.close();const d=fixture({disabled:true});assert.equal((await d.request('quote')).code,403);d.db.close();});
 for(const state of [{plan:'pro',end:'2000-01-01'},{plan:'ultra',status:'canceled'},{plan:'free'}])test('constructor entitlement refuses inactive subscription '+JSON.stringify(state),async()=>{const f=fixture(state);assert.equal((await f.request('access')).data.active,false);f.db.close();});
@@ -23,3 +28,16 @@ test('a repeated or concurrent request has one paid provider call and returns st
 test('a price change, budget cap and external references cannot trigger generation',async()=>{const f=fixture(),p=await payload(f);assert.equal((await f.request('generate',{...p,maxCredits:0})).code,409);assert.equal((await f.request('generate',{...p,references:['https://private.invalid/']})).code,400);f.setPrice(.02);assert.equal((await f.request('generate',p)).code,409);assert.equal(f.calls(),0);f.db.close();});
 test('an uncertain provider failure is never retried automatically',async()=>{const f=fixture(),p=await payload(f);f.setFail();assert.equal((await f.request('generate',p)).code,503);assert.equal((await f.request('generate',p)).code,409);assert.equal(f.calls(),1);f.db.close();});
 test('database outage fails closed before paid work',async()=>{const f=fixture({available:false});assert.equal((await f.request('access')).code,503);assert.equal(f.calls(),0);f.db.close();});
+
+test('plan recognition accepts only a bounded JPEG from the trusted marketplace',async()=>{
+ const f=fixture(),image='/9j/fixtureJpeg';
+ assert.equal((await f.request('recognize-plan',{image},'wrong')).code,403);
+ assert.equal((await f.request('recognize-plan',{image:'https://example.invalid/plan.jpg'})).code,400);
+ assert.equal(f.visionCalls(),0);
+ const plan=await f.request('recognize-plan',{image});
+ assert.equal(plan.code,200);
+ assert.equal(plan.data.outline.length,4);
+ assert.equal(f.visionCalls(),1);
+ assert.equal(f.calls(),0);
+ f.db.close();
+});

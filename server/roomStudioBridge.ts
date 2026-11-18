@@ -19,6 +19,7 @@ import { priceForImage } from "./pricing";
 import { creditsForCostUsd } from "./creditPricing";
 import { creditsEnabled, syncCredits } from "./creditGate";
 import { generateImage } from "./aiCore";
+import { recognizeRoomPlan } from "./roomPlanRecognition";
 import { readAsset, assetIdFromUrl } from "./media/mediaLibraryStore";
 async function storedImage(result: any, ownerId: string) {
   let bytes: Buffer | undefined, mimeType: string | undefined;
@@ -84,6 +85,7 @@ export function registerRoomStudioBridge(
           .json({ error: "Потрібен чинний акаунт Студії." });
       const sub = await resolveSubscription(user.id),
         action = String(req.params.action);
+      if (action === "recognize-plan") return await recognizeRoomPlan(req, res, user);
       if (action === "access")
         return res.json({
           plan: sub.plan,
