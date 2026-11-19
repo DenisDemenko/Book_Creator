@@ -13,15 +13,15 @@ function load(path, result, deps = {}) {
 }
 const { CreditWallet, WalletError } = load('../server/creditWallet.ts', '{CreditWallet, WalletError}');
 const schema = load('../server/creditSchema.ts', 'CREDIT_SCHEMA');
-function fixture({ paid = true, expires = '2099-01-01', status = 'active', available = true, gate = true } = {}) {
+function fixture({ paid = true, expires = '2099-01-01', status = 'active', available = true, gate = true, disabled = false } = {}) {
   const db = new DatabaseSync(':memory:'); db.exec(schema);
   const wallet = new CreditWallet(db);
   wallet.grant('studio-user', 200, 'initial', 'test balance');
-  let cost = 49, model = 'gpt-image-1.5', handler;
+  let cost = 49, model = 'gpt-image-1.5', handler, calls = 0;
   const register = load('../server/tableAiBilling.ts', 'registerTableAiBillingRoutes', {
-    timingSafeEqual, CreditWallet, WalletError, TableImageError: class extends Error {}, generateTableImage: async () => ({ image: 'data:image/png;base64,aW1hZ2U=' }),
+    timingSafeEqual, CreditWallet, WalletError, TableImageError: class extends Error {}, generateTableImage: async () => { calls++; return { image: 'data:image/png;base64,aW1hZ2U=' }; },
     readBridgeSettings: async () => ({ key: 'secret' }),
-    findUserByFirebaseUid: async uid => uid === 'firebase-user' ? { id: 'studio-user' } : undefined,
+    findUserByFirebaseUid: async uid => uid === 'firebase-user' ? { id: 'studio-user', disabled } : undefined,
     resolveSubscription: async () => ({ plan: paid ? 'pro' : 'free', status, currentPeriodEnd: expires }),
     PLANS: { free: {}, pro: {} }, getDb: () => db, isAvailable: () => available, creditsEnabled: () => gate,
     syncCredits: async () => wallet.getBalance('studio-user'),
@@ -29,19 +29,44 @@ function fixture({ paid = true, expires = '2099-01-01', status = 'active', avail
     IMAGE_PRICING: { 'gpt-image': { get modelId() { return model; } } },
   });
   register({ post: (_path, fn) => { handler = fn; } });
-  async function request(action, { key = 'secret', firebaseUid = 'firebase-user', model = 'gpt-image-1.5', jobKey = `table:${randomUUID()}` } = {}) {
+  async function request(action, { key = 'secret', firebaseUid = 'firebase-user', model = 'gpt-image-1.5', jobKey = `table:${randomUUID()}`, marketplaceDomeAdmin } = {}) {
     let code = 200, body;
     const res = { status: value => { code = value; return res; }, json: value => { body = value; return res; } };
-    await handler({ get: () => key, params: { action }, body: { firebaseUid, jobKey, model } }, res);
+    await handler({ get: () => key, params: { action }, body: { firebaseUid, jobKey, model, marketplaceDomeAdmin } }, res);
     return { code, body, jobKey };
   }
-  return { request, wallet, db, setCost: value => { cost = value; }, setModel: value => { model = value; } };
+  return { request, wallet, db, providerCalls: () => calls, setCost: value => { cost = value; }, setModel: value => { model = value; } };
 }
 
 test('bridge secret required; browser cannot spend or refund credits', async () => {
   const f = fixture(); assert.equal((await f.request('reserve', { key: 'wrong' })).code, 403);
   assert.equal(f.wallet.getBalance('studio-user').available, 200); f.db.close();
 });
+test('trusted Marketplace dome admins generate without a Studio wallet, even with a paid account', async () => {
+  const f = fixture({ gate: false });
+  const role = { marketplaceDomeAdmin: true };
+  const quote = await f.request('access', role);
+  assert.equal(quote.body.mode, 'unlimited');
+  assert.equal(quote.body.credits, undefined);
+  assert.equal((await f.request('generate', role)).code, 200);
+  assert.equal(f.providerCalls(), 1);
+  assert.equal(f.wallet.getBalance('studio-user').available, 200);
+  assert.equal(f.wallet.getBalance('studio-user').reserved, 0);
+  f.db.close();
+});
+
+test('only a trusted boolean role can bypass the dome wallet check', async () => {
+  const f = fixture();
+  assert.equal((await f.request('generate', { key: 'wrong', marketplaceDomeAdmin: true })).code, 403);
+  assert.equal((await f.request('generate', { marketplaceDomeAdmin: 'true' })).code, 402);
+  assert.equal(f.providerCalls(), 0);
+  f.db.close();
+  const disabled = fixture({ disabled: true });
+  assert.equal((await disabled.request('generate', { marketplaceDomeAdmin: true })).code, 403);
+  assert.equal(disabled.providerCalls(), 0);
+  disabled.db.close();
+});
+
 test('active subscriber reserves then settles the exact Studio catalog price, idempotently', async () => {
   const f = fixture(); const start = await f.request('reserve');
   assert.equal(start.body.mode, 'credits'); assert.equal(start.body.credits, 49);

@@ -40,7 +40,10 @@ export function registerTableAiBillingRoutes(app: Express) {
         return res.json({ ok: true, balance });
       }
       if (user?.disabled) return res.status(403).json({ error: 'Обліковий запис вимкнено.' });
-      const sub = user ? await resolveSubscription(user.id) : null;
+      // The authenticated Marketplace server sets this only from its persisted
+      // admin role on the dome route. The bridge key was verified above.
+      const unlimited = req.body.marketplaceDomeAdmin === true;
+      const sub = user && !unlimited ? await resolveSubscription(user.id) : null;
       const paid = !!sub && sub.plan !== 'free' && !!PLANS[sub.plan as keyof typeof PLANS] && sub.status === 'active' && Date.parse(sub.currentPeriodEnd) > Date.now();
       // The same direct GPT Image entry shown in Admin → AI credits determines
       // BOTH the actual model and the price. Do not copy a price into marketplace.
@@ -56,6 +59,7 @@ export function registerTableAiBillingRoutes(app: Express) {
         // The provider key stays inside Studio; the marketplace receives only the image.
         return res.json(await generateTableImage({ prompt: req.body.prompt, referenceImage: req.body.referenceImage, model, interiorImages: req.body.interiorImages, refinementImage: req.body.refinementImage }));
       }
+      if (unlimited) return res.json({ mode: 'unlimited', model });
       if (!paid || !user) return res.json({ mode: 'free', model });
       if (!creditsEnabled()) return res.status(503).json({ error: 'Списання AI-балів у Студії вимкнено.' });
       const credits = creditsForCostUsd(priceForImage('gpt-image', '1K', model));
