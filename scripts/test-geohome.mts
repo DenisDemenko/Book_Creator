@@ -40,20 +40,31 @@ let passed=0;
 const check=(label:string,condition:boolean)=>{assert.ok(condition,label);passed++;console.log('✓ '+label);};
 try{
  check('guests denied',(await request('guest','/projects')).status===401);
- for(const id of ['free','start','team','expired','cancelled','admin']){
+ for(const id of ['free','start','team','expired','cancelled']){
+  check(id+' has no cloud access',(await (await request(id,'/access')).json()).allowed===false);
   check(id+' cannot save',(await request(id,'/projects',body)).status===403);
   check(id+' cannot export CAD',(await request(id,'/projects/'+body.id+'/cad',{version:1})).status===403);
  }
+ check('administrator without a paid plan has cloud access',(await (await request('admin','/access')).json()).allowed===true);
  check('client-selected plan cannot unlock free',(await request('free','/projects',{...body,plan:'ultra'})).status===403);
+ check('client-selected administrator role cannot unlock free',(await request('free','/projects',{...body,role:'admin',marketplaceAdmin:true})).status===403);
  check('CSRF header required',(await request('pro','/projects',body,'POST',{'Content-Type':'application/json',Cookie:'nova_session=session-pro'})).status===403);
  check('session account binding required',(await request('pro','/projects',body,'POST',{...headers('pro'),'X-GeoHome-Uid':'uid-other'})).status===403);
  let response=await request('pro','/projects',body);check('Pro can save',response.status===200);
  const saved=await response.json();check('server checksum',saved.sha256===createHash('sha256').update(JSON.stringify(pkg)).digest('hex'));
+ const adminBody={...body,id:randomUUID(),requestId:randomUUID()};
+ const adminResponse=await request('admin','/projects',adminBody);
+ check('administrator can save without a paid plan',adminResponse.status===200);
+ const adminSaved=await adminResponse.json();
+ check('administrator can list only owned cloud projects',(await (await request('admin','/projects')).json()).map((p:any)=>p.id).join()===adminBody.id);
+ check('administrator can restore a saved version',(await (await request('admin','/projects/'+adminBody.id+'?version=1')).json()).sha256===adminSaved.sha256);
+ check('administrator can export the saved version',(await request('admin','/projects/'+adminBody.id+'/cad',{version:1})).status===200);
+ check('administrator cannot read another owner’s cloud project',(await request('admin','/projects/'+body.id)).status===404);
  check('room source rejects untrusted bridge',(await bridge('pro','geohome-projects',{},'wrong')).status===403);
  for(const id of ['free','start','team','expired','cancelled'])check('room source keeps GeoHome entitlement '+id,(await bridge(id,'geohome-projects',{plan:'ultra',role:'admin',marketplaceAdmin:'true'})).status===403);
  for(const [id, role] of [['admin', {}], ['free', { marketplaceAdmin: true }]] as const) {
-  const own={...body,id:randomUUID(),requestId:randomUUID()};
-  saveProject(id,own);
+  const own=id==='admin'?adminBody:{...body,id:randomUUID(),requestId:randomUUID()};
+  if(id!=='admin')saveProject(id,own);
   const projects=await (await bridge(id,'geohome-projects',{...role,ownerId:'pro'})).json();
   check('admin room source lists only owned project '+id,projects.projects?.length===1&&projects.projects[0].id===own.id);
   check('admin room source reads owned version without subscription '+id,(await bridge(id,'geohome-project',{...role,projectId:own.id,version:1})).status===200);

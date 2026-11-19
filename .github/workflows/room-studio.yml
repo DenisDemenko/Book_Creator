@@ -5,6 +5,7 @@ on:
       - 'server/**'
       - 'server.ts'
       - 'scripts/test-roomStudioBridge.mjs'
+      - 'scripts/test-geohome.mts'
       - 'package*.json'
       - '.github/workflows/room-studio.yml'
       - '.github/scripts/**'
@@ -14,6 +15,7 @@ on:
       - 'server/**'
       - 'server.ts'
       - 'scripts/test-roomStudioBridge.mjs'
+      - 'scripts/test-geohome.mts'
       - 'package*.json'
       - '.github/workflows/room-studio.yml'
       - '.github/scripts/**'
@@ -38,3 +40,4 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run test:room-studio
+      - run: npm run test:geohome

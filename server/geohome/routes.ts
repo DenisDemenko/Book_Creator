@@ -5,7 +5,7 @@ import { requireAuth } from '../auth';
 import { resolveSubscription } from '../subscriptions';
 import { GeoHomeError, initGeoHomeStore, listProjects, readProject, saveProject, deleteProject } from './store';
 
-// No administrator/team bypass: the product rule is specifically active Pro/Ultra.
+// Subscription eligibility for users without an authenticated administrator role.
 export function geoHomeAccess(sub: {plan:string;status:string;currentPeriodEnd:string}, now=Date.now()) {
   return ['pro','ultra'].includes(sub.plan) && sub.status==='active' && Number.isFinite(Date.parse(sub.currentPeriodEnd)) && Date.parse(sub.currentPeriodEnd)>now;
 }
@@ -20,8 +20,8 @@ export function registerGeoHomeRoutes(app: Express) {
       const firebaseUid='firebaseUid' in user?user.firebaseUid:undefined;
       if (!firebaseUid || req.get('x-geohome-client')!=='marketplace-v1' || req.get('x-geohome-uid')!==firebaseUid)
         throw new GeoHomeError(403,'Оновіть вхід у GeoHome.');
-      const sub=await resolveSubscription(user.id);
-      if (paid && !geoHomeAccess(sub)) throw new GeoHomeError(403,'Хмарні проєкти та CAD IDE доступні за активною підпискою Pro або Ultra.');
+      if (paid && user.role !== 'admin' && !geoHomeAccess(await resolveSubscription(user.id)))
+        throw new GeoHomeError(403,'Хмарні проєкти та CAD IDE доступні адміністраторам і користувачам з активною підпискою Pro або Ultra.');
       return await action(req,res,user.id);
     } catch(error) {
       const known=error instanceof GeoHomeError;
@@ -30,7 +30,7 @@ export function registerGeoHomeRoutes(app: Express) {
   });
   app.get('/api/geohome/access',requireAuth,handle(async(req,res,owner)=>{
     const sub=await resolveSubscription(owner);
-    res.json({plan:sub.plan,allowed:geoHomeAccess(sub),requiredPlans:['pro','ultra'],expiresAt:sub.currentPeriodEnd});
+    res.json({plan:sub.plan,allowed:req.principal?.role==='admin'||geoHomeAccess(sub),requiredPlans:['pro','ultra'],expiresAt:sub.currentPeriodEnd});
   },false));
   app.get('/api/geohome/projects',requireAuth,handle((_req,res,owner)=>res.json(listProjects(owner))));
   app.post('/api/geohome/projects',requireAuth,handle((req,res,owner)=>res.json(saveProject(owner,req.body))));
