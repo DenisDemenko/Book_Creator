@@ -1250,6 +1250,8 @@ export async function saveGeneratedImage(
 export function listEngines(availability: { google: boolean; bytedance: boolean; openai: boolean; leonardo: boolean }) {
   return Object.values(IMAGE_ENGINES).map((engine) => {
     const v2Spec = leonardoV2SpecFor(engine.id);
+    const supportsReferenceImages = engine.provider !== 'openai' &&
+      (engine.provider !== 'leonardo' || !!v2Spec);
     return {
       id: engine.id,
       label: engine.label,
@@ -1267,10 +1269,10 @@ export function listEngines(availability: { google: boolean; bytedance: boolean;
        * референсів». Тепер клієнт бачить підтримку і реальну межу
        * ЗАЗДАЛЕГІДЬ, для кожного двигуна окремо.
        */
-      supportsReferenceImages: engine.provider === 'leonardo' ? !!v2Spec : true,
+      supportsReferenceImages,
       maxReferenceImages: v2Spec
         ? leonardoV2PhotoMaxReferences(v2Spec)
-        : engine.provider === 'leonardo'
+        : !supportsReferenceImages
           ? 0
           : MAX_REFERENCE_IMAGES,
       available:

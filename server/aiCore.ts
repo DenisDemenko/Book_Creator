@@ -682,8 +682,10 @@ export async function generateImage(p: GenerateImageParams): Promise<{
             ? await platformKeyFor('leonardo')
             : undefined;
 
-
-    const generated = await generateImageRaw(geminiClient, {
+    const imageSdk = targetEngine.provider === 'google' && !geminiClient
+      ? geminiSdkFor(await platformKeyFor('gemini'))
+      : geminiClient;
+    const generated = await generateImageRaw(imageSdk, {
       prompt: p.prompt,
       engine: p.engine,
       aspectRatio: p.aspectRatio,

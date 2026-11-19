@@ -14,7 +14,7 @@ import {
   readProject,
 } from "./geohome/store";
 import { getDb, isAvailable } from "./db";
-import { listEngines, GENERATED_DIR } from "./imageGeneration";
+import { listEngines, GENERATED_DIR, ImageGenerationError } from "./imageGeneration";
 import { priceForImage } from "./pricing";
 import { creditsForCostUsd } from "./creditPricing";
 import { creditsEnabled, syncCredits } from "./creditGate";
@@ -47,6 +47,25 @@ async function storedImage(result: any, ownerId: string) {
 }
 const digest = (v: unknown) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
+
+const storedImageUnavailable =
+  "Рендер завершився, але файл тимчасово недоступний. Повторіть перевірку збереженого результату.";
+
+function renderFailure(error: unknown, engineLabel: string) {
+  if (error instanceof ImageGenerationError) {
+    switch (error.kind) {
+      case "no_key":
+        return `Двигун «${engineLabel}» не має доступу до провайдера. Перевірте ключ і дозволи.`;
+      case "quota":
+        return `Двигун «${engineLabel}» вичерпав квоту провайдера або ліміт запитів.`;
+      case "safety":
+        return `Двигун «${engineLabel}» відхилив знімки або опис сцени.`;
+      case "empty":
+        return `Двигун «${engineLabel}» не повернув зображення.`;
+    }
+  }
+  return `Двигун «${engineLabel}» не завершив рендер. Перевірте збережений результат перед новим запуском.`;
+}
 
 export function registerRoomStudioBridge(
   app: Express,
@@ -147,11 +166,20 @@ export function registerRoomStudioBridge(
           { user_id: string; status: string; result: string } | undefined;
         if (!job || job.user_id !== user.id)
           return res.status(404).json({ error: "Завдання не знайдено." });
-        if (job.status !== "completed") return res.json({ status: job.status });
-        return res.json({
-          status: "completed",
-          ...(await storedImage(JSON.parse(job.result), user.id)),
-        });
+        if (job.status !== "completed") {
+          const failure = job.result ? JSON.parse(job.result) : null;
+          return res.json({ status: job.status, error: failure?.error });
+        }
+        try {
+          return res.json({
+            status: "completed",
+            ...(await storedImage(JSON.parse(job.result), user.id)),
+          });
+        } catch {
+          return res.status(503).json({
+            error: storedImageUnavailable,
+          });
+        }
       }
       if (!["quote", "generate"].includes(action))
         return res.status(404).json({ error: "Невідома дія." });
@@ -245,12 +273,19 @@ export function registerRoomStudioBridge(
             result: string;
           }
         | undefined;
-      const respond = async (result: any) =>
-        res.json({
-          ...(await storedImage(result, user.id)),
-          credits: result.credits ?? engine.credits,
-          costUsd: result.costUsd ?? engine.costUsd,
-        });
+      const respond = async (result: any) => {
+        try {
+          return res.json({
+            ...(await storedImage(result, user.id)),
+            credits: result.credits ?? engine.credits,
+            costUsd: result.costUsd ?? engine.costUsd,
+          });
+        } catch {
+          return res.status(503).json({
+            error: storedImageUnavailable,
+          });
+        }
+      };
       if (old) {
         if (old.user_id !== user.id || old.request_hash !== h)
           return res
@@ -302,15 +337,19 @@ export function registerRoomStudioBridge(
           b.jobKey,
         );
         return respond(result);
-      } catch {
-        db.prepare("UPDATE room_image_jobs SET status=? WHERE job_key=?").run(
+      } catch (error) {
+        const message = renderFailure(error, engine.label);
+        console.warn("[room-studio] image job failed", {
+          jobKey: b.jobKey,
+          engine: engine.id,
+          kind: error instanceof ImageGenerationError ? error.kind : "unknown",
+        });
+        db.prepare("UPDATE room_image_jobs SET status=?,result=? WHERE job_key=?").run(
           "needs_review",
+          JSON.stringify({ error: message }),
           b.jobKey,
         );
-        return res.status(503).json({
-          error:
-            "Виклик завершився з помилкою. Автоматичний платний повтор вимкнено.",
-        });
+        return res.status(503).json({ error: message });
       }
     } catch {
       return res

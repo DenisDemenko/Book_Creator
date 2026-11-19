@@ -444,6 +444,8 @@ console.log('\nсписок двигунів для UI:');
     const l = listEngines({ google:false, bytedance:false, openai:true, leonardo:false });
     return l.find(e=>e.id==='gpt-image')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='leonardo')!.available;
   })());
+  const gptImage = list.find(e => e.id === 'gpt-image')!;
+  t('GPT Image не обіцяє референси на маршруті генерації', !gptImage.supportsReferenceImages && gptImage.maxReferenceImages === 0);
   t('лише Leonardo-ключ → доступний тільки leonardo', (()=>{
     const l = listEngines({ google:false, bytedance:false, openai:false, leonardo:true });
     return l.find(e=>e.id==='leonardo')!.available && l.filter(e=>e.provider==='google').every(e=>!e.available) && !l.find(e=>e.id==='seedream')!.available && !l.find(e=>e.id==='gpt-image')!.available;
