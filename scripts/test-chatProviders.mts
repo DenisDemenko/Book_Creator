@@ -143,6 +143,11 @@ console.log('\nЗображення доїжджає до провайдера �
     t(`${engine}: у запит пішла САМЕ обрана модель`, calls[0]?.model === modelId, String(calls[0]?.model));
   }
 
+  const highDetail = stub(() => ({ status: 200, body: okOpenAiBody('контур') }));
+  await providers.PROVIDERS.gpt('обведи план', 'система', 'gpt-4o', 'test-key', [{ ...tinyPng[0], detail: 'high' }]);
+  t('gpt: деталізація передана в частині image_url',
+    highDetail[0]?.body?.messages?.[1]?.content?.[1]?.image_url?.detail === 'high');
+
   // Перекладання старого id робиться перед самим запитом, не лише в UI.
   const legacyCalls = stub(() => ({ status: 200, body: okOpenAiBody('опис') }));
   await providers.PROVIDERS.deepseek('опиши фото', 'система', 'deepseek-chat', 'test-key', tinyPng);

@@ -42,6 +42,7 @@ export interface GenerateResult {
 export interface ImageAttachment {
   mimeType: string;
   dataBase64: string;
+  detail?: 'high';
 }
 
 /**
@@ -371,7 +372,10 @@ async function openAiCompatible(
           { type: 'text', text: prompt },
           ...images.map((img) => ({
             type: 'image_url',
-            image_url: { url: `data:${img.mimeType};base64,${img.dataBase64}` },
+            image_url: {
+              url: `data:${img.mimeType};base64,${img.dataBase64}`,
+              ...(img.detail && { detail: img.detail }),
+            },
           })),
         ]
       : prompt;

@@ -11,7 +11,7 @@ const source=['roomPlanRecognition', 'roomGeminiImageAccess', 'constructorImageE
 class ImageGenerationError extends Error {
   constructor(kind, message) { super(message); this.kind = kind; }
 }
-function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false,role='writer',getGeminiClients}={}){
+function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false,role='writer',getGeminiClients,onVision}={}){
  const db=new DatabaseSync(':memory:');let handler,calls=0,visionCalls=0,price=.01,failure,missingMedia=false;
  const imageClients = [];
  const engines=Object.fromEntries(['nano-banana-2','nano-banana-pro','nano-banana-2-lite','gpt-image','reference-free'].map(id=>[id,{id,label:id,modelId:'test-model',maxSize:id==='gpt-image'?'1K':'4K'}]));
@@ -31,6 +31,7 @@ function fixture({plan='pro',status='active',end='2099-01-01',available=true,dis
   generateRawImage: async (key) => { imageClients.push(key ?? undefined); if (failure) throw failure; },
  ChatProviderError: class extends Error {},generateText:async options=>{
   visionCalls++;assert.equal(options.engine,'gpt');assert.equal(options.images[0].mimeType,'image/jpeg');assert.equal(options.req.principal.id,'studio-owner');assert.equal(options.json,true);
+  onVision?.(options);
   return {text:JSON.stringify({outline:[[100,100],[900,100],[900,900],[100,900]],partitions:[],openings:[]})};
  },createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,available:true, supportsReferenceImages:!['gpt-image','reference-free'].includes(e.id),maxReferenceImages:['gpt-image','reference-free'].includes(e.id)?0:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role,disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),imagePriceFor:(id,size)=>({key:id+'@'+size,costUsd:price}),creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.ok(p.referenceImageUrls.length >= 1);await p.constructorRender.generate();return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>missingMedia?null:({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
  vm.createContext(context);
@@ -225,6 +226,26 @@ test('plan recognition accepts only a bounded JPEG from the trusted marketplace'
  assert.equal(f.visionCalls(),1);
  assert.equal(f.calls(),0);
  f.db.close();
+});
+
+test('plan recognition sends high-detail imagery and only bounded numerical wall anchors', async () => {
+  const prompts = [];
+  const f = fixture({ onVision: (options) => {
+    assert.equal(options.images[0].detail, 'high');
+    assert.match(options.systemInstruction, /sheet border, title block, legend/);
+    prompts.push(options.prompt);
+  } });
+  try {
+    const hints = { outline: [48, 64, 931, 941], horizontal: [[64, 48, 220]], vertical: [[48, 64, 941]] };
+    const image = '/9j/fixtureJpeg';
+    assert.equal((await f.request('recognize-plan', { image, wallHints: hints })).code, 200);
+    assert.match(prompts[0], /\[48,64,931,941\]/);
+    assert.match(prompts[0], /\[\[64,48,220\]\]/);
+    assert.equal((await f.request('recognize-plan', { image, wallHints: { ...hints, vertical: [[48, 64, 1001]] } })).code, 200);
+    assert.doesNotMatch(prompts[1], /Image-derived anchors/);
+  } finally {
+    f.db.close();
+  }
 });
 
 test('room plan recognition allows active Pro and Ultra plus verified administrators', async () => {
