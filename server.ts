@@ -581,7 +581,7 @@ async function startServer() {
 
   registerAuthRoutes(app);
   registerTableAiBillingRoutes(app);
-  registerRoomStudioBridge(app, async()=>({google:!!ai || !!(await platformKeyFor('gemini')),bytedance:seedreamConfig.enabled || !!(await platformKeyFor('seedream')),openai:openaiImageConfig.enabled || !!(await platformKeyFor('gpt')),leonardo:leonardoConfig.enabled || !!(await platformKeyFor('leonardo'))}));
+  registerRoomStudioBridge(app);
   registerAdminRoutes(app);
   registerUsageRoutes(app);
   registerSubscriptionRoutes(app);

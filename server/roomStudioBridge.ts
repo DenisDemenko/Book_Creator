@@ -14,9 +14,10 @@ import {
   readProject,
 } from "./geohome/store";
 import { getDb, isAvailable } from "./db";
-import { listEngines, GENERATED_DIR, ImageGenerationError } from "./imageGeneration";
-import { priceForImage } from "./pricing";
-import { creditsForCostUsd } from "./creditPricing";
+import { GENERATED_DIR, ImageGenerationError } from "./imageGeneration";
+import { constructorImageQuotes, generateConstructorImage } from "./constructorImageEngines";
+import { hasPaidConstructorPlan } from "./tableAiBilling";
+import { TableImageError } from "./tableAiGeneration";
 import { creditsEnabled, syncCredits } from "./creditGate";
 import { generateImage } from "./aiCore";
 import { recognizeRoomPlan } from "./roomPlanRecognition";
@@ -52,10 +53,11 @@ const storedImageUnavailable =
   "Рендер завершився, але файл тимчасово недоступний. Повторіть перевірку збереженого результату.";
 
 function renderFailure(error: unknown, engineLabel: string) {
+  if (error instanceof TableImageError) return error.message;
   if (error instanceof ImageGenerationError) {
     switch (error.kind) {
       case "no_key":
-        return `Двигун «${engineLabel}» не має доступу до провайдера. Перевірте ключ і дозволи.`;
+        return `Провайдер відхилив доступ рушія «${engineLabel}». Оновіть оцінку та виберіть доступний рушій.`;
       case "quota":
         return `Двигун «${engineLabel}» вичерпав квоту провайдера або ліміт запитів.`;
       case "safety":
@@ -67,20 +69,7 @@ function renderFailure(error: unknown, engineLabel: string) {
   return `Двигун «${engineLabel}» не завершив рендер. Перевірте збережений результат перед новим запуском.`;
 }
 
-export function registerRoomStudioBridge(
-  app: Express,
-  availability: () => Promise<{
-    google: boolean;
-    bytedance: boolean;
-    openai: boolean;
-    leonardo: boolean;
-  }> = async () => ({
-    google: false,
-    bytedance: false,
-    openai: false,
-    leonardo: false,
-  }),
-) {
+export function registerRoomStudioBridge(app: Express) {
   app.post("/api/room-studio/bridge/:action", async (req, res) => {
     try {
       const s = await readBridgeSettings(),
@@ -183,54 +172,33 @@ export function registerRoomStudioBridge(
       }
       if (!["quote", "generate"].includes(action))
         return res.status(404).json({ error: "Невідома дія." });
-      if (!creditsEnabled())
+      const externalBilling = req.body.externalBilling === true;
+      if (!externalBilling && !creditsEnabled())
         return res
           .status(503)
           .json({ error: "Облік AI-балів тимчасово вимкнено." });
-      const balance = await syncCredits(user.id);
-      const engines = listEngines(await availability())
-        .filter(
-          (e) =>
-            e.available !== false &&
-            e.supportsReferenceImages &&
-            e.maxReferenceImages >= 3,
-        )
-        .map((e) => {
-          const id = e.id,
-            size =
-              e.maxSize === "1K"
-                ? "1K"
-                : req.body.imageSize === "4K" && e.maxSize === "4K"
-                  ? "4K"
-                  : req.body.imageSize === "1K"
-                    ? "1K"
-                    : "2K",
-            usd = priceForImage(id, size, e.modelId);
-          return {
-            ...e,
-            imageSize: size,
-            credits: user.role === "admin" ? 0 : creditsForCostUsd(usd),
-            costUsd: usd,
-            referenceInputs: ["image-reference"],
-            qualifiedStrict: false,
-            quoteHash: digest({ id, model: e.modelId, size, usd }),
-          };
-        })
-        .filter((e) => e.costUsd > 0);
-      if (action === "quote")
-        return res.json({
-          engines,
-          available: balance.available,
-          currency: "AI credits",
-          strictQualification: "pending_benchmark",
-        });
+      const balance = externalBilling ? null : await syncCredits(user.id);
+      const aspectRatio = req.body.aspectRatio || "1:1";
+      const access = await constructorImageQuotes(req.body.imageSize || (externalBilling ? "1K" : "2K"), aspectRatio);
+      const engines = access.editions.filter((engine) => engine.available && (externalBilling || engine.id !== "gpt-image")).map((engine) => ({
+        ...engine,
+        credits: !externalBilling && user.role === "admin" ? 0 : engine.credits,
+        quoteHash: externalBilling ? engine.quoteHash : digest({ id: engine.id, model: engine.modelId, size: engine.imageSize, usd: engine.costUsd }),
+        referenceInputs: ["image-reference"],
+        qualifiedStrict: false,
+      }));
+      if (action === "quote") {
+        if (!engines.length)
+          return res.status(503).json({ error: "Студія зараз не має доступного рушія фоторендера." });
+        return res.json({ engines, available: balance?.available ?? 0, currency: "AI credits", strictQualification: "pending_benchmark" });
+      }
       const b = req.body,
         engine = engines.find((e) => e.id === b.engine);
       if (
         !engine ||
         engine.quoteHash !== b.quoteHash ||
         !Number.isFinite(b.maxCredits) ||
-        b.maxCredits < engine.credits
+        b.maxCredits < (externalBilling && b.billingMode === "free" ? 0 : engine.credits)
       )
         return res
           .status(409)
@@ -262,6 +230,7 @@ export function registerRoomStudioBridge(
         prompt: b.prompt,
         references: b.references,
         aspect: b.aspectRatio,
+        ...(externalBilling && { negativePrompt: b.negativePrompt, billingMode: b.billingMode }),
       });
       const old = db
         .prepare("SELECT * FROM room_image_jobs WHERE job_key=?")
@@ -297,6 +266,22 @@ export function registerRoomStudioBridge(
             "Цей виклик уже запущено або потребує перевірки. Повторної оплати не буде.",
         });
       }
+      if (externalBilling) {
+        if (b.billingJobKey !== 'table:' + b.jobKey.slice(5))
+          return res.status(409).json({ error: "Не підтверджено спільний резерв рендера." });
+        const paid = await hasPaidConstructorPlan(user.id);
+        if (b.billingMode !== (paid ? "credits" : "free"))
+          return res.status(409).json({ error: "Підписка змінилася. Оновіть оцінку." });
+        if (paid) {
+          const reservation = db.prepare("SELECT user_id, amount, status FROM credit_reservations WHERE job_key = ?").get(b.billingJobKey) as
+            { user_id: string; amount: number; status: string } | undefined;
+          if (reservation?.user_id !== user.id || reservation.status !== "reserved" || reservation.amount !== engine.credits)
+            return res.status(402).json({ error: "Спочатку зарезервуйте AI-бали." });
+        }
+        const concurrent = db.prepare("SELECT status FROM room_image_jobs WHERE job_key = ?").get(b.jobKey);
+        if (concurrent) return res.status(409).json({ error: "Завдання вже прийнято. Перевірте збережений результат." });
+      }
+      const chargedCredits = externalBilling && b.billingMode === "free" ? 0 : engine.credits;
       db.prepare("INSERT INTO room_image_jobs VALUES (?,?,?,?,?,?)").run(
         b.jobKey,
         user.id,
@@ -308,6 +293,13 @@ export function registerRoomStudioBridge(
       try {
         const result = await generateImage({
           engine: engine.id,
+          constructorRender: {
+            externallyBilled: externalBilling,
+            generate: () => generateConstructorImage(engine, access, {
+              prompt: b.prompt, aspectRatio: b.aspectRatio, references: b.references,
+              negativePrompt: String(b.negativePrompt || "").slice(0, 4000),
+            }),
+          },
           prompt: b.prompt,
           aspectRatio: b.aspectRatio,
           imageSize: engine.imageSize,
@@ -330,13 +322,13 @@ export function registerRoomStudioBridge(
           "completed",
           JSON.stringify({
             ...result,
-            credits: engine.credits,
+            credits: chargedCredits,
             costUsd: engine.costUsd,
             quoteHash: engine.quoteHash,
           }),
           b.jobKey,
         );
-        return respond(result);
+        return respond({ ...result, credits: chargedCredits });
       } catch (error) {
         const message = renderFailure(error, engine.label);
         console.warn("[room-studio] image job failed", {

@@ -1,5 +1,10 @@
 import { platformKeyFor } from './platformKeys';
 
+const openAiEditSizes: Record<string, string> = {
+  '16:9': '1536x1024', '4:3': '1536x1024', '1:1': '1024x1024',
+  '3:4': '1024x1536', '9:16': '1024x1536',
+};
+
 export class TableImageError extends Error {
   constructor(message: string, public status = 503) { super(message); }
 }
@@ -38,15 +43,25 @@ export async function generateTableImage(input: { prompt?: unknown; referenceIma
       throw new TableImageError('Некоректний PNG попереднього результату.', 400);
     refinement = new Uint8Array(bytes);
   }
+  const references = [{ bytes: new Uint8Array(image), type: 'image/png', file: 'tabletop.png' }];
+  rooms.forEach((bytes, index) => references.push({ bytes, type: 'image/jpeg', file: `room-${index + 1}.jpg` }));
+  if (refinement) references.push({ bytes: refinement, type: 'image/png', file: 'previous-result.png' });
+  return { image: 'data:image/png;base64,' + await editOpenAiImage({ prompt, model, references }) };
+}
+
+export async function editOpenAiImage({ prompt, model, references, aspectRatio }: {
+  prompt: string;
+  model: string;
+  references: { bytes: Uint8Array<ArrayBuffer>; type: string; file: string }[];
+  aspectRatio?: string;
+}) {
   const apiKey = await platformKeyFor('gpt');
   if (!apiKey) throw new TableImageError('Адміністратор має додати ключ OpenAI (GPT) у розділі «Ключі API» Студії книг.');
   const form = new FormData();
   form.set('model', model);
   form.set('prompt', prompt);
-  form.set('image[]', new Blob([new Uint8Array(image)], { type: 'image/png' }), 'tabletop.png');
-  rooms.forEach((room, index) => form.append('image[]', new Blob([room], { type: 'image/jpeg' }), `room-${index + 1}.jpg`));
-  if (refinement) form.append('image[]', new Blob([refinement], { type: 'image/png' }), 'previous-result.png');
-  form.set('size', '1024x1024');
+  references.forEach(({ bytes, type, file }) => form.append('image[]', new Blob([bytes], { type }), file));
+  form.set('size', openAiEditSizes[aspectRatio || '1:1'] || '1024x1024');
   form.set('quality', 'medium');
   form.set('n', '1');
   let response: Response;
@@ -65,6 +80,6 @@ export async function generateTableImage(input: { prompt?: unknown; referenceIma
     const payload = await response.json() as { data?: { b64_json?: string }[] };
     const result = payload.data?.[0]?.b64_json;
     if (!result || result.length > 20000000 || !/^[A-Za-z0-9+/=]+$/.test(result)) throw new Error();
-    return { image: `data:image/png;base64,${result}` };
+    return result;
   } catch { throw new TableImageError('OpenAI повернув некоректне зображення.', 502); }
 }

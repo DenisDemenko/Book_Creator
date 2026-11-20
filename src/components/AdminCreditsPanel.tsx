@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AdminConstructorPricing } from './AdminConstructorPricing';
 import { AdminTaxPricingPanel } from './AdminTaxPricingPanel';
 
 interface PricingConfig {
@@ -52,7 +53,7 @@ async function api(url: string, init?: RequestInit) {
 const post = (url: string, method: string, body: unknown) =>
   api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-type Section = 'params' | 'costs' | 'users';
+type Section = 'params' | 'costs' | 'constructors' | 'users';
 
 /** Єдине місце керування балами й підписками: параметри → ціни/пакети/списання, таблиця вартості, користувачі. */
 export const AdminCreditsPanel: React.FC = () => {
@@ -112,7 +113,7 @@ export const AdminCreditsPanel: React.FC = () => {
       <div>
         <h3 className="font-bold text-sm text-slate-100">AI-бали та підписки</h3>
         <p className="text-[11px] text-slate-400 mt-1">
-          Один бал знімається за зображення й відео. Правки параметрів автоматично переносяться в ціни підписок,
+          AI-бали списуються за тарифом обраного рушія. Правки параметрів автоматично переносяться в ціни підписок,
           пакети балів, ліміт тексту й формулу списання.
         </p>
         {ex.photo && ex.video && (
@@ -129,10 +130,10 @@ export const AdminCreditsPanel: React.FC = () => {
         <div className="text-xs text-amber-300">Гаманець недоступний: сховище працює без SQLite, списання балів вимкнено.</div>
       )}
 
-      <div className="flex gap-2">
-        {([['params', 'Параметри й плани'], ['costs', 'Вартість генерацій'], ['users', 'Користувачі']] as [Section, string][]).map(([id, label]) => (
+      <div className="flex flex-wrap gap-2">
+        {([['params', 'Параметри й плани'], ['costs', 'Вартість генерацій'], ['constructors', 'Тарифи фоторендерів'], ['users', 'Користувачі']] as [Section, string][]).map(([id, label]) => (
           <button
-            key={id} onClick={() => setSection(id)}
+            key={id} type="button" aria-pressed={section === id} onClick={() => setSection(id)}
             className={`px-3 py-1 rounded-lg text-xs font-semibold ${section === id ? 'bg-amber-500 text-slate-950' : 'badge-glass text-slate-300'}`}
           >{label}</button>
         ))}
@@ -243,6 +244,8 @@ export const AdminCreditsPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      {section === 'constructors' && <AdminConstructorPricing />}
 
       {section === 'users' && <UsersSection onChanged={load} flash={flash} setError={setError} />}
     </div>

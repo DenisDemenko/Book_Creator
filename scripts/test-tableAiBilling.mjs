@@ -19,7 +19,7 @@ function fixture({ paid = true, expires = '2099-01-01', status = 'active', avail
   wallet.grant('studio-user', 200, 'initial', 'test balance');
   let cost = 49, model = 'gpt-image-1.5', handler, calls = 0;
   const register = load('../server/tableAiBilling.ts', 'registerTableAiBillingRoutes', {
-    timingSafeEqual, CreditWallet, WalletError, TableImageError: class extends Error {}, generateTableImage: async () => { calls++; return { image: 'data:image/png;base64,aW1hZ2U=' }; },
+    timingSafeEqual, CreditWallet, WalletError, TableImageError: class extends Error {}, ImageGenerationError: class extends Error {}, generateTableImage: async () => { calls++; return { image: 'data:image/png;base64,aW1hZ2U=' }; },
     readBridgeSettings: async () => ({ key: 'secret' }),
     findUserByFirebaseUid: async uid => uid === 'firebase-user' ? { id: 'studio-user', disabled } : undefined,
     resolveSubscription: async () => ({ plan: paid ? 'pro' : 'free', status, currentPeriodEnd: expires }),

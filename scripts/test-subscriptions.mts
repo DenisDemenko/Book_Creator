@@ -24,7 +24,8 @@ import assert from 'node:assert/strict';
 const { initStore, saveUser, __resetCacheForTests } = await import('../server/store.ts');
 const { CreditWallet } = await import('../server/creditWallet.ts');
 const { getDb } = await import('../server/db.ts');
-const { checkImageQuota, activateSubscription, resolveSubscription, priceFor, PLANS } = await import('../server/subscriptions.ts');
+const { checkImageQuota, activateSubscription, resolveSubscription, priceFor, PLANS, getActiveTaxRegime } = await import('../server/subscriptions.ts');
+const { constructorPlanProjection } = await import('../server/constructorRenderReport.ts');
 const { __dropDatabaseForTests } = await import('../server/db.ts');
 
 let passed = 0;
@@ -62,6 +63,32 @@ async function main() {
   await test('Ultra місяць = 2100', () => assert.equal(priceFor('ultra', 'monthly'), 2100));
   await test('Team місяць = 3800', () => assert.equal(priceFor('team', 'monthly'), 3800));
   await test('Free завжди 0', () => assert.equal(priceFor('free', 'annual'), 0));
+
+  const gptImage = { costUsd: 0.034, credits: 49 };
+  const pro = { ...PLANS.pro, credits: PLANS.pro.aiCredits };
+  await test('націнка 30% і залишок підписки обчислюються окремо', () => {
+    const row = constructorPlanProjection(pro, gptImage, getActiveTaxRegime(), 48, false);
+    assert.equal(row.photos, 102);
+    assert.equal(row.grossUah, 740);
+    assert.equal(row.imageCostUah, 166.46);
+    assert.equal(row.markupRevenueUah, 216.40);
+    assert.equal(row.markupUah, 49.94);
+    assert.equal(row.contributionUah, 191);
+  });
+  await test('річний тариф враховує 12 місячних пакетів і річну ціну', () => {
+    const row = constructorPlanProjection(pro, gptImage, getActiveTaxRegime(), 48, true);
+    assert.equal(row.photos, 1224);
+    assert.equal(row.grossUah, 7400);
+    assert.equal(row.otherAiUah, 2400);
+    assert.equal(row.contributionUah, 1177.10);
+  });
+  await test('Free використовує п’ять запусків за весь час і нульову виручку', () => {
+    const free = { ...PLANS.free, credits: PLANS.free.aiCredits };
+    const row = constructorPlanProjection(free, gptImage, getActiveTaxRegime(), 48, true);
+    assert.equal(row.photos, 5);
+    assert.equal(row.grossUah, 0);
+    assert.equal(row.contributionUah, -8.16);
+  });
 
   console.log('\nЗареєстрований без підписки («гість») — 300 пробних балів одноразово:');
   await test('новий користувач: план free, 300 балів, використано 0', async () => {

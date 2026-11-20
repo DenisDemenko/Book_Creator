@@ -226,11 +226,12 @@ export function priceBreakdown(
   regime: TaxRegime,
   planId: string,
   grossUah: number,
-  fx = pricingConfig.fxUahPerUsd
+  fx = pricingConfig.fxUahPerUsd,
+  scenario?: { imageCostUah: number; months: number },
 ): PriceBreakdown {
   const net = grossUah / (1 + regime.vatPercent / 100);
-  const imageCostUah = planCreditsFor(planId) * costUsdPerCredit() * fx;
-  const otherAiUah = planId === 'free' ? 0 : pricingConfig.textBudgetUah;
+  const imageCostUah = scenario?.imageCostUah ?? planCreditsFor(planId) * costUsdPerCredit() * fx;
+  const otherAiUah = planId === 'free' ? 0 : pricingConfig.textBudgetUah * (scenario?.months ?? 1);
   const turnoverTaxUah = net * regime.turnoverTaxShare;
   const overheadUah = grossUah * overheadShare();
   const contributionUah = net - turnoverTaxUah - overheadUah - imageCostUah - otherAiUah;

@@ -7,26 +7,45 @@ import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 const loadBridgeModule=name=>readFileSync(new URL('../server/'+name+'.ts',import.meta.url),'utf8').replace(/^import[\s\S]*?;\n/gm,'').replace(/export /g,'');
-const source=loadBridgeModule('roomPlanRecognition')+'\n'+loadBridgeModule('roomStudioBridge');
+const source=['roomPlanRecognition', 'roomGeminiImageAccess', 'constructorImageEngines', 'roomStudioBridge'].map(loadBridgeModule).join('\n');
 class ImageGenerationError extends Error {
   constructor(kind, message) { super(message); this.kind = kind; }
 }
-function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false,role='writer'}={}){
+function fixture({plan='pro',status='active',end='2099-01-01',available=true,disabled=false,role='writer',getGeminiClients}={}){
  const db=new DatabaseSync(':memory:');let handler,calls=0,visionCalls=0,price=.01,failure,missingMedia=false;
- const engines=Object.fromEntries(['nano-banana-2','nano-banana-pro','nano-banana-2-lite','gpt-image'].map(id=>[id,{id,label:id,modelId:'test-model',maxSize:id==='gpt-image'?'1K':'4K'}]));
+ const imageClients = [];
+ const engines=Object.fromEntries(['nano-banana-2','nano-banana-pro','nano-banana-2-lite','gpt-image','reference-free'].map(id=>[id,{id,label:id,modelId:'test-model',maxSize:id==='gpt-image'?'1K':'4K'}]));
+ if (getGeminiClients) {
+  for (const engine of Object.values(engines)) {
+   if (engine.id.startsWith('nano-banana')) Object.assign(engine, {provider:'google', modelId:'gemini-'+engine.id});
+  }
+  engines.leonardo = {id:'leonardo', label:'Leonardo', provider:'leonardo', modelId:'leonardo-model', maxSize:'2K'};
+ }
+ const openAiEdits = [];
  const context={Buffer,Date,console,Number,ImageGenerationError,platformKeyFor:async()=> 'fixture-provider-key',
+  TableImageError: class extends Error {},
+  seedreamConfig: {}, leonardoConfig: {}, normalizeAspectRatio: value => value,
+  seedreamTransportFor: () => 'ark',
+  hasPaidConstructorPlan: async () => plan !== 'free' && status === 'active',
+  editOpenAiImage: async (options) => { openAiEdits.push(options); return 'iVBORw0KGgo='; },
+  generateRawImage: async (key) => { imageClients.push(key ?? undefined); if (failure) throw failure; },
  ChatProviderError: class extends Error {},generateText:async options=>{
   visionCalls++;assert.equal(options.engine,'gpt');assert.equal(options.images[0].mimeType,'image/jpeg');assert.equal(options.req.principal.id,'studio-owner');assert.equal(options.json,true);
   return {text:JSON.stringify({outline:[[100,100],[900,100],[900,900],[100,900]],partitions:[],openings:[]})};
- },createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,supportsReferenceImages:e.id!=='gpt-image',maxReferenceImages:e.id==='gpt-image'?0:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role,disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),priceForImage:()=>price,creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.equal(p.referenceImageUrls.length,1);if(failure)throw failure;return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>missingMedia?null:({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
- vm.createContext(context);const register=vm.runInContext(stripTypeScriptTypes(source,{mode:'transform'})+'\nregisterRoomStudioBridge',context);register({post:(_path,fn)=>{handler=fn;}});
+ },createHash,timingSafeEqual,resolve,basename,GENERATED_DIR:'/unused',IMAGE_ENGINES:engines,listEngines:()=>Object.values(engines).map(e=>({...e,available:true, supportsReferenceImages:!['gpt-image','reference-free'].includes(e.id),maxReferenceImages:['gpt-image','reference-free'].includes(e.id)?0:10})),readFile:async()=>{throw Error('Must use media library');},readBridgeSettings:async()=>({key:'fixture-key'}),findUserByFirebaseUid:async uid=>uid==='fixture-uid'?{id:'studio-owner',email:'owner@fixture.invalid',role,disabled}:null,resolveSubscription:async()=>({plan,status,currentPeriodEnd:end}),getDb:()=>db,isAvailable:()=>available,creditsEnabled:()=>true,syncCredits:async()=>({available:200}),priceForImage:()=>price,creditsForCostUsd:usd=>Math.ceil(usd*1000),generateImage:async p=>{calls++;assert.equal(p.req.principal.id,'studio-owner');assert.ok(p.referenceImageUrls.length >= 1);await p.constructorRender.generate();return {url:'/api/media/generated-asset',engineId:p.engine,modelId:'test-model'};},assetIdFromUrl:url=>url.split('/').pop(),readAsset:async()=>missingMedia?null:({record:{ownerId:'studio-owner'},bytes:Buffer.from([137,80,78,71])})};
+ vm.createContext(context);
+ const { registerRoomStudioBridge, createRoomGeminiImageAccess } = vm.runInContext(
+  stripTypeScriptTypes(source,{mode:'transform'})+'\n({registerRoomStudioBridge, createRoomGeminiImageAccess})',context,
+ );
+ context.roomGeminiImageAccess = createRoomGeminiImageAccess(getGeminiClients ?? (async () => []));
+ registerRoomStudioBridge({post:(_path,fn)=>{handler=fn;}});
  const request=async(action,body={},key='fixture-key')=>{let code=200,data;const res={status:v=>{code=v;return res;},json:v=>{data=v;return res;}};await handler({get:()=>key,params:{action},body:{firebaseUid:'fixture-uid',...body}},res);return {code,data};};
- return {db,request,calls:()=>calls,visionCalls:()=>visionCalls,setPrice:v=>{price=v;},setFail:(error=Error('provider uncertain'))=>{failure=error;},setMissingMedia:v=>{missingMedia=v;}};
+ return {db,request,imageClients,openAiEdits,calls:()=>calls,visionCalls:()=>visionCalls,setPrice:v=>{price=v;},setFail:(error=Error('provider uncertain'))=>{failure=error;},setMissingMedia:v=>{missingMedia=v;}};
 }
 test('bridge rejects untrusted requests, unknown and disabled accounts',async()=>{const f=fixture();assert.equal((await f.request('access',{},'wrong')).code,403);assert.equal((await f.request('access',{firebaseUid:'other'})).code,403);assert.equal(f.calls(),0);f.db.close();const d=fixture({disabled:true});assert.equal((await d.request('quote')).code,403);d.db.close();});
 for(const state of [{plan:'pro',end:'2000-01-01'},{plan:'ultra',status:'canceled'},{plan:'free'}])test('constructor entitlement refuses inactive subscription '+JSON.stringify(state),async()=>{const f=fixture(state);assert.equal((await f.request('access')).data.active,false);f.db.close();});
 test('active Pro and Ultra use existing subscription and quotes do not call a paid provider',async()=>{for(const plan of ['pro','ultra']){const f=fixture({plan});assert.equal((await f.request('access')).data.active,true);const quote=await f.request('quote');assert.equal(quote.code,200);assert.equal(quote.data.engines[0].qualifiedStrict,false);assert.equal(quote.data.engines[0].credits,10);assert.equal(f.calls(),0);f.db.close();}});
-async function payload(f){const q=(await f.request('quote')).data.engines[0];return {jobKey:'room:'+randomUUID(),prompt:'Keep exact room and product count',engine:q.id,imageSize:q.imageSize,quoteHash:q.quoteHash,maxCredits:q.credits,aspectRatio:'16:9',references:['data:image/png;base64,iVBORw0KGgo=']};}
+async function payload(f,engineId){const {engines}=(await f.request('quote',{aspectRatio:'16:9',externalBilling:engineId==='gpt-image'})).data;const q=engineId?engines.find(engine=>engine.id===engineId):engines[0];return {jobKey:'room:'+randomUUID(),prompt:'Keep exact room and product count',engine:q.id,imageSize:q.imageSize,quoteHash:q.quoteHash,maxCredits:q.credits,aspectRatio:'16:9',references:['data:image/png;base64,iVBORw0KGgo=']};}
 test('a repeated or concurrent request has one paid provider call and returns stored media',async()=>{const f=fixture(),p=await payload(f);const results=await Promise.all([f.request('generate',p),f.request('generate',p)]);assert(results.some(r=>r.code===200));assert.equal(f.calls(),1);const replay=await f.request('generate',p);assert.equal(replay.code,200);assert(replay.data.image);assert.equal(f.calls(),1);assert.equal((await f.request('result',{jobKey:p.jobKey})).code,200);assert.equal(f.calls(),1);assert.equal((await f.request('generate',{...p,prompt:'different'})).code,409);f.db.close();});
 test('a price change, budget cap and external references cannot trigger generation',async()=>{const f=fixture(),p=await payload(f);assert.equal((await f.request('generate',{...p,maxCredits:0})).code,409);assert.equal((await f.request('generate',{...p,references:['https://private.invalid/']})).code,400);f.setPrice(.02);assert.equal((await f.request('generate',p)).code,409);assert.equal(f.calls(),0);f.db.close();});
 test('an uncertain provider failure is never retried automatically',async()=>{const f=fixture(),p=await payload(f);f.setFail();assert.equal((await f.request('generate',p)).code,503);assert.equal((await f.request('generate',p)).code,409);assert.equal(f.calls(),1);f.db.close();});
@@ -36,9 +55,122 @@ test('the room quote excludes engines without reference inputs', async () => {
     const quote = await f.request('quote');
     assert(quote.data.engines.some((engine) => engine.id === 'nano-banana-2'));
     assert(!quote.data.engines.some((engine) => engine.id === 'gpt-image'));
-    const rejected = await f.request('generate', { ...await payload(f), engine: 'gpt-image' });
+    assert(!quote.data.engines.some((engine) => engine.id === 'reference-free'));
+    const rejected = await f.request('generate', { ...await payload(f), engine: 'reference-free' });
     assert.equal(rejected.code, 409);
     assert.equal(f.calls(), 0);
+  } finally {
+    f.db.close();
+  }
+});
+
+test('room quotes share metadata checks and render with the Gemini key that passed', async () => {
+  const deniedChecks = [];
+  const acceptedChecks = [];
+  const denied = { models: { get: async ({ model }) => {
+    deniedChecks.push(model);
+    throw Error('Permission denied');
+  } } };
+  const accepted = { models: { get: async ({ model }) => {
+    acceptedChecks.push(model);
+    return { supportedActions: ['generateContent'] };
+  } } };
+  const f = fixture({ getGeminiClients: async () => [denied, accepted] });
+  try {
+    const [first, second] = await Promise.all([f.request('quote'), f.request('quote')]);
+    for (const quote of [first, second]) {
+      assert.equal(quote.code, 200);
+      assert.equal(quote.data.engines[0].id, 'nano-banana-2');
+    }
+    assert.equal(deniedChecks.length, 3);
+    assert.deepEqual(acceptedChecks, deniedChecks);
+    assert.equal(f.calls(), 0);
+    const p = await payload(f);
+    await Promise.all([f.request('generate', p), f.request('generate', p)]);
+    assert.deepEqual(f.imageClients, [accepted]);
+    assert.equal(acceptedChecks.length, 3);
+  } finally {
+    f.db.close();
+  }
+});
+
+test('a revoked Gemini key blocks a previously quoted render and leaves other engines available', async () => {
+  let currentClient = { models: { get: async () => ({}) } };
+  const f = fixture({ getGeminiClients: async () => [currentClient] });
+  try {
+    const p = await payload(f);
+    currentClient = { models: { get: async () => { throw Error('Invalid key'); } } };
+    const rejected = await f.request('generate', p);
+    assert.equal(rejected.code, 409);
+    assert.match(rejected.data.error, /Оновіть оцінку/);
+    assert.equal((await f.request('result', { jobKey: p.jobKey })).code, 404);
+    assert.equal(f.calls(), 0);
+    const updated = await f.request('quote');
+    assert.deepEqual([...updated.data.engines.map(engine => engine.id)], ['leonardo']);
+    assert.equal(f.calls(), 0);
+  } finally {
+    f.db.close();
+  }
+});
+
+test('Gemini generation permission errors invalidate the quote without retrying the job', async () => {
+  const client = { models: { get: async ({ model }) => ({
+    supportedActions: [model === 'gemini-nano-banana-pro' ? 'countTokens' : 'generateContent'],
+  }) } };
+  const f = fixture({ getGeminiClients: async () => [client] });
+  try {
+    const p = await payload(f);
+    f.setFail(new ImageGenerationError('no_key', 'provider permission details'));
+    assert.equal((await f.request('generate', p)).code, 503);
+    const sameJob = await f.request('generate', p);
+    assert.equal(sameJob.code, 409);
+    assert.equal(f.calls(), 1);
+    const updated = await f.request('quote');
+    assert(!updated.data.engines.some(engine => engine.id === p.engine));
+    assert(!updated.data.engines.some(engine => engine.id === 'nano-banana-pro'));
+    assert(updated.data.engines.some(engine => engine.id === 'leonardo'));
+    f.setFail(null);
+    assert.equal((await f.request('generate', await payload(f, 'leonardo'))).code, 200);
+    assert.deepEqual(f.imageClients, [client, undefined]);
+  } finally {
+    f.db.close();
+  }
+});
+
+test('Room Studio sends the sketch, depth and mask to the same OpenAI edits adapter without a second internal charge', async () => {
+  const f = fixture({ plan: 'free' });
+  try {
+    const p = await payload(f, 'gpt-image');
+    p.references = [p.references[0], p.references[0], p.references[0]];
+    let result = await f.request('generate', { ...p, externalBilling: true, billingMode: 'free', maxCredits: 0 });
+    assert.equal(result.code, 409);
+    assert.equal(f.calls(), 0);
+    result = await f.request('generate', {
+      ...p, externalBilling: true, billingMode: 'free', maxCredits: 0,
+      billingJobKey: p.jobKey.replace('room:', 'table:'),
+    });
+    assert.equal(result.code, 200);
+    assert.equal(result.data.credits, 0);
+    assert.equal(f.openAiEdits.length, 1);
+    assert.equal(f.openAiEdits[0].references.length, 3);
+  } finally {
+    f.db.close();
+  }
+});
+
+test('a paid Room Studio account requires a matching wallet reservation', async () => {
+  const f = fixture();
+  try {
+    f.db.exec('CREATE TABLE credit_reservations (job_key TEXT, user_id TEXT, amount INTEGER, status TEXT)');
+    const p = await payload(f, 'gpt-image');
+    const billingJobKey = p.jobKey.replace('room:', 'table:');
+    const request = { ...p, externalBilling: true, billingMode: 'credits', billingJobKey };
+    assert.equal((await f.request('generate', request)).code, 402);
+    assert.equal(f.calls(), 0);
+    f.db.prepare('INSERT INTO credit_reservations VALUES (?,?,?,?)').run(billingJobKey, 'studio-owner', p.maxCredits, 'reserved');
+    assert.equal((await f.request('generate', request)).code, 200);
+    assert.equal((await f.request('generate', request)).code, 200);
+    assert.equal(f.calls(), 1);
   } finally {
     f.db.close();
   }

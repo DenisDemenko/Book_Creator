@@ -1,3 +1,4 @@
+import { constructorRenderReport } from './constructorRenderReport';
 import { refreshFurnitureRoster, setSharedFurnitureRole } from './furnitureAccess';
 /**
  * API панелі адміністратора: користувачі, матриця прав і облік витрат.
@@ -669,6 +670,15 @@ export function registerAdminRoutes(app: Express): void {
 
   app.get('/api/admin/credits/overview', requireAdmin, (_req, res) => {
     res.json(creditsOverview());
+  });
+
+  app.get('/api/admin/credits/constructor-renders', requireAdmin, async (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      res.json(await constructorRenderReport());
+    } catch {
+      res.status(503).json({ error: 'Не вдалося завантажити ціни фоторендерів.' });
+    }
   });
 
   /** Зміна параметрів: ціни підписок, пакети балів, ліміт тексту й формула списання оновлюються разом. */

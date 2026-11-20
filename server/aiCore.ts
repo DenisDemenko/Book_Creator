@@ -45,6 +45,7 @@ import {
   generateImage as generateImageRaw,
   saveGeneratedImage,
   resolveEngine as resolveImageEngine,
+  type GeneratedImageResult,
 } from './imageGeneration';
 import {
   generateVideo as generateVideoRaw,
@@ -58,6 +59,7 @@ import {
 } from './media/mediaLibraryStore';
 import { recordUsage } from './store';
 import { platformKeyFor } from './platformKeys';
+import { createRoomGeminiImageAccess } from './roomGeminiImageAccess';
 import { beginImage, beginVideo, type ImageCreditJob } from './creditGate';
 import { checkChatQuota } from './subscriptions';
 import { priceForImage, priceForTextEngine, priceForVideo } from './pricing';
@@ -95,6 +97,11 @@ function geminiSdkFor(apiKey?: string): GoogleGenAI | null {
   }
   return client;
 }
+
+export const roomGeminiImageAccess = createRoomGeminiImageAccess(async () => {
+  const platformKey = await platformKeyFor('gemini');
+  return [platformKey ? geminiSdkFor(platformKey) : null, geminiClient];
+});
 
 /** Відмова саме ключа (а не моделі чи мережі): 401/403 або текст провайдера про недійсний ключ. */
 function isKeyRejection(err: unknown): boolean {
@@ -562,6 +569,7 @@ export async function generateWithGemini(
 
 interface GenerateImageParams {
   prompt: string;
+  constructorRender?: { generate: () => Promise<GeneratedImageResult>; externallyBilled: boolean };
   engine?: string;
   aspectRatio?: string;
   imageSize?: string;
@@ -659,7 +667,8 @@ export async function generateImage(p: GenerateImageParams): Promise<{
   // ImageCreditsError (402) одразу, без очікування генерації й без списання.
   const planned = resolveImageEngine(p.engine);
   const plannedSize = planned.maxSize === '1K' ? '1K' : p.imageSize === '1K' || p.imageSize === '4K' ? p.imageSize : '2K';
-  const creditJob: ImageCreditJob | null = await beginImage(p.req, planned.id, planned.modelId, plannedSize);
+  const creditJob: ImageCreditJob | null = p.constructorRender?.externallyBilled
+    ? null : await beginImage(p.req, planned.id, planned.modelId, plannedSize);
   try {
     // Ключ платформи, а не того, хто викликає: коди провайдерів вводить
     // лише адміністратор, і Nova обслуговує ним усіх авторів. Помилка
@@ -672,9 +681,9 @@ export async function generateImage(p: GenerateImageParams): Promise<{
     // рушієм 'gpt' (той самий OPENAI_API_KEY, що обслуговує GPT-4o в
     // чаті/тексті) — окремого запису для зображень адміністратор не
     // заводить.
-    const targetEngine = resolveImageEngine(p.engine);
+    const targetEngine = planned;
     const apiKeyOverride =
-      targetEngine.provider === 'bytedance'
+      p.constructorRender ? undefined : targetEngine.provider === 'bytedance'
         ? await platformKeyFor('seedream')
         : targetEngine.provider === 'openai'
           ? await platformKeyFor('gpt')
@@ -682,10 +691,10 @@ export async function generateImage(p: GenerateImageParams): Promise<{
             ? await platformKeyFor('leonardo')
             : undefined;
 
-    const imageSdk = targetEngine.provider === 'google' && !geminiClient
-      ? geminiSdkFor(await platformKeyFor('gemini'))
+    const imageSdk = !p.constructorRender && targetEngine.provider === 'google'
+      ? geminiClient ?? geminiSdkFor(await platformKeyFor('gemini'))
       : geminiClient;
-    const generated = await generateImageRaw(imageSdk, {
+    const generated = p.constructorRender ? await p.constructorRender.generate() : await generateImageRaw(imageSdk, {
       prompt: p.prompt,
       engine: p.engine,
       aspectRatio: p.aspectRatio,
