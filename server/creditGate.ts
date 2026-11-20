@@ -17,7 +17,7 @@ import { getDb, isAvailable } from './db';
 import { CreditWallet, WalletError, type CreditBalance } from './creditWallet';
 import { creditsForCostUsd } from './creditPricing';
 import { JEV_USD_PER_MTOK } from './ai/adapters/jev';
-import { priceForImage, priceForVideo } from './pricing';
+import { captureImagePrice, priceForImage, priceForVideo } from './pricing';
 import { resolveVideoParams } from './videoGeneration';
 import { PLANS, resolveSubscription, type PlanId } from './subscriptions';
 import { getPricingConfig } from './taxPricing';
@@ -121,6 +121,7 @@ async function beginCharge(req: any, costUsd: number, kind: 'img' | 'vid' | 'txt
   const userId = gatedUserId(req);
   if (!userId) return null;
   const credits = creditsOrThrow(costUsd);
+  const imagePriceAtReservation = captureImagePrice();
 
   const w = wallet();
   const jobKey = `${kind}:${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
@@ -147,7 +148,7 @@ async function beginCharge(req: any, costUsd: number, kind: 'img' | 'vid' | 'txt
     jobKey,
     reservedCredits: credits,
     settleUsd,
-    settle: (e, m, size) => settleUsd(priceForImage(e, size, m)),
+    settle: (e, m, size) => settleUsd(imagePriceAtReservation(e, size, m)),
     settleVideo: (e, m, res, dur) => settleUsd(priceForVideo(e, m, res, dur)),
     release(reason) {
       try {

@@ -1,3 +1,4 @@
+import { loadProviderImagePricing } from './server/providerImagePricing';
 import { registerRoomStudioBridge } from './server/roomStudioBridge';
 import { registerMarketplaceAssistant } from './server/marketplaceAssistant';
 import { chatOutputCap } from './src/utils/chatLimits';
@@ -563,6 +564,7 @@ async function startServer() {
 
   const storeInfo = await initStore();
   await loadTaxRegime();
+  await loadProviderImagePricing();
   console.log(
     storeInfo.backend === 'sqlite'
       ? `[db] Сховище: SQLite (${storeInfo.path})`

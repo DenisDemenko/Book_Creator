@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminConstructorPricing } from './AdminConstructorPricing';
 import { AdminTaxPricingPanel } from './AdminTaxPricingPanel';
+import type { ConstructorRenderReport } from '../../server/constructorRenderReport';
 
 interface PricingConfig {
   targetMarginPercent: number;
@@ -29,6 +30,7 @@ interface Overview {
   plans: PlanRow[];
   images: ImageRow[];
   videos: VideoRow[];
+  providerPriceReview?: ConstructorRenderReport['review'];
   examples: { photo: ImageRow | null; video: VideoRow | null };
   walletAvailable: boolean;
 }
@@ -128,6 +130,11 @@ export const AdminCreditsPanel: React.FC = () => {
       {notice && <div className="text-xs text-emerald-300">{notice}</div>}
       {!data.walletAvailable && (
         <div className="text-xs text-amber-300">Гаманець недоступний: сховище працює без SQLite, списання балів вимкнено.</div>
+      )}
+      {data.providerPriceReview?.due && section !== 'constructors' && (
+        <button type="button" className="text-xs text-amber-300 underline" onClick={() => setSection('constructors')}>
+          Час перевірити ціни провайдерів фоторендерів
+        </button>
       )}
 
       <div className="flex flex-wrap gap-2">
@@ -245,7 +252,10 @@ export const AdminCreditsPanel: React.FC = () => {
         </div>
       )}
 
-      {section === 'constructors' && <AdminConstructorPricing />}
+      {section === 'constructors' && <AdminConstructorPricing onReviewChanged={(review) => {
+        setData((current) => current && { ...current, providerPriceReview: review });
+        void api('/api/admin/credits/overview').then((overview: Overview) => setData(overview)).catch(() => {});
+      }} />}
 
       {section === 'users' && <UsersSection onChanged={load} flash={flash} setError={setError} />}
     </div>

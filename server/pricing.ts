@@ -96,7 +96,7 @@ export const IMAGE_PRICING: Record<string, ImagePriceTable> = {
   'gpt-image': {
     modelId: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5',
     label: 'GPT Image (OpenAI)',
-    perImageUsd: { '1K': 0.034 },
+    perImageUsd: { '1K': 0.034, ...(process.env.OPENAI_IMAGE_MODEL && process.env.OPENAI_IMAGE_MODEL !== 'gpt-image-1.5' ? {} : { '1K-rectangular': 0.05 }) },
   },
 
   // --- Задача #214: ПРИБЛИЗНІ тарифи 6 фото-двигунів Leonardo.Ai v2 -------
@@ -505,20 +505,40 @@ export function priceForMistralText(inputTokens: number, outputTokens: number): 
  *  3. `engineId` — запасний, генерик-тариф двигуна, коли жодна з двох
  *     точніших пар не знайшлася.
  */
+let imagePriceOverrides: Record<string, number> = {};
+
+export function setImagePriceOverrides(overrides: Record<string, number>) {
+  imagePriceOverrides = { ...overrides };
+}
+
+export function imagePriceKey(tableId: string, size: string) {
+  return `${tableId}@${size}`;
+}
+
+export function imagePriceEntries(tableId: string, overrides = imagePriceOverrides) {
+  return Object.entries(IMAGE_PRICING[tableId]?.perImageUsd ?? {}).map(([size, baseCostUsd]) => {
+    const key = imagePriceKey(tableId, size);
+    return { key, size, baseCostUsd, costUsd: overrides[key] ?? baseCostUsd };
+  });
+}
+
+export function imagePriceFor(engineId: string, imageSize = '2K', modelId?: string, overrides = imagePriceOverrides) {
+  const candidates = modelId ? [`${engineId}::${modelId}`, modelId, engineId] : [engineId];
+  const tableId = candidates.find((key) => Object.hasOwn(IMAGE_PRICING, key));
+  if (!tableId) return undefined;
+  const entries = imagePriceEntries(tableId, overrides);
+  return entries.find((entry) => entry.size === imageSize)
+    ?? entries.sort((a, b) => a.baseCostUsd - b.baseCostUsd)[0];
+}
+
 export function priceForImage(engineId: string, imageSize = '2K', modelId?: string): number {
-  const table =
-    (modelId && IMAGE_PRICING[`${engineId}::${modelId}`]) ||
-    (modelId && IMAGE_PRICING[modelId]) ||
-    IMAGE_PRICING[engineId];
-  if (!table) return 0;
+  return imagePriceFor(engineId, imageSize, modelId)?.costUsd ?? 0;
+}
 
-  const exact = table.perImageUsd[imageSize];
-  if (typeof exact === 'number') return exact;
-
-  const known = Object.keys(table.perImageUsd);
-  if (known.length === 0) return 0;
-  // Єдиний доступний тариф (як у Lite) або найдешевший із наявних.
-  return Math.min(...known.map((k) => table.perImageUsd[k]));
+export function captureImagePrice() {
+  const overrides = imagePriceOverrides;
+  return (engineId: string, imageSize: string, modelId?: string) =>
+    imagePriceFor(engineId, imageSize, modelId, overrides)?.costUsd ?? 0;
 }
 
 /**
@@ -798,7 +818,7 @@ export function pricingSnapshot() {
       engineId,
       modelId: table.modelId,
       label: table.label,
-      perImageUsd: table.perImageUsd,
+      perImageUsd: Object.fromEntries(imagePriceEntries(engineId).map(({ size, costUsd }) => [size, costUsd])),
     })),
     // Задача #214: те саме для відео — ключ тут це modelId (leonardoModel/
     // modelSlug), а не engineId, бо саме за modelId шукає priceForVideo().

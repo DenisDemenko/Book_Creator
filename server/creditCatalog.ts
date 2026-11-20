@@ -4,7 +4,7 @@
  * тож таблиця в панелі завжди збігається з тим, що реально знімається.
  */
 
-import { IMAGE_PRICING, VIDEO_PRICING, priceForVideo } from './pricing';
+import { IMAGE_PRICING, imagePriceEntries, VIDEO_PRICING, priceForVideo } from './pricing';
 import { VIDEO_ENGINES, engineModelId, type VideoEngineInfo } from './videoGeneration';
 import { creditsForCostUsd } from './creditPricing';
 
@@ -33,7 +33,7 @@ export interface VideoCostRow {
 export function imageCostTable(): ImageCostRow[] {
   const rows: ImageCostRow[] = [];
   for (const [key, table] of Object.entries(IMAGE_PRICING)) {
-    for (const [size, usd] of Object.entries(table.perImageUsd)) {
+    for (const { size, costUsd: usd } of imagePriceEntries(key)) {
       if (!(usd > 0)) continue;
       rows.push({ key, label: table.label, size, costUsd: usd, credits: creditsForCostUsd(usd) });
     }

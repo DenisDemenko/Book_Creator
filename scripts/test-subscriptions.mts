@@ -26,6 +26,11 @@ const { CreditWallet } = await import('../server/creditWallet.ts');
 const { getDb } = await import('../server/db.ts');
 const { checkImageQuota, activateSubscription, resolveSubscription, priceFor, PLANS, getActiveTaxRegime } = await import('../server/subscriptions.ts');
 const { constructorPlanProjection } = await import('../server/constructorRenderReport.ts');
+const { quoteConstructorImages } = await import('../server/constructorImageEngines.ts');
+const { listEngines } = await import('../server/imageGeneration.ts');
+const { captureImagePrice, priceForImage, setImagePriceOverrides } = await import('../server/pricing.ts');
+const { loadProviderImagePricing, providerPricingReview, saveProviderImagePricing, confirmedProviderImagePrice } =
+  await import('../server/providerImagePricing.ts');
 const { __dropDatabaseForTests } = await import('../server/db.ts');
 
 let passed = 0;
@@ -88,6 +93,55 @@ async function main() {
     assert.equal(row.photos, 5);
     assert.equal(row.grossUah, 0);
     assert.equal(row.contributionUah, -8.16);
+  });
+
+  await test('новий тариф змінює AI-бали, скасовує стару оцінку та зберігається після завантаження', async () => {
+    const access = {
+      registry: listEngines({ google: false, openai: true, bytedance: false, leonardo: false }),
+      google: new Map(), seedream: undefined, leonardo: undefined, seedreamViaFal: false,
+    };
+    const quote = (aspectRatio: string) => quoteConstructorImages(access, '1K', aspectRatio).find((row) => row.id === 'gpt-image')!;
+    const before = quote('1:1');
+    const priceAtReservation = captureImagePrice();
+    assert.equal(before.credits, 49);
+    await saveProviderImagePricing({
+      action: 'price', revision: providerPricingReview().revision, key: before.priceKey, costUsd: 0.07,
+      sourceUrl: 'https://developers.openai.com/api/docs/models/gpt-image-1.5',
+    }, 'admin-fixture');
+    const after = quote('1:1');
+    assert.equal(after.costUsd, 0.07);
+    assert.equal(priceAtReservation('gpt-image', '1K'), 0.034);
+    assert.equal(after.credits, 100);
+    assert.notEqual(after.quoteHash, before.quoteHash);
+    assert.equal(quote('16:9').costUsd, 0.05);
+    assert.equal(confirmedProviderImagePrice(after.priceKey!)?.updatedBy, 'admin-fixture');
+    setImagePriceOverrides({});
+    assert.equal(priceForImage('gpt-image', '1K'), 0.034);
+    await loadProviderImagePricing();
+    assert.equal(priceForImage('gpt-image', '1K'), 0.07);
+  });
+
+  await test('непідтверджена ціна і паралельні записи не перезаписують тариф', async () => {
+    const revision = providerPricingReview().revision;
+    await assert.rejects(saveProviderImagePricing({
+      action: 'price', revision, key: 'gpt-image@1K', costUsd: 0.02, sourceUrl: 'javascript:alert(1)',
+    }, 'admin-fixture'), /HTTPS/);
+    assert.equal(providerPricingReview().revision, revision);
+    const concurrent = await Promise.allSettled([
+      saveProviderImagePricing({ action: 'review', revision }, 'admin-a'),
+      saveProviderImagePricing({ action: 'review', revision }, 'admin-b'),
+    ]);
+    assert.equal(concurrent.filter((result) => result.status === 'fulfilled').length, 1);
+    const stale = concurrent.find((result) => result.status === 'rejected');
+    assert.equal(stale?.reason.status, 409);
+    assert.equal(priceForImage('gpt-image', '1K'), 0.07);
+  });
+
+  await test('нагадування стає активним через сім днів після підтвердження', () => {
+    const review = providerPricingReview();
+    assert.equal(Date.parse(review.dueAt!) - Date.parse(review.reviewedAt!), 7 * 86_400_000);
+    assert.equal(providerPricingReview(Date.parse(review.dueAt!) - 1).due, false);
+    assert.equal(providerPricingReview(Date.parse(review.dueAt!)).due, true);
   });
 
   console.log('\nЗареєстрований без підписки («гість») — 300 пробних балів одноразово:');

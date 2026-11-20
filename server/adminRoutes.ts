@@ -1,3 +1,4 @@
+import { providerPricingReview, ProviderImagePricingError, saveProviderImagePricing } from './providerImagePricing';
 import { constructorRenderReport } from './constructorRenderReport';
 import { refreshFurnitureRoster, setSharedFurnitureRole } from './furnitureAccess';
 /**
@@ -539,6 +540,7 @@ export function registerAdminRoutes(app: Express): void {
       })),
       images,
       videos,
+      providerPriceReview: providerPricingReview(),
       examples: { photo: photo || null, video: video || null },
       walletAvailable: isAvailable(),
     };
@@ -678,6 +680,17 @@ export function registerAdminRoutes(app: Express): void {
       res.json(await constructorRenderReport());
     } catch {
       res.status(503).json({ error: 'Не вдалося завантажити ціни фоторендерів.' });
+    }
+  });
+
+  app.put('/api/admin/credits/constructor-renders/pricing', requireAdmin, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      res.json(await saveProviderImagePricing(req.body, req.principal!.id));
+    } catch (error) {
+      if (error instanceof ProviderImagePricingError)
+        return res.status(error.status).json({ error: error.message });
+      res.status(503).json({ error: 'Не вдалося зберегти тариф провайдера.' });
     }
   });
 

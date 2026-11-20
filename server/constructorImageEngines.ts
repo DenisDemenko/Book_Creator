@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { roomGeminiImageAccess } from './aiCore';
 import { platformKeyFor } from './platformKeys';
 import { IMAGE_ENGINES, generateImage as generateRawImage, ImageGenerationError, listEngines, leonardoConfig, normalizeAspectRatio, seedreamConfig, seedreamTransportFor } from './imageGeneration';
-import { priceForImage, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
+import { imagePriceFor, SEEDREAM_FAL_EDIT_MODEL } from './pricing';
 import { creditsForCostUsd } from './creditPricing';
 import { editOpenAiImage, TableImageError } from './tableAiGeneration';
 
@@ -30,10 +30,12 @@ export function quoteConstructorImages(access: ConstructorImageAccess, requested
     const modelId = viaFal ? SEEDREAM_FAL_EDIT_MODEL : engine.modelId;
     const imageSize = engine.maxSize === '1K' || requestedSize === '1K' ? '1K'
       : requestedSize === '4K' && engine.maxSize === '4K' ? '4K' : '2K';
-    const costUsd = isGptEdit && modelId === 'gpt-image-1.5' && aspectRatio !== '1:1'
-      ? 0.05 : priceForImage(engine.id, imageSize, modelId);
+    const priceSize = isGptEdit && modelId === 'gpt-image-1.5' && aspectRatio !== '1:1'
+      ? '1K-rectangular' : imageSize;
+    const price = imagePriceFor(engine.id, priceSize, modelId);
+    const costUsd = price?.costUsd ?? 0;
     return {
-      ...engine, modelId, imageSize, costUsd,
+      ...engine, modelId, imageSize, costUsd, priceKey: price?.key,
       label: viaFal ? 'Seedream (через fal.ai)' : engine.label,
       available: engine.provider === 'google' ? access.google.has(modelId) : engine.available,
       supportsReferenceImages: isGptEdit || engine.supportsReferenceImages,
