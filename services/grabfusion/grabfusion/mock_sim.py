@@ -133,7 +133,8 @@ class Sim:
             return 200, {"drafts": [
                 {"draftId": d["draftId"], "kind": d["kind"], "status": d["status"], "title": d["title"],
                  "photoCount": len(d["photos"]), "updatedAt": d["updatedAt"],
-                 **({"courseSource": d.get("courseSource") or "photos"} if d["kind"] == "course" else {})}
+                 **({"courseSource": d.get("courseSource") or "photos"} if d["kind"] == "course" else {}),
+                 **({"newBookTitle": d["newBookTitle"]} if d["kind"] == "book" and d.get("newBookTitle") else {})}
                 for d in reversed(list(self.drafts.values())) if d["status"] != "discarded"]}
         if (method, name) == ("POST", "/"):
             return self._create(body)
@@ -238,16 +239,16 @@ class Sim:
 
     @staticmethod
     def _check_book_fields(kind: str, body: dict[str, Any], current: dict[str, Any] | None = None) -> Result | None:
-        """bookId обовʼязковий для book; для manuscript — bookId АБО newBookTitle; newBookTitle лише в рукописі."""
-        if body.get("newBookTitle") is not None and kind != "manuscript":
+        """bookId обовʼязковий для book; для manuscript — bookId АБО newBookTitle; newBookTitle — назва нової книги з фото або рукопису."""
+        if body.get("newBookTitle") is not None and kind not in {"book", "manuscript"}:
             return _err(400, "bad_input", "newBookTitle — лише для рукопису.")
         if body.get("bookId") is not None and kind not in {"book", "manuscript"}:
             return _err(400, "bad_input", "bookId — лише для книги чи рукопису.")
         book = body.get("bookId") if "bookId" in body else (current or {}).get("bookId")
         new = body.get("newBookTitle") if "newBookTitle" in body else (current or {}).get("newBookTitle")
-        if kind == "manuscript" and book and new:
+        if kind in {"book", "manuscript"} and book and new:
             return _err(400, "bad_input", "Оберіть або існуючу книгу, або нову — не обидві.")
-        if kind == "book" and current is None and not body.get("bookId"):
+        if kind == "book" and current is None and not (body.get("bookId") or new):
             return _err(400, "bad_input", "Для глави потрібен bookId.")
         if book and str(book).startswith("bk_missing"):
             return _err(404, "book_not_found", "Книги немає або вона чужа.")
@@ -586,7 +587,7 @@ class Sim:
         bl = self.blockers(d)
         if bl:
             return _err(400, "submit_blocked", "Чернетка ще не готова до відправки.", blockers=bl)
-        if d["kind"] == "manuscript":
+        if d["kind"] == "manuscript" or (d["kind"] == "book" and d.get("newBookTitle")):
             if not d["bookId"]:
                 # Контракт 1.5.0: без наявної книги Studio створює її сама, ціль — `book` (id книги, дашборд).
                 target = {"kind": "book", "id": self._next("BK"), "studioUrl": "/"}

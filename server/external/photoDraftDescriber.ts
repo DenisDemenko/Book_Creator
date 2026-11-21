@@ -36,7 +36,7 @@ export async function describePhotoWithCoreVision(
         keyLabel: 'photo-draft',
         params: {
           prompt: buildDescribePrompt(p.context),
-          systemInstruction: describeSystemInstruction(),
+          systemInstruction: describeSystemInstruction(p.context.kind),
           images: [{ mimeType: p.mimeType, dataBase64: p.base64 }],
           req: p.req,
           // Оплачено балами — грошовий ліміт не питаємо, запис журналу витрат позначаємо, токени міркування рахуємо.

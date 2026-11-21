@@ -118,10 +118,10 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 - **`POST /photo-drafts`** — тіло `{ kind, title?, craft?, audience?, level?, bookId?, newBookTitle?, instructionMode?, modelCode? }`.
   `instructionMode` (`assembly` — складання, `operation` — користування; без нього `assembly`) і `modelCode`
   (код або модель виробу) — для `kind: instruction`; режим у курсу чи книги → `400 bad_input`.
-  `bookId` обовʼязковий для `book` і має бути книгою автора (`404 book_not_found`). Для `manuscript`
-  `bookId` необовʼязковий, а замість нього можна дати `newBookTitle` (нова книга; обидва разом →
-  `400 bad_input`); `newBookTitle` в інших видів → `400 bad_input`. Понад
+  Для `book` передайте `bookId` власної книги (`404 book_not_found`) або `newBookTitle` для нової книги з фото й нотаток.
+  Для `manuscript` ці поля визначають книгу для набраного рукопису. Передавання обох полів разом і використання `newBookTitle` для інших видів → `400 bad_input`. Понад
   `maxOpenDrafts` → `409 too_many_drafts`.
+- **Книга з фото (`book` із `newBookTitle`).** Фото отримують описи, авторські нотатки зберігаються окремо. Проходи структури й генерації складають глави та сцени. Після перевірки `submit` створює нову книгу з чернетками глав, додає фото в медіатеку й повертає `target.kind: book`.
 - **`GET /photo-drafts`** — перелік власних чернеток (`drafts[]`, коротко), новіші перші; відкинуті
   (`discarded`) не показуються.
 - **`PATCH /photo-drafts/:draftId`** — тіло `{ ifRevision, title?, craft?, audience?, level?,

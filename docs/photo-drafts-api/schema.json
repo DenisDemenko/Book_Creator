@@ -754,6 +754,9 @@
           "type": "string",
           "format": "date-time"
         },
+        "newBookTitle": {
+          "type": "string"
+        },
         "courseSource": {
           "oneOf": [
             {

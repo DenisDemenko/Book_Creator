@@ -32,6 +32,8 @@ interface QuickAiModalProps {
   isOpen: boolean;
   onClose: () => void;
   book: Book;
+  activeChapterId?: string;
+  activeSectionId?: string;
   authUser?: AuthUser | null;
   /**
    * «Передати текст у книгу» (виділення в чаті → кінець розділу). Власник
@@ -1752,6 +1754,8 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   discussFragment,
   onDiscussFragmentConsumed,
   discussBatch,
+  activeChapterId,
+  activeSectionId,
   onDiscussBatchConsumed,
   pendingAttachmentFile,
   onAttachmentConsumed,
@@ -1770,6 +1774,8 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
   const welcomeMessage: ChatMessage = { sender: 'ai', text: t('quickAi.welcomeMessage', { title: book.title }) };
 
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
+  const [writingSkill, setWritingSkill] = useState(false);
+  useEffect(() => { setWritingSkill(false); }, [book.id]);
   const [inputText, setInputText] = useState('');
   const chatInputRef = useRef<HTMLInputElement>(null);
   /**
@@ -2264,6 +2270,26 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
     // «що скажеш про це?» без жодного слова в полі — нормальний запит.
     if ((!inputText.trim() && readyAttachments.length === 0 && !fragmentCard && !batchCard) || isLoading || hasPendingAttachment) return;
     const question = inputText.trim();
+    const activeChapter = book.chapters.find((chapter) => chapter.id === activeChapterId);
+    const activeSection = activeChapter?.sections.find((section) => section.id === activeSectionId);
+    const relatedIds = new Set([...(activeChapter?.cast ?? []), ...(activeSection?.scene?.characters.map((character) => character.characterId) ?? [])]);
+    const writingOptions = writingSkill ? {
+      writingSkill: 'fusion-book-writing',
+      writingLanguage: lang,
+      writingContext: JSON.stringify({
+        version: book.version,
+        revision: book.revisionNumber,
+        chapter: activeChapter?.title,
+        section: activeSection?.title,
+        outline: book.chapters.slice(0, 20).map(({ title }) => title.slice(0, 150)),
+        scene: activeSection?.scene,
+        characters: [...book.characters].sort((a, b) => Number(relatedIds.has(b.id)) - Number(relatedIds.has(a.id)))
+          .slice(0, 12).map(({ id, name, role, behaviorPatterns, dialogueTemplates }) => ({
+            id, name, role, behaviorPatterns: behaviorPatterns?.slice(0, 3), dialogueTemplates: dialogueTemplates?.slice(0, 2),
+          })),
+        sample: (lang === 'en' ? (activeSection?.contentEn || activeSection?.content) : activeSection?.content)?.slice(0, 3500),
+      }),
+    } : {};
     // Фрагмент іде ПЕРЕД питанням: модель читає уривок, потім те, що про
     // нього питають. Зворотний порядок змушує її тримати питання в голові
     // упродовж усього уривка — і вона регулярно відповідає на початок.
@@ -2303,6 +2329,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
             messages: nextMessages.map((m) => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text })),
             bookContext: { title: book.title, genre: book.genre, synopsis: book.synopsis },
             entityTagging: showEntityTags,
+            ...writingOptions,
           }),
         });
         const data = await res.json();
@@ -2348,6 +2375,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
            * може міняти його хоч посеред розмови.
            */
           entityTagging: showEntityTags,
+          ...writingOptions,
           attachments: readyAttachments.length > 0 || batchFile
             ? {
                 images: readyAttachments
@@ -2837,6 +2865,20 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
               </div>
             )}
 
+            <div>
+              <button
+                type="button"
+                aria-pressed={writingSkill}
+                onClick={() => {
+                  setWritingSkill(!writingSkill);
+                  chatInputRef.current?.focus();
+                }}
+                className={`${writingSkill ? 'nm-btn-primary' : 'nm-btn'} rounded-xl px-3 py-2 text-xs`}
+              >
+                {t('quickAi.writingSkill')}
+              </button>
+            </div>
+
             {attachedFiles.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {attachedFiles.map((a) => (
@@ -2896,7 +2938,7 @@ export const QuickAiModal: React.FC<QuickAiModalProps> = ({
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleChatInputKeyDown}
-                placeholder={batchCard ? t('quickAi.batchQuestionPlaceholder') : fragmentCard ? t('quickAi.fragmentQuestionPlaceholder') : t('quickAi.inputPlaceholder')}
+                placeholder={batchCard ? t('quickAi.batchQuestionPlaceholder') : fragmentCard ? t('quickAi.fragmentQuestionPlaceholder') : t(writingSkill ? 'quickAi.writingSkillPlaceholder' : 'quickAi.inputPlaceholder')}
                 className="flex-1 nm-inset rounded-xl p-2.5 text-xs text-[var(--on-surface)] placeholder:text-[var(--outline)] outline-none bg-transparent"
               />
               <button

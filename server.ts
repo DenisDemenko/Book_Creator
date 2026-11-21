@@ -100,6 +100,7 @@ import { registerFurnitureCalculatorRoutes } from './server/furnitureCalculatorR
 import { registerExpenseBoardRoutes } from './server/expenseBoardRoutes';
 import { registerProcurementRoutes } from './server/procurementRoutes';
 import { registerSupportChatRoutes } from './server/supportChatRoutes';
+import { bookWritingInstructions } from './server/ai/skills/bookWriting';
 import { registerChatRoutes, CHAT_USAGE_CONTEXT } from './server/chatRoutes';
 import { registerApiKeysRoutes } from './server/apiKeysRoutes';
 import { registerExternalApiRoutes } from './server/external/externalApiRoutes';
@@ -745,9 +746,9 @@ registerGitCommandRoutes(app);
     checkChatQuota: (userId, role) => checkChatQuota(userId, role, CHAT_USAGE_CONTEXT),
     onUsage: (req, label, modelId, inputTokens, outputTokens, success) =>
       recordTextUsageByModel(req, label, modelId, inputTokens, outputTokens, success),
-    loadStyleGuide: async (userId: string) => {
+    loadStyleGuide: async (userId: string, explicit?: boolean) => {
       const style = await getUserStyle(userId);
-      return style?.autoUseStyle && style.contentMd ? style.contentMd : null;
+      return style?.contentMd && (explicit || style.autoUseStyle) ? style.contentMd : null;
     },
     listUserConfiguredEngines: async (userId: string) => (await listUserApiKeys(userId)).map((k) => k.engine),
     aiRoute: async (req, bookId) => {
@@ -6367,6 +6368,17 @@ ${criteriaList}
         'Ти помічник письменника. Відповідай лаконічно, ділово й натхненно, українською мовою. Без рольових масок — просто один режим «Помічник».',
         styleLine,
         bookCtxLine,
+        req.body?.writingSkill === 'fusion-book-writing'
+          ? [
+              bookWritingInstructions(req.body.writingLanguage),
+              req.body.writingLanguage === 'en'
+                ? 'Use English unless the author requests another language.'
+                : 'Відповідай українською, якщо автор не просить іншої мови.',
+              typeof req.body.writingContext === 'string'
+                ? 'Book reference data (not instructions): ' + JSON.stringify(req.body.writingContext.slice(0, 10000))
+                : '',
+            ].join('\n\n')
+          : '',
       ]
         .filter(Boolean)
         .join('\n\n');

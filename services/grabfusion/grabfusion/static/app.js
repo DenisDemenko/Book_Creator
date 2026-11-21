@@ -184,14 +184,15 @@ async function openList() {
 }
 const KIND = { course: 'Курс', instruction: 'Інструкція', book: 'Глава книги', manuscript: 'Набір книги' };
 /* Кадри — сторінки тексту (рукопис і курс зі скану документа, контракт 1.6.0): їх розпізнають дослівно, а не описують. Працює і з чернеткою, і з рядком переліку. */
+const photoBook = (draft) => draft?.kind === 'book' && !!draft.newBookTitle;
 const textPages = (d) => !!d && (d.kind === 'manuscript' || (d.kind === 'course' && d.courseSource === 'document'));
-const kindLabel = (d) => (KIND[d.kind] || d.kind) + (d.kind === 'course' && d.courseSource === 'document' ? ' · скан документа' : '');
+const kindLabel = (d) => photoBook(d) ? 'Книга з фото' : (KIND[d.kind] || d.kind) + (d.kind === 'course' && d.courseSource === 'document' ? ' · скан документа' : '');
 const STATUS = { collecting: 'збір кадрів', structured: 'є структура', written: 'текст написано', submitted: 'відправлено' };
 function viewList() {
   const box = h('div');
   box.append(h('div', { class: 'row', style: 'margin-bottom:12px' }, h('h2', { class: 'grow', text: 'Чернетки' }),
     h('button', { class: 'primary', id: 'btn-new', text: 'Нова чернетка', onclick: () => go('choose') })));
-  if (!state.drafts.length && !(state.privateDrafts || []).length) box.append(h('p', { class: 'muted', text: 'Поки порожньо. Натисніть «Нова чернетка» й оберіть, що створюєте: інструкцію чи курс.' }));
+  if (!state.drafts.length && !(state.privateDrafts || []).length) box.append(h('p', { class: 'muted', text: 'Поки порожньо. Натисніть «Нова чернетка» й оберіть, що створюєте: інструкцію, курс або книгу.' }));
   for (const d of state.drafts) {
     box.append(h('div', { class: 'card row', 'data-draft': d.draftId },
       h('div', { class: 'grow' }, h('strong', { text: d.title || 'Без назви' }),
@@ -252,8 +253,8 @@ function viewChoose() {
     h('p', { class: 'muted', text: 'Оберіть, що вийде зі знімків. Далі все так само: знімаєте або скануєте, ШІ розпізнає, ви перевіряєте, і результат лягає в потрібний розділ Studio.' }),
     choiceCard('choose-instruction', '🔧', 'Інструкція', 'Кроки складання чи користування виробом за кадрами й технічною документацією. Результат — експрес-чернетка в майстрі інструкцій Studio.', () => startNew({ kind: 'instruction' })),
     choiceCard('choose-course', '🎓', 'Курс (тренінг)', 'Навчальний курс за фото майстер-класу або за сканом документа з друкованим чи рукописним текстом. Результат — чернетка в розділі «Курси» Studio: назва, опис, результати, модулі й уроки.', () => go('choose-course')),
-    h('p', { class: 'muted' }, 'Потрібна книга? ',
-      h('button', { class: 'link', id: 'choose-manuscript', type: 'button', text: 'Набір книги зі сторінок рукопису', onclick: () => startNew({ kind: 'manuscript' }) })),
+    choiceCard('choose-book', '📖', 'Створити книгу', 'Збирайте фото й замітки у своєму темпі. Коли будете готові, складіть план і напишіть чернетку книги.', () => startNew({ kind: 'book' })),
+    h('p', { class: 'muted' }, h('button', { class: 'link', id: 'choose-manuscript', type: 'button', text: 'Набрати книгу зі сторінок рукопису', onclick: () => startNew({ kind: 'manuscript' }) })),
     privateStoresNote(),
     h('p', null, h('button', { class: 'link', id: 'choose-to-list', type: 'button', text: state.drafts.length ? `Мої чернетки (${state.drafts.length})` : 'Мої чернетки', onclick: () => go('list') })));
 }
@@ -266,14 +267,15 @@ function viewChooseCourse() {
     h('p', null, h('button', { class: 'link', id: 'choose-back', type: 'button', text: '← Назад', onclick: () => go('choose') })));
 }
 
-const NEW_TITLE = { instruction: 'Нова інструкція', manuscript: 'Новий набір книги' };
+const NEW_TITLE = { book: 'Нова книга з фото', instruction: 'Нова інструкція', manuscript: 'Новий набір книги' };
 function viewCreate() {
   const preset = state.newDraft || { kind: 'course', courseSource: 'photos' };
   const kind = preset.kind;
+  const creatingBook = kind === 'book';
   const heading = kind === 'course' ? (preset.courseSource === 'document' ? 'Новий курс зі скану документа' : 'Новий курс із фото майстер-класу') : NEW_TITLE[kind] || 'Нова чернетка';
   const f = {
-    title: h('input', { id: 'f-title', maxlength: 160, placeholder: kind === 'course' && preset.courseSource === 'document' ? 'Назва курсу (можна залишити порожньою — ШІ запропонує)' : 'Наприклад: Ложка з вишні за один вечір' }),
-    craft: h('input', { id: 'f-craft', maxlength: 200, placeholder: kind === 'course' && preset.courseSource === 'document' ? 'Тема (необовʼязково)' : 'Ремесло (необовʼязково)' }),
+    title: h('input', { id: 'f-title', required: creatingBook, maxlength: 160, placeholder: creatingBook ? 'Робоча назва книги' : kind === 'course' && preset.courseSource === 'document' ? 'Назва курсу (можна залишити порожньою — ШІ запропонує)' : 'Наприклад: Ложка з вишні за один вечір' }),
+    craft: h('input', { id: 'f-craft', maxlength: 200, placeholder: creatingBook ? 'Про що буде книга? (необов’язково)' : kind === 'course' && preset.courseSource === 'document' ? 'Тема (необовʼязково)' : 'Ремесло (необовʼязково)' }),
     audience: h('input', { id: 'f-audience', maxlength: 200, placeholder: 'Для кого (необовʼязково)' }),
     mode: h('select', { id: 'f-mode' }, h('option', { value: 'assembly', text: 'Складання' }), h('option', { value: 'operation', text: 'Користування' })),
     model: h('input', { id: 'f-model', maxlength: 200, placeholder: 'Код або модель виробу' }),
@@ -300,6 +302,10 @@ function viewCreate() {
   return h('form', { class: 'card', id: 'create-form', 'data-kind': kind, onsubmit: async (e) => {
     e.preventDefault(); err.textContent = '';
     const body = { kind };
+    if (creatingBook) {
+      if (!f.title.value.trim()) { err.textContent = 'Вкажіть робочу назву книги.'; return; }
+      body.newBookTitle = f.title.value.trim();
+    }
     if (kind === 'course') body.courseSource = preset.courseSource || 'photos';
     for (const k of ['title', 'craft', 'audience']) if (f[k].value.trim()) body[k] = f[k].value.trim();
     if (kind === 'manuscript') {
@@ -313,11 +319,15 @@ function viewCreate() {
       try { await startPrivateDraft(body, f.store.value); } catch (e3) { err.textContent = e3.message; }
       return;
     }
-    try { const r = await api('POST', '/drafts', body); await openDraft(r.draft.draftId); } catch (e2) { err.textContent = e2.message; }
+    const button = e.currentTarget.querySelector('[type="submit"]');
+    button.disabled = true;
+    try { const r = await api('POST', '/drafts', body); await openDraft(r.draft.draftId); }
+    catch (e2) { err.textContent = e2.message; }
+    finally { button.disabled = false; }
   } },
     h('h2', { id: 'create-title', text: heading }),
     docNote, extra, msExtra, whereBlock,
-    h('label', { text: 'Назва' }), f.title, h('label', { text: f.craft.placeholder.startsWith('Тема') ? 'Тема' : 'Ремесло' }), f.craft, h('label', { text: 'Аудиторія' }), f.audience, err,
+    h('label', { for: 'f-title', text: creatingBook ? 'Назва книги' : 'Назва' }), f.title, h('label', { for: 'f-craft', text: creatingBook ? 'Задум' : f.craft.placeholder.startsWith('Тема') ? 'Тема' : 'Ремесло' }), f.craft, h('label', { text: 'Аудиторія' }), f.audience, err,
     h('p', { class: 'row' }, h('button', { class: 'primary', type: 'submit', text: 'Створити' }), h('button', { type: 'button', id: 'create-back', text: 'Назад', onclick: () => go('choose') })));
 }
 
@@ -351,7 +361,8 @@ const maxNote = () => (state.limits ? state.limits.maxNoteChars : 500);
 function noteBox(initial, onSave, id) {
   const tech = state.draft && state.draft.kind === 'instruction';
   const hint = textPages(state.draft);
-  const ta = h('textarea', { rows: 2, placeholder: (hint ? 'Підказка для розпізнавання: імена, мова, почерк… (до ' : tech ? 'Деталь, інструмент, момент складання… (до ' : 'Що на кадрі? (до ') + maxNote() + ' символів)', id });
+  const book = photoBook(state.draft);
+  const ta = h('textarea', { rows: 2, placeholder: (hint ? 'Підказка для розпізнавання: імена, мова, почерк… (до ' : tech ? 'Деталь, інструмент, момент складання… (до ' : book ? 'Що тут важливе для книги? Місце, герой, подія чи репліка… (до ' : 'Що на кадрі? (до ') + maxNote() + ' символів)', id });
   ta.value = initial || '';
   const cnt = h('div', { class: 'counter' });
   const upd = () => { const n = chars(ta.value); cnt.textContent = `${n} / ${maxNote()}`; cnt.className = 'counter' + (n > maxNote() ? ' over' : ''); return n; };
@@ -366,10 +377,14 @@ function saveNote(photoId, text) { return serial(async () => {
   const cur = noteFor(photoId);
   if ((cur ? cur.text : '') === text) return;
   try {
-    if (!text.trim()) { if (cur) { const r = await api('DELETE', `/drafts/${state.draft.draftId}/notes/${cur.noteId}`); state.draft = r.draft; } return; }
+    if (!text.trim()) { if (cur) { const r = await api('DELETE', `/drafts/${state.draft.draftId}/notes/${cur.noteId}`); state.draft = r.draft; if (photoBook(state.draft)) state.needsRender = true; } return; }
     const r = await api('PUT', `/drafts/${state.draft.draftId}/notes/${cur ? cur.noteId : 'n-' + photoId}`, { photoIds: [photoId], text });
     const rest = (state.draft.notes || []).filter((n) => n.noteId !== r.note.noteId);
     state.draft.notes = [...rest, r.note]; state.draft.revision = r.revision;
+    if (photoBook(state.draft) && state.draft.structure) {
+      if (state.draft.status === 'structured' || state.draft.status === 'written') state.draft.status = 'collecting';
+      state.needsRender = true;
+    }
   } catch (e) { toast(e.message); }
 }); }
 
@@ -388,7 +403,8 @@ function photoCard(p, i, total) {
     h('img', { src: `api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }),
     h('div', null,
       h('div', { class: 'row' }, h('strong', { text: '#' + p.order }), h('span', { class: 'badge ' + p.status, text: { processing: 'описується…', described: 'описано', failed: 'не вдалося' }[p.status] || p.status })),
-      p.description && h('p', { text: p.description }),
+      photoBook(state.draft) && p.takenAt && h('time', { datetime: p.takenAt, class: 'muted', text: new Date(p.takenAt).toLocaleDateString('uk-UA') }),
+      p.description && h('p', { text: photoBook(state.draft) ? 'Опис ШІ: ' + p.description : p.description }),
       p.tags && p.tags.length ? h('div', { class: 'tags' }, p.tags.map((t) => h('span', { text: t }))) : null,
       p.status === 'failed' && h('p', { class: 'err', text: p.error || 'Не вдалося описати кадр.' }),
       noteBox((noteFor(p.photoId) || {}).text, (text) => saveNote(p.photoId, text)),
@@ -430,6 +446,9 @@ function viewDraft() {
     h('button', { class: 'small', id: 'btn-save', text: '💾 Зберегти чернетку', onclick: saveDraft }),
     h('span', { class: 'muted', text: 'Зміни зберігаються й самі; кнопка — щоб відкласти роботу на потім.' })));
   if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(textPages(d) ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
+  if (photoBook(d)) box.append(h('div', { class: 'card', id: 'book-workflow' },
+    h('strong', { text: 'Матеріали книги' }),
+    h('p', { class: 'muted', text: 'Додавайте фото сьогодні й повертайтеся до цієї чернетки пізніше. Перевіряйте опис ШІ й дописуйте, яку роль кожне фото має в книзі.' })));
   const onFiles = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
   box.append(h('div', { class: 'shoot' },
     h('label', { class: 'btn primary', for: 'file-cam', id: 'lbl-cam', text: '📷 Зняти' }),
@@ -445,6 +464,11 @@ function viewDraft() {
     return box;
   }
   if (d.kind === 'instruction') box.append(viewInstructionMeta(d));
+  if (photoBook(d)) {
+    box.append(photosSection(d, mine, false), viewActions(d, mine));
+    if (d.structure) box.append(viewStructure(d));
+    return box;
+  }
   if (d.kind === 'course' || d.kind === 'instruction') box.append(viewActions(d, mine));
   if (d.structure) box.append(viewStructure(d));
   box.append(photosSection(d, mine, false));
@@ -472,7 +496,7 @@ function photosSection(d, mine, readOnly) {
   const list = h('div', { class: 'frames', id: 'frames' });
   photos.forEach((p, i) => list.append(photoCard(p, i, photos.length)));
   mine.forEach((q) => list.append(queuedCard(q)));
-  if (!photos.length && !mine.length) list.append(h('p', { class: 'muted', text: 'Знімайте кроки по порядку. Кожен кадр опишеться автоматично; свій опис можна дописати.' }));
+  if (!photos.length && !mine.length) list.append(h('p', { class: 'muted', text: photoBook(d) ? 'Додайте перше фото. Після розпізнавання допишіть, як воно пов’язане з книгою.' : 'Знімайте кроки по порядку. Кожен кадр опишеться автоматично; свій опис можна дописати.' }));
   if (!d.structure) return h('div', null, h('h3', { text: 'Кадри' }), list);
   const det = h('details', { id: 'photos-section' }, h('summary', { text: `Кадри (${photos.length})` }), list);
   if (state.photosOpen) det.setAttribute('open', '');
@@ -506,7 +530,7 @@ const AI_REFRESH_MS = 4 * 60 * 1000; // Studio кешує перевірку к�
 let aiSeq = 0;
 function aiPlan(d) {
   const plan = [];
-  const words = d.kind === 'instruction' ? { s: 'Розкласти на кроки', w: 'Написати кроки' } : { s: 'Розкласти на уроки', w: 'Написати уроки' };
+  const words = photoBook(d) ? { s: 'Скласти план книги', w: 'Написати чернетку книги' } : d.kind === 'instruction' ? { s: 'Розкласти на кроки', w: 'Написати кроки' } : { s: 'Розкласти на уроки', w: 'Написати уроки' };
   const left = d.structure ? d.structure.modules.filter((m) => !m.written).map((m) => m.moduleId) : [];
   if (!d.structure || d.status === 'collecting') plan.push({ id: 'structure', label: words.s, pass: 'structure', moduleIds: [] });
   else {
@@ -624,7 +648,9 @@ function viewAiPicker(d) {
 }
 
 function viewActions(d, mine) {
+  const book = photoBook(d);
   const box = h('div', { class: 'card', id: 'actions' });
+  if (book) box.append(h('strong', { text: 'План і чернетка книги' }));
   const job = d.job;
   const running = !!(job && job.status === 'running');
   const photosBusy = d.photos.some((p) => p.status === 'processing');
@@ -633,7 +659,7 @@ function viewActions(d, mine) {
   ensureAi(d);
   const aiWhy = !running && d.photos.length ? aiBlock(d) : '';
   const lock = running || state.writing || photosBusy || unsent || !d.photos.length || !!aiWhy;
-  if (running) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
+  if (running) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (book && job.kind === 'structure' ? 'ШІ складає план книги…' : JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
   if (job && job.status === 'failed') box.append(h('p', { class: 'err', id: 'job-error', text: job.error || 'Фонова робота не вдалася. Спробуйте ще раз.' }));
   if (!d.photos.length) box.append(h('p', { class: 'muted', text: `Спершу додайте ${unit.a}.` }));
   else if (photosBusy || unsent) box.append(h('p', { class: 'muted', id: textPages(d) ? 'ocr-banner' : null, text: unsent ? `Дочекайтесь, поки всі ${unit.a} надішлються.` : `${unit.b} ще ${unit.done}…` }));
@@ -641,14 +667,14 @@ function viewActions(d, mine) {
   const row = h('div', { class: 'row' });
   const mods = d.structure ? d.structure.modules : [];
   const left = mods.filter((m) => !m.written);
-  if (!d.structure) row.append(h('button', { class: 'primary', id: 'btn-structure', text: d.kind === 'instruction' ? 'Розкласти на кроки' : 'Розкласти на уроки', disabled: lock, onclick: () => doStructure(false) }));
+  if (!d.structure) row.append(h('button', { class: 'primary', id: 'btn-structure', text: book ? 'Скласти план книги' : d.kind === 'instruction' ? 'Розкласти на кроки' : 'Розкласти на уроки', disabled: lock, onclick: () => doStructure(false) }));
   else if (d.status === 'collecting') {
-    box.append(h('p', { class: 'muted', id: 'stale-note', text: 'Після розкладання додано чи змінено кадри — розкладіть уроки заново.' }));
+    box.append(h('p', { class: 'muted', id: 'stale-note', text: book ? 'Матеріали змінилися. Оновіть план книги.' : 'Після розкладання додано чи змінено кадри — розкладіть уроки заново.' }));
     row.append(confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure', class: 'primary' }));
   } else {
-    if (d.status !== 'written') row.append(h('button', { class: 'primary', id: 'btn-write', text: (d.kind === 'instruction' ? left.length === mods.length ? 'Написати кроки' : 'Дописати кроки' : left.length === mods.length ? 'Написати курс' : 'Дописати курс'), disabled: lock || !left.length, onclick: () => writeModules(left.map((m) => m.moduleId)) }));
+    if (d.status !== 'written') row.append(h('button', { class: 'primary', id: 'btn-write', text: (book ? (left.length === mods.length ? 'Написати чернетку книги' : 'Дописати глави') : d.kind === 'instruction' ? left.length === mods.length ? 'Написати кроки' : 'Дописати кроки' : left.length === mods.length ? 'Написати курс' : 'Дописати курс'), disabled: lock || !left.length, onclick: () => writeModules(left.map((m) => m.moduleId)) }));
     if (d.kind === 'course' && (left.length === 0 || d.status === 'written')) box.append(h('p', { id: 'submit-explain', text: 'Після «Відправити» Studio створить чернетку курсу й заповнить у розділі «Курси»:' }), coursePlaces(d));
-    if (left.length === 0 || d.status === 'written') row.append(h('button', { class: 'primary', id: 'btn-submit', text: d.kind === 'course' ? 'Відправити курс у Studio' : 'Відправити в Studio', disabled: lock, onclick: doSubmit }));
+    if (left.length === 0 || d.status === 'written') row.append(h('button', { class: 'primary', id: 'btn-submit', text: book ? 'Створити книгу в Studio' : d.kind === 'course' ? 'Відправити курс у Studio' : 'Відправити в Studio', disabled: lock, onclick: doSubmit }));
     const again = confirmBtn('Розкласти заново', 'Так, правки в структурі зникнуть', () => doStructure(true), { disabled: lock, id: 'btn-restructure' });
     row.append(again);
   }
@@ -680,6 +706,7 @@ async function runJob(startFn) {
   return true;
 }
 async function doStructure(replace) {
+  if (photoBook(state.draft)) await saveChain;
   const id = state.draft.draftId;
   state.writing = true; render();
   const body = aiBody(replace ? { replace: true } : undefined);
@@ -688,6 +715,7 @@ async function doStructure(replace) {
 }
 async function writeModules(ids) {
   if (state.writing) return;
+  if (photoBook(state.draft)) await saveChain;
   state.writing = true; render();
   try {
     for (const mid of ids) {
@@ -698,6 +726,7 @@ async function writeModules(ids) {
   } finally { state.writing = false; state.ai = null; render(); }
 }
 async function doSubmit() {
+  if (photoBook(state.draft)) await saveChain;
   state.blockers = null;
   try {
     const r = await api('POST', `/drafts/${state.draft.draftId}/submit`);
@@ -733,8 +762,8 @@ function viewSubmitted(d) {
     const name = d.newBookTitle || d.title || 'Нова книга';
     return h('div', { class: 'card', id: 'submitted' },
       h('h2', { text: 'Книгу створено в Studio' }),
-      h('p', { id: 'submitted-text', text: `Studio створила нову книгу «${name}» і поклала розпізнане в три місця:` }),
-      manuscriptPlaces(),
+      h('p', { id: 'submitted-text', text: photoBook(d) ? `Чернетка «${name}» є в «Книга & Текст». Фото додано до медіатеки, описи й авторські нотатки збережено з джерелами.` : `Studio створила нову книгу «${name}» і поклала розпізнане в три місця:` }),
+      !photoBook(d) && manuscriptPlaces(),
       h('p', { class: 'muted', text: 'Відкрийте Studio — книга вже чекає на дашборді; натисніть «Відкрити книгу».' }),
       h('p', null, h('a', { class: 'btn primary', id: 'open-studio', href, target: '_blank', rel: 'noopener', text: 'Відкрити Studio' })));
   }
@@ -922,6 +951,7 @@ function setAssumption(id, status) { return serial(async () => {
 }); }
 
 const TERMS = {
+  book: { structure: 'План книги', lesson: 'Сцена', title: 'Назва сцени', goal: 'Що має відбутися', body: 'Чернетка сцени' },
   course: { structure: 'Структура курсу', lesson: 'Урок', title: 'Назва уроку', goal: 'Мета', body: 'Текст уроку' },
   instruction: { structure: 'Кроки інструкції', lesson: 'Крок', title: 'Назва кроку', goal: 'Мета кроку', body: 'Опис кроку' },
 };

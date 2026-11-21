@@ -282,6 +282,23 @@ console.log('\nHTTP-роути (підставний генератор, без 
   t('модель отримала клієнтський контекст у промпті', lastPrompt.includes('Лише цей клієнтський контекст'));
   t('відповідь містить поле model', typeof threadSent.data?.assistantMessage?.model === 'string', String(threadSent.data?.assistantMessage?.model));
 
+  const writing = await call('POST', `/api/chat/sessions/${sessionId}/messages`, {
+    content: 'Write the next scene.',
+    writingSkill: 'fusion-book-writing',
+    writingLanguage: 'en',
+    writingContext: 'Marta has the key. Chapter 4.',
+  });
+  t('англійський скіл додається до системних інструкцій', writing.status === 200 &&
+    lastSystemPrompt.includes('Writing Books in Fusion Lab Studio') &&
+    lastSystemPrompt.includes('Marta has the key.') &&
+    lastSystemPrompt.includes('Короткі речення.'));
+  await call('POST', `/api/chat/sessions/${sessionId}/messages`, {
+    content: 'Продовж сцену.', writingSkill: 'fusion-book-writing', writingLanguage: 'uk',
+  });
+  t('український скіл обрано за мовою сайту', lastSystemPrompt.includes('Написання книг у Fusion Lab Studio'));
+  await call('POST', `/api/chat/sessions/${sessionId}/messages`, { content: 'Звичайне питання.' });
+  t('звичайний чат працює без скіла', !lastSystemPrompt.includes('Написання книг у Fusion Lab Studio'));
+
   // --- Негативні сценарії ---
   const badInput = await call('POST', `/api/chat/sessions/${sessionId}/messages`, { content: '   ' });
   t('порожнє повідомлення → 400', badInput.status === 400, String(badInput.status));

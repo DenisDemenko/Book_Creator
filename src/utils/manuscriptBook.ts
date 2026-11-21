@@ -26,6 +26,8 @@ export interface ManuscriptBookOptions {
   /** Час у мс: з нього робляться id книги й запису версії. */
   now: number;
   pageCount?: number;
+  photoBook?: boolean;
+  bookId?: string;
 }
 
 export interface ManuscriptBookBuild {
@@ -39,8 +41,9 @@ export function buildBookFromManuscript(opts: ManuscriptBookOptions): Manuscript
   const iso = new Date(now).toISOString();
   const title = opts.title.trim() || 'Нова книга з телефона';
   const chapterTitle = (opts.chapterTitle ?? '').trim() || title;
-  const bookId = `BK-${now.toString(36).toUpperCase()}`;
-  const note = `Книга створена автоматично з рукопису в GrabFusion${opts.pageCount ? ` (сторінок: ${opts.pageCount})` : ''}.`;
+  const bookId = opts.bookId ?? `BK-${now.toString(36).toUpperCase()}`;
+  const origin = opts.photoBook ? 'Фото й нотатки' : 'Рукопис';
+  const note = opts.photoBook ? 'Книга створена з фото й авторських нотаток у GrabFusion.' : `Книга створена автоматично з рукопису в GrabFusion${opts.pageCount ? ` (сторінок: ${opts.pageCount})` : ''}.`;
   const snapshot: BookVersionSnapshot = {
     id: `snap-init-${now}`,
     bookId,
@@ -50,10 +53,10 @@ export function buildBookFromManuscript(opts: ManuscriptBookOptions): Manuscript
     author,
     authorName: author,
     authorRole,
-    label: 'Створення з рукопису GrabFusion',
+    label: opts.photoBook ? 'Створення з фото GrabFusion' : 'Створення з рукопису GrabFusion',
     comment: note,
     note,
-    tags: ['Створення', 'GrabFusion', 'Рукопис'],
+    tags: ['Створення', 'GrabFusion', origin],
     wordCount: 0,
     chapterCount: 1,
     pageCount: opts.pageCount ?? 1,

@@ -363,9 +363,7 @@ export interface PhotoDraft {
   /** Лише для `kind: book` — книга, у «Вхідні» якої ляже глава. */
   bookId: string | null;
   /**
-   * Лише для `kind: manuscript` (з 1.3.0): назва НОВОЇ книги, коли `bookId` немає.
-   * Книга живе в браузері автора, тож сервер її не створює: пакет сторінок лягає
-   * у «Вхідні» без книги, а автор у Studio створює книгу й вставляє главу.
+   * Назва нової книги для `book` (із фото й нотаток) або `manuscript` (зі сканів), якщо немає `bookId`.
    */
   newBookTitle?: string | null;
   /** Лише для `kind: instruction` (з 1.2.0): складання чи користування; для інших видів `null`. Новим інструкціям — `assembly`. */
@@ -391,6 +389,7 @@ export interface PhotoDraftSummary {
   status: PhotoDraftStatus;
   title: string | null;
   photoCount: number;
+  newBookTitle?: string;
   /** Лише для `kind: course` (з 1.6.0). */
   courseSource?: PhotoDraftCourseSource | null;
   updatedAt: string;
@@ -482,9 +481,9 @@ export interface CreatePhotoDraftRequest {
   craft?: string;
   audience?: string;
   level?: PhotoDraftLevel;
-  /** Обовʼязковий для `kind: book`; для `manuscript` — або він, або `newBookTitle`. */
+  /** Книга призначення для `book` або `manuscript`, якщо не задано `newBookTitle`. */
   bookId?: string;
-  /** Лише для `kind: manuscript` (з 1.3.0): назва нової книги. */
+  /** Назва нової книги при створенні `book` або `manuscript`. */
   newBookTitle?: string;
   /** Лише для `kind: instruction`; без нього — `assembly`. */
   instructionMode?: PhotoDraftInstructionMode;

@@ -4,6 +4,7 @@
  * інтерфейсів і не тягнуть ні базу курсів, ні мережевих провайдерів.
  */
 
+import { createHash } from 'node:crypto';
 import { GEMINI_MODEL, generateText } from '../aiCore';
 import { engineConfigured, resolveEngine, ENGINE_ENV_KEY } from '../chatProviders';
 import { resolveEngineKey } from '../platformKeys';
@@ -11,11 +12,11 @@ import { resolveModuleModelId } from '../coreModuleModels';
 import { createCourse } from '../courseStore';
 import { createDraft as createExpressDraft } from '../expressStore';
 import { listUsageSince } from '../store';
-import { createScan, updateScan } from './externalApiStore';
-import { saveBook } from '../bookStore';
+import { createScan, listScans, updateScan } from './externalApiStore';
+import { getBook, saveBook } from '../bookStore';
 import { attachAssetsToBook } from '../media/mediaLibraryStore';
 import { buildBookFromManuscript } from '../../src/utils/manuscriptBook';
-import { joinManuscriptPages } from '../../src/utils/manuscriptBatch';
+import { insertBatchIntoBook, joinManuscriptPages } from '../../src/utils/manuscriptBatch';
 import type { UserRole } from '../../src/types';
 import type { CourseInput, InboxItem } from './photoDraftMapping';
 import type { WriteTextParams } from './photoDraftRoutes';
@@ -115,26 +116,52 @@ export async function createBookFromManuscript(p: {
   bookTitle: string;
   chapterTitle: string;
   items: InboxItem[];
+  photoChapters?: { title: string; text: string }[];
   tokenId?: string | null;
   batchId: string;
 }): Promise<{ bookId: string; chapterTitle: string; pages: number } | null> {
-  const text = joinManuscriptPages(p.items.map((i) => i.text));
+  const text = p.photoChapters?.[0]?.text ?? joinManuscriptPages(p.items.map((i) => i.text));
+  const photoBookId = p.photoChapters
+    ? 'BK-GF-' + createHash('sha256').update(p.ownerId + ':' + p.batchId).digest('hex').slice(0, 24)
+    : undefined;
+  const previous = photoBookId ? await getBook(photoBookId) : null;
+  if (previous && previous.ownerId !== p.ownerId) throw new Error('Немає доступу до книги.');
   const built = buildBookFromManuscript({
     title: p.bookTitle,
     chapterTitle: p.chapterTitle,
     text,
     author: p.ownerName || 'Автор',
     authorRole: p.ownerRole as UserRole,
-    now: Date.now(),
+    now: previous ? Date.parse(previous.createdAt) : Date.now(),
+    bookId: photoBookId,
     pageCount: p.items.length,
+    photoBook: !!p.photoChapters,
   });
   if (!built) return null;
-  const saved = await saveBook({ book: built.book as unknown as Record<string, unknown>, ownerId: p.ownerId });
+  let book = built.book;
+  const chapterIds = new Map([[built.chapterTitle, built.chapterId]]);
+  for (const [index, chapter] of (p.photoChapters ?? []).slice(1).entries()) {
+    const inserted = insertBatchIntoBook(book, chapter.text, {
+      title: chapter.title,
+      newChapterId: `${built.chapterId}-${index + 2}`,
+      now: book.updatedAt,
+    });
+    if (inserted) {
+      book = inserted.book;
+      chapterIds.set(chapter.title, inserted.chapterId);
+    }
+  }
+  const saved = previous ?? await saveBook({ book: book as unknown as Record<string, unknown>, ownerId: p.ownerId });
   await attachAssetsToBook(p.items.map((i) => i.assetId), p.ownerId, saved.id);
+  const existingScans = p.photoChapters
+    ? new Map((await listScans(p.ownerId, { bookId: saved.id })).filter((scan) => scan.batchId === p.batchId).map((scan) => [scan.batchOrder, scan]))
+    : new Map();
   let order = 0;
   for (const item of p.items) {
     order += 1;
-    const scan = await createScan({
+    const existing = existingScans.get(order);
+    if (existing?.status === 'inserted') continue;
+    const scan = existing ?? await createScan({
       ownerId: p.ownerId,
       bookId: saved.id,
       assetId: item.assetId,
@@ -146,8 +173,8 @@ export async function createBookFromManuscript(p: {
       status: 'inserted',
       recognizedText: item.text,
       text: item.text,
-      chapterId: built.chapterId,
-      chapterTitle: built.chapterTitle,
+      chapterId: chapterIds.get(item.chapterTitle) ?? built.chapterId,
+      chapterTitle: item.chapterTitle || built.chapterTitle,
       sectionTitle: item.sectionTitle,
       modelId: 'grabfusion',
     });

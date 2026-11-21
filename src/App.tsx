@@ -2849,6 +2849,8 @@ function StudioApp() {
         }}
         book={book}
         authUser={auth.user}
+        activeChapterId={activeChapterId}
+        activeSectionId={activeSectionId}
         onSendTextToChapter={handleSendChatTextToChapter}
         discussFragment={chatDiscussFragment}
         onDiscussFragmentConsumed={() => setChatDiscussFragment(null)}

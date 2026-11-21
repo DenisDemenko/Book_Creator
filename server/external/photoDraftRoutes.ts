@@ -96,7 +96,7 @@ import {
   suggestSystemInstruction,
 } from './photoDraftPasses';
 import { estimateGeneratePass, estimateStructurePass, estimateSuggestPass, type PassTokenEstimate } from './photoDraftEstimate';
-import { toCourseInput, toExpressPayload, toInboxItems, toManuscriptItems, type CourseInput, type InboxItem } from './photoDraftMapping';
+import { libraryUrl, toCourseInput, toExpressPayload, toInboxItems, toManuscriptItems, type CourseInput, type InboxItem } from './photoDraftMapping';
 
 const BASE = '/api/external/v1/photo-drafts';
 /** Стеля виходу моделі в проходах 2–3 і основа оцінки резерву балів. */
@@ -201,6 +201,7 @@ export interface PhotoDraftSinks {
     bookTitle: string;
     chapterTitle: string;
     items: InboxItem[];
+    photoChapters?: { title: string; text: string }[];
     tokenId?: string | null;
     batchId: string;
   }) => Promise<{ bookId: string; chapterTitle: string; pages: number } | null>;
@@ -301,7 +302,7 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
     audience: d.audience,
     level: d.level,
     bookId: d.bookId,
-    ...(d.kind === 'manuscript' ? { newBookTitle: d.newBookTitle ?? null } : {}),
+    ...(d.kind === 'manuscript' || d.newBookTitle ? { newBookTitle: d.newBookTitle ?? null } : {}),
     instructionMode: d.kind === 'instruction' ? (d.instructionMode ?? 'assembly') : null,
     modelCode: d.modelCode ?? null,
     ...(d.kind === 'course' ? { courseSource: d.courseSource ?? 'photos' } : {}),
@@ -324,6 +325,7 @@ function summary(d: StoredDraft): PhotoDraftSummary {
     title: d.title,
     photoCount: d.photos.length,
     ...(d.kind === 'course' ? { courseSource: d.courseSource ?? 'photos' } : {}),
+    ...(d.kind === 'book' && d.newBookTitle ? { newBookTitle: d.newBookTitle } : {}),
     updatedAt: d.updatedAt,
   };
 }
@@ -656,21 +658,19 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       let newBookTitle: string | null = null;
       if (kind === 'book' || kind === 'manuscript') {
         const wanted = typeof body.bookId === 'string' ? body.bookId.trim() : '';
-        if (kind === 'manuscript') {
-          try {
-            newBookTitle = shortField(body.newBookTitle, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Назва нової книги') ?? null;
-          } catch (err) {
-            return sendChangeError(res, err, 'create');
-          }
-          if (wanted && newBookTitle) return fail(res, 400, 'bad_input', 'Передайте або bookId (існуюча книга), або newBookTitle (нова), але не обидва.');
+        try {
+          newBookTitle = shortField(body.newBookTitle, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Назва нової книги') ?? null;
+        } catch (err) {
+          return sendChangeError(res, err, 'create');
         }
-        if (kind === 'book' || wanted) {
+        if (wanted && newBookTitle) return fail(res, 400, 'bad_input', 'Передайте або bookId (існуюча книга), або newBookTitle (нова), але не обидва.');
+        if ((kind === 'book' && !newBookTitle) || wanted) {
           const stored = wanted ? await getBook(wanted) : null;
           if (!stored || stored.ownerId !== ownerId) return fail(res, 404, 'book_not_found', 'Книгу не знайдено.');
           bookId = wanted;
         }
       } else if (body.newBookTitle !== undefined && body.newBookTitle !== null) {
-        return fail(res, 400, 'bad_input', 'Назва нової книги є лише в чернеток-рукописів.');
+        return fail(res, 400, 'bad_input', 'Назва нової книги є лише в чернеток книг і рукописів.');
       }
       if ((await countOpenDrafts(ownerId)) >= PHOTO_DRAFT_LIMITS.maxOpenDrafts) {
         return fail(
@@ -687,7 +687,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         kind,
         status: 'collecting',
         revision: 1,
-        title,
+        title: title || (kind === 'book' ? newBookTitle : null),
         craft,
         audience,
         level,
@@ -695,7 +695,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         modelCode,
         ...(kind === 'course' ? { courseSource } : {}),
         bookId,
-        ...(kind === 'manuscript' ? { newBookTitle } : {}),
+        ...(kind === 'manuscript' || newBookTitle ? { newBookTitle } : {}),
         photos: [],
         notes: [],
         structure: null,
@@ -1134,6 +1134,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           const index = d.notes.findIndex((n) => n.noteId === noteId);
           if (index >= 0) d.notes[index] = note;
           else d.notes.push(note);
+          if (d.kind === 'book' && d.newBookTitle) backToCollecting(d);
           return note;
         },
         { byTeacher: true, now }
@@ -1155,6 +1156,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           assertEditable(d);
           if (!d.notes.some((n) => n.noteId === noteId)) throw new DraftChangeError(404, 'note_not_found', 'Опису немає.');
           d.notes = d.notes.filter((n) => n.noteId !== noteId);
+          if (d.kind === 'book' && d.newBookTitle) backToCollecting(d);
         },
         { byTeacher: true, now }
       );
@@ -1309,12 +1311,12 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       let lessonId: string | null = null;
       let est: PassTokenEstimate;
       if (pass === 'structure') {
-        est = estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS);
+        est = estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource, d.kind === 'book' && !!d.newBookTitle), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS);
       } else if (pass === 'generate') {
         moduleId = String(req.query.moduleId ?? '');
         const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
         if (!m) return fail(res, 404, 'module_not_found', 'Модуля немає в структурі.');
-        est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
+        est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode, d.courseSource, d.kind === 'book' && !!d.newBookTitle), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
       } else {
         lessonId = String(req.query.lessonId ?? '');
         const found = findLesson(d, lessonId);
@@ -1365,7 +1367,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             'Структура вже є. Щоб розкласти заново, передайте { "replace": true } — правки викладача в ній буде втрачено.'
           );
         }
-      }, (d) => estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS));
+      }, (d) => estimateStructurePass(structureSystemInstruction(d.kind, d.instructionMode, d.courseSource, d.kind === 'book' && !!d.newBookTitle), buildStructurePrompt(d), d.photos.length, PASS_MAX_TOKENS));
       if (!begun) return;
       const { ownerId, draftId, startedAt, snapshot, draft, charge, modelId } = begun;
       finishJob(ownerId, draftId, startedAt, 'structure', async () => {
@@ -1374,7 +1376,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           const out = await deps.writeText!({
             ownerId,
             draftId,
-            system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource),
+            system: structureSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource, snapshot.kind === 'book' && !!snapshot.newBookTitle),
             prompt: buildStructurePrompt(snapshot),
             maxTokens: PASS_MAX_TOKENS,
             label: passLabel('Структура за фото (GrabFusion)', !!charge),
@@ -1399,7 +1401,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           };
           d.assumptions = parsed.assumptions.map((a) => (a.photoId && !d.photos.some((p) => p.photoId === a.photoId) ? { ...a, photoId: null } : a));
           if (!d.title && parsed.title) d.title = parsed.title;
-          d.status = 'structured';
+          d.status = d.kind === 'book' && d.newBookTitle && d.revision !== draft.revision ? 'collecting' : 'structured';
           d.job = null;
         };
       });
@@ -1420,7 +1422,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       }, (d) => {
         const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
         return estimateGeneratePass(
-          generateSystemInstruction(d.kind, d.instructionMode, d.courseSource),
+          generateSystemInstruction(d.kind, d.instructionMode, d.courseSource, d.kind === 'book' && !!d.newBookTitle),
           m ? buildGeneratePrompt(d, m) : '',
           m?.lessons.length ?? 1,
           PASS_MAX_TOKENS
@@ -1435,7 +1437,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           const out = await deps.writeText!({
             ownerId,
             draftId,
-            system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource),
+            system: generateSystemInstruction(snapshot.kind, snapshot.instructionMode, snapshot.courseSource, snapshot.kind === 'book' && !!snapshot.newBookTitle),
             prompt: buildGeneratePrompt(snapshot, module),
             maxTokens: PASS_MAX_TOKENS,
             label: passLabel('Текст модуля за фото (GrabFusion)', !!charge),
@@ -1599,7 +1601,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
       if ((before.kind === 'book' || before.kind === 'manuscript') && before.bookId) {
         const book = await getBook(before.bookId).catch(() => null);
         bookOk = !!book && book.ownerId === ownerId;
-      } else if (before.kind === 'manuscript' && before.newBookTitle?.trim()) {
+      } else if ((before.kind === 'manuscript' || before.kind === 'book') && before.newBookTitle?.trim()) {
         bookOk = true; // нова книга: її створить автор у Studio
       }
       const changed = await mutateDraft(
@@ -1623,6 +1625,36 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           } else if (d.kind === 'instruction') {
             const id = await sinks.createExpress(ownerId, toExpressPayload(d));
             target = { kind: 'express', id, studioUrl: `/express/${id}` };
+          } else if (d.kind === 'book' && d.newBookTitle) {
+            if (!sinks.createManuscriptBook) throw new Error('Створення книг не налаштовано.');
+            const photoChapters = (d.structure?.modules ?? []).map((module) => ({
+              title: module.title,
+              text: module.lessons.map((scene) => (scene.body ?? '').trim()).filter(Boolean).join('\n\n'),
+            }));
+            const items = [...d.photos].sort((a, b) => a.order - b.order).map((photo) => ({
+              assetId: photo.assetId,
+              imageUrl: libraryUrl(photo.assetId),
+              text: [
+                photo.description && `Опис ШІ: ${photo.description}`,
+                ...d.notes.filter((note) => note.photoIds.includes(photo.photoId)).map((note) => `Нотатка автора: ${note.text}`),
+              ].filter(Boolean).join('\n\n'),
+              chapterTitle: photoChapters.find((chapter, index) => d.structure?.modules[index]?.lessons.some((scene) => scene.photoIds.includes(photo.photoId)))?.title ?? '',
+              sectionTitle: `Фото ${photo.order}`,
+            }));
+            const principal = req.principal as { name?: string; role?: string } | undefined;
+            const made = await sinks.createManuscriptBook({
+              ownerId,
+              ownerName: principal?.name ?? '',
+              ownerRole: principal?.role ?? 'writer',
+              bookTitle: d.newBookTitle,
+              chapterTitle: photoChapters[0]?.title ?? d.newBookTitle,
+              photoChapters,
+              items,
+              tokenId: d.tokenId,
+              batchId: d.id,
+            });
+            if (!made) throw new Error('Немає тексту для створення книги.');
+            target = { kind: 'book', id: made.bookId, studioUrl: '/' };
           } else if (d.kind === 'manuscript') {
             const items = toManuscriptItems(d);
             // Нової книги ще немає — Studio створює її сама (дашборд, «Книга & Текст», медіатека); збій чи порожній текст — як раніше, «Вхідні».

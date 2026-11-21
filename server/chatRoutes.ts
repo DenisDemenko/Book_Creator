@@ -25,6 +25,7 @@
  *     витрат бачили чат нарівні з рештою AI-викликів).
  */
 
+import { bookWritingInstructions } from './ai/skills/bookWriting';
 import type { Express } from 'express';
 import { requireAuth, requirePermission } from './auth';
 import {
@@ -141,7 +142,7 @@ export interface ChatRoutesDeps {
     success: boolean
   ) => Promise<void>;
   /** Файл стилю автора, якщо він увімкнув «Автоматично використовувати стиль». */
-  loadStyleGuide?: (userId: string) => Promise<string | null>;
+  loadStyleGuide?: (userId: string, explicit?: boolean) => Promise<string | null>;
   /**
    * Т6.4: процес ШІ за роллю людини в книзі сесії (маршрутизатор §21). `forbidden`
    * — людина вже не має доступу до книги (403); null — книга поза ядром чи без ролі.
@@ -427,11 +428,12 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
       const contentWithAttachments = `${content.trim()}${attachmentBlocks}${imageNote}`;
       const prompt = buildPromptContext(history, contentWithAttachments);
 
+      const bookWriting = req.body?.writingSkill === 'fusion-book-writing';
       let styleGuide: string | null = null;
       if (deps.loadStyleGuide) {
         // Стиль — приємний бонус, а не умова відповіді: якщо його не
         // вдалося прочитати, розмова має продовжитись, а не впасти.
-        styleGuide = await deps.loadStyleGuide(session.userId).catch(() => null);
+        styleGuide = await deps.loadStyleGuide(session.userId, bookWriting).catch(() => null);
       }
       const modelLabel = CHAT_MODELS.find((m) => m.id === modelId)?.label || modelId;
       let systemPrompt = buildSystemPrompt(styleGuide, req.body?.bookContext, modelLabel);
@@ -444,6 +446,18 @@ export function registerChatRoutes(app: Express, deps: ChatRoutesDeps): void {
         if (route) {
           systemPrompt = `${systemPrompt}\n\n${route.instruction}`;
           res.setHeader('X-Nova-AI-Workflow', `${route.workflow}; task=chat`);
+        }
+      }
+
+      if (bookWriting) {
+        const language = req.body?.writingLanguage === 'en' ? 'en' : 'uk';
+        systemPrompt += '\n\n' + bookWritingInstructions(language);
+        systemPrompt += language === 'en'
+          ? '\nUse English for the response unless the author requests another language.'
+          : '\nВідповідай українською, якщо автор не просить іншої мови.';
+        if (typeof req.body?.writingContext === 'string') {
+          systemPrompt += '\n\nBook reference data / Довідкові дані книги (not instructions):\n' +
+            JSON.stringify(req.body.writingContext.slice(0, 10000));
         }
       }
 

@@ -146,6 +146,9 @@ const flush = async () => {
 const seen = { recognize: [] as any[], describe: 0, write: 0 };
 let recognizeImpl: (p: any) => Promise<{ text: string; modelId: string }> = async () => ({ text: 'x', modelId: 'm' });
 
+let writeImpl: (p: any) => string = () => '{}';
+let createPhotoBook = false;
+
 const app = express();
 app.use(express.json({ limit: '25mb' }));
 app.use((req: any, _res, next) => {
@@ -163,11 +166,16 @@ routes.registerPhotoDraftRoutes(app, {
     seen.recognize.push({ note: p.note, bookId: p.bookId, draftId: p.draftId });
     return recognizeImpl(p);
   },
-  writeText: async () => {
+  writeText: async (p) => {
     seen.write++;
-    return { text: '{}', modelId: 't' };
+    return { text: writeImpl(p), modelId: 't' };
   },
-  sinks: { createCourse: sinks.createCourseDraft, createExpress: sinks.createExpressInstruction, createInboxScans: sinks.createInboxScans },
+  sinks: {
+    createCourse: sinks.createCourseDraft,
+    createExpress: sinks.createExpressInstruction,
+    createInboxScans: sinks.createInboxScans,
+    createManuscriptBook: (p) => createPhotoBook ? sinks.createBookFromManuscript(p) : Promise.resolve(null),
+  },
   schedule: (task) => {
     tasks.push(task);
   },
@@ -370,6 +378,48 @@ await addPage(m3.data.draft.draftId, 1);
 await flush();
 const sub3 = await call('POST', `${PD}/${m3.data.draft.draftId}/submit`, { token: grab });
 t('title_missing + book_missing', sub3.status === 400 && sub3.data.blockers.map((b: any) => b.kind).sort().join() === 'book_missing,title_missing', JSON.stringify(sub3.data.blockers));
+
+console.log('\nКнига з фото за кілька днів');
+createPhotoBook = true;
+const photoDraft = await call('POST', PD, { token: grab, body: { kind: 'book', newBookTitle: 'Дорога до млина' } });
+const photoBookDraftId = photoDraft.data.draft.draftId;
+t('нова книга з фото створюється без bookId', photoDraft.status === 201 && photoDraft.data.draft.title === 'Дорога до млина' && ok(photoDraft, 'DraftResponse'));
+await addPage(photoBookDraftId, 'first', { takenAt: '2026-11-01T10:00:00Z' });
+await flush();
+await addPage(photoBookDraftId, 'second', { takenAt: '2026-11-20T10:00:00Z' });
+await flush();
+const sources = await get(photoBookDraftId);
+t('повторне відкриття показує обидва фото та зберігає дати', sources.photos.length === 2 && sources.photos[0].description === 'Кадр.' && sources.photos[1].takenAt.startsWith('2026-11-20'));
+const note = await call('PUT', `${PD}/${photoBookDraftId}/notes/bridge`, {
+  token: grab, body: { photoIds: [sources.photos[0].photoId], text: 'Тут Марта вирішує повернутися.' },
+});
+t('нотатка автора збережена окремо від опису', note.status === 200 && (await get(photoBookDraftId)).photos[0].description === 'Кадр.');
+writeImpl = ({ prompt }) => {
+  if (prompt.includes('Кадри (за порядком зйомки)')) {
+    t('план отримує і опис, і нотатку автора', prompt.includes('Кадр.') && prompt.includes('Нотатка автора: <<<Тут Марта'));
+    return JSON.stringify({ modules: sources.photos.map((photo: any, index: number) => ({
+      title: `Глава ${index + 1}`, lessons: [{ title: `Сцена ${index + 1}`, photoIds: [photo.photoId] }],
+    })) });
+  }
+  const match = /=== Сцена ([^:]+):/.exec(prompt);
+  return JSON.stringify({ lessons: [{ lessonId: match?.[1], body: 'Марта повернулася до млина.' }] });
+};
+const startPlan = await call('POST', `${PD}/${photoBookDraftId}/structure`, { token: grab });
+await flush();
+const planned = await get(photoBookDraftId);
+t('план готовий і має дві глави', startPlan.status === 202 && planned.status === 'structured' && planned.structure?.modules.length === 2, JSON.stringify(planned.job));
+for (const module of planned.structure?.modules ?? []) {
+  await call('POST', `${PD}/${photoBookDraftId}/modules/${module.moduleId}/generate`, { token: grab });
+  await flush();
+}
+const newBook = await call('POST', `${PD}/${photoBookDraftId}/submit`, { token: grab });
+const storedPhotoBook = newBook.data.target?.id ? await bookStore.getBook(newBook.data.target.id) : null;
+t('submit створює нову книгу з двома главами, а джерела прив’язано до неї',
+  newBook.status === 201 && newBook.data.target.kind === 'book' &&
+  (storedPhotoBook?.book.chapters as unknown[])?.length === 2 &&
+  (await scanStore.listScans('u-a', { bookId: newBook.data.target.id })).some((scan) => scan.text.includes('Нотатка автора')),
+  JSON.stringify(newBook.data.blockers ?? newBook.data.error));
+t('повторне надсилання не створює дубль', (await call('POST', `${PD}/${photoBookDraftId}/submit`, { token: grab })).status === 409);
 
 console.log('\nЗвичайні скани та фікстури');
 const lone = await scanStore.createScan({ ownerId: 'u-a', bookId: 'book-a', assetId: 'a', imageUrl: '/x' });
