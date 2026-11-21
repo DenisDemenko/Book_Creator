@@ -17,6 +17,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { getDb, isAvailable, DATA_DIR } from '../db';
 import type {
+  BookIdea,
   DraftAssumption,
   DraftJob,
   DraftNote,
@@ -60,6 +61,7 @@ export interface StoredDraft {
   notes: DraftNote[];
   structure: DraftStructure | null;
   assumptions: DraftAssumption[];
+  bookIdeas?: BookIdea[];
   job: DraftJob | null;
   submitted: SubmitTarget | null;
   /** Яким токеном створено — для журналу, назовні не йде. */

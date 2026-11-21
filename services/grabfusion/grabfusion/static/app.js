@@ -377,13 +377,13 @@ function saveNote(photoId, text) { return serial(async () => {
   const cur = noteFor(photoId);
   if ((cur ? cur.text : '') === text) return;
   try {
-    if (!text.trim()) { if (cur) { const r = await api('DELETE', `/drafts/${state.draft.draftId}/notes/${cur.noteId}`); state.draft = r.draft; if (photoBook(state.draft)) state.needsRender = true; } return; }
+    if (!text.trim()) { if (cur) { const r = await api('DELETE', `/drafts/${state.draft.draftId}/notes/${cur.noteId}`); state.draft = r.draft; if (photoBook(state.draft)) render(); } return; }
     const r = await api('PUT', `/drafts/${state.draft.draftId}/notes/${cur ? cur.noteId : 'n-' + photoId}`, { photoIds: [photoId], text });
     const rest = (state.draft.notes || []).filter((n) => n.noteId !== r.note.noteId);
     state.draft.notes = [...rest, r.note]; state.draft.revision = r.revision;
-    if (photoBook(state.draft) && state.draft.structure) {
+    if (photoBook(state.draft)) {
       if (state.draft.status === 'structured' || state.draft.status === 'written') state.draft.status = 'collecting';
-      state.needsRender = true;
+      render();
     }
   } catch (e) { toast(e.message); }
 }); }
@@ -434,6 +434,164 @@ function queuedCard(it) {
         h('button', { class: 'small danger', text: 'Прибрати', onclick: async () => { await qDel(it.clientId); dropUrl(it.clientId); state.queue = state.queue.filter((x) => x.clientId !== it.clientId); render(); } }))));
 }
 
+const BOOK_IDEA_LABELS = { character: 'Герой', scene: 'Сцена' };
+
+function bookIdeaDialog(title, ...contents) {
+  const headingId = 'book-idea-dialog-heading';
+  const dialog = h('dialog', { class: 'card book-idea-dialog', 'aria-labelledby': headingId },
+    h('h3', { id: headingId, text: title }), ...contents,
+    h('button', { type: 'button', class: 'small', text: 'Закрити', onclick: () => dialog.close() }));
+  // Keep automatic photo/job polling from replacing the draft while the author edits a card.
+  state.editing = true;
+  dialog.addEventListener('close', () => { dialog.remove(); endEditing(); }, { once: true });
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+async function chooseBookIdea(kind) {
+  const id = state.draft.draftId;
+  await saveChain;
+  const draft = state.draft;
+  if (!draft || draft.draftId !== id || draft.job?.status === 'running') return;
+  const notedIds = new Set(draft.notes.flatMap((note) => note.photoIds));
+  const photos = draft.photos.filter((p) => p.status !== 'processing' && (p.description || notedIds.has(p.photoId)));
+  if (!photos.some((p) => notedIds.has(p.photoId))) { toast('Додайте нотатку хоча б до одного фото.'); return; }
+  const checked = new Set(photos.length <= 8
+    ? photos.map((p) => p.photoId)
+    : photos.filter((p) => notedIds.has(p.photoId)).slice(-8).map((p) => p.photoId));
+  const note = h('p', { 'aria-live': 'polite', class: 'muted' });
+  const err = h('p', { role: 'alert', class: 'err' });
+  const button = h('button', { type: 'button', class: 'primary', text: 'Перевірити вартість' });
+  let quote = null;
+  let busy = false;
+  const update = () => {
+    quote = null;
+    button.textContent = 'Перевірити вартість';
+    button.disabled = busy || checked.size < 1 || checked.size > 8 || ![...checked].some((id) => notedIds.has(id));
+    note.textContent = `Вибрано: ${checked.size} з 8. Потрібне хоча б одне фото з вашою нотаткою.`;
+    err.textContent = '';
+  };
+  const authorNotes = new Map(photos.map((p) => [
+    p.photoId,
+    draft.notes.filter((item) => item.photoIds.includes(p.photoId)).map((item) => item.text).join(' '),
+  ]));
+  const dialog = bookIdeaDialog(kind === 'character' ? 'Створити героя з нотаток' : 'Створити сцену з нотаток',
+    h('p', { text: 'Виберіть фото, які стосуються героя або події.' }),
+    h('div', { class: 'book-idea-sources' }, photos.map((photo) => h('label', { class: 'book-idea-source' },
+      h('input', { type: 'checkbox', checked: checked.has(photo.photoId), onchange: (e) => {
+        if (e.target.checked) checked.add(photo.photoId); else checked.delete(photo.photoId);
+        update();
+      } }),
+      h('img', { src: `api/drafts/${id}/photos/${photo.photoId}/image`, alt: '', loading: 'lazy' }),
+      h('span', null, h('strong', { text: `Фото №${photo.order}` }),
+        h('span', { class: 'muted', text: authorNotes.get(photo.photoId) || photo.description || '' }))))),
+    note, err, button);
+  update();
+  button.addEventListener('click', async () => {
+    if (busy) return;
+    busy = true; button.disabled = true; err.textContent = '';
+    const photoIds = [...checked];
+    const selection = photoIds.join(',');
+    try {
+      if (!quote || quote.selection !== selection) {
+        const params = new URLSearchParams({ pass: 'book-idea', kind, photoIds: selection });
+        const result = await api('GET', `/drafts/${id}/ai-options?${params}`);
+        if (!dialog.open || selection !== [...checked].join(',')) return;
+        const usable = result.models.filter((m) => m.usable && m.credits);
+        const saved = aiStored();
+        const model = usable.find((m) => m.modelId === saved) || usable.find((m) => m.modelId === result.defaultModelId) || usable[0];
+        if (!model) throw new Error('Немає доступної моделі з визначеною вартістю.');
+        if (!result.unlimited && result.balance != null && result.balance < model.credits.max) {
+          throw new Error(`Не вистачає балів: потрібно до ${credits(model.credits.max)}, на балансі ${credits(result.balance)}.`);
+        }
+        quote = { modelId: model.modelId, selection };
+        note.textContent = result.unlimited ? `${model.label} · без списання балів`
+          : `${model.label} · приблизно ${credits(model.credits.expected)}, до ${credits(model.credits.max)}`;
+        button.textContent = 'Створити пропозицію';
+        return;
+      }
+      const result = await api('POST', `/drafts/${id}/book-ideas`, { kind, photoIds, modelId: quote.modelId, ifRevision: draft.revision });
+      if (state.draft?.draftId === id) {
+        state.draft = result.draft;
+        dialog.close(); render(); schedulePoll();
+      }
+    } catch (error) {
+      if (error.kind === 'revision_conflict') { dialog.close(); toast(error.message); await reloadDraft(); }
+      else err.textContent = error.message;
+    } finally {
+      busy = false;
+      button.disabled = !checked.size || checked.size > 8 || ![...checked].some((id) => notedIds.has(id));
+    }
+  });
+}
+
+function reviewBookIdea(idea) {
+  const title = h('input', { id: 'book-idea-title', maxlength: 160, value: idea.title });
+  const description = h('textarea', { id: 'book-idea-description', maxlength: 2400, rows: 10 });
+  description.value = idea.text;
+  const place = idea.kind === 'scene' ? h('input', { id: 'book-idea-place', maxlength: 160, value: idea.location ?? '' }) : null;
+  const time = idea.kind === 'scene' ? h('input', { id: 'book-idea-time', maxlength: 160, value: idea.timeOfDay ?? '' }) : null;
+  const err = h('p', { role: 'alert', class: 'err' });
+  const save = h('button', { type: 'button', class: 'primary', text: idea.accepted ? 'Зберегти зміни' : 'Додати до чернетки' });
+  const dialog = bookIdeaDialog(BOOK_IDEA_LABELS[idea.kind],
+    h('label', { for: title.id, text: idea.kind === 'character' ? 'Ім’я героя' : 'Назва сцени' }), title,
+    place && h('label', { for: place.id, text: 'Місце' }), place,
+    time && h('label', { for: time.id, text: 'Час' }), time,
+    h('label', { for: description.id, text: 'Опис' }), description, err, save);
+  save.addEventListener('click', async () => {
+    if (!title.value.trim() || !description.value.trim()) { err.textContent = 'Заповніть назву й опис.'; return; }
+    save.disabled = true;
+    try {
+      await changeBookIdea(idea.id, {
+        action: 'accept', title: title.value.trim(), text: description.value.trim(),
+        ...(place && time ? { location: place.value.trim(), timeOfDay: time.value.trim() } : {}),
+      });
+      dialog.close(); render();
+    } catch (error) {
+      err.textContent = error.message;
+      if (error.kind === 'revision_conflict') await reloadDraft();
+    } finally { save.disabled = false; }
+  });
+}
+
+function changeBookIdea(ideaId, fields) {
+  return serial(async () => {
+    const draft = state.draft;
+    const result = await api('PATCH', `/drafts/${draft.draftId}/book-ideas/${ideaId}`, { ...fields, ifRevision: draft.revision });
+    if (state.draft?.draftId === draft.draftId) state.draft = result.draft;
+  });
+}
+
+function viewBookIdeas(draft, readOnly = false) {
+  const ideas = draft.bookIdeas ?? [];
+  const job = draft.job;
+  const busy = state.writing || job?.status === 'running';
+  const hasNotes = draft.notes.some((note) => note.photoIds.some((id) =>
+    draft.photos.some((photo) => photo.photoId === id && photo.status !== 'processing')));
+  return h('div', { class: 'card', id: 'book-ideas' },
+    h('h3', { text: 'Герої та сцени' }),
+    !readOnly && h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'primary', id: 'create-character-from-notes', text: 'Створити героя з нотаток', disabled: busy || !hasNotes, onclick: () => chooseBookIdea('character') }),
+      h('button', { type: 'button', class: 'primary', id: 'create-scene-from-notes', text: 'Створити сцену з нотаток', disabled: busy || !hasNotes, onclick: () => chooseBookIdea('scene') })),
+    !readOnly && !hasNotes && h('p', { class: 'muted', text: 'Додайте авторську нотатку до фото, щоб підготувати героя або сцену.' }),
+    job?.bookIdeaKind && h('p', { role: 'status', class: job.status === 'failed' ? 'err' : 'muted',
+      text: job.status === 'failed' ? job.error : (job.bookIdeaKind === 'character' ? 'ШІ готує героя…' : 'ШІ готує сцену…') }),
+    [...ideas].reverse().map((idea) => {
+      const sources = draft.photos.filter((p) => idea.photoIds.includes(p.photoId)).map((p) => `№${p.order}`).join(', ');
+      return h('article', { class: 'book-idea', 'data-book-idea': idea.id },
+        h('strong', { text: `${BOOK_IDEA_LABELS[idea.kind]} · ${idea.title}` }),
+        h('p', { class: 'muted', text: `${idea.accepted ? 'Додано до чернетки' : 'Пропозиція ШІ'}${sources ? ' · Фото ' + sources : ''}` }),
+        (idea.location || idea.timeOfDay) && h('p', { class: 'muted', text: [idea.location, idea.timeOfDay].filter(Boolean).join(' · ') }),
+        h('p', { class: 'book-idea-text', text: idea.text }),
+        !readOnly && h('div', { class: 'row' },
+          h('button', { type: 'button', class: 'small', disabled: busy, text: idea.accepted ? 'Редагувати' : 'Переглянути й додати', onclick: () => reviewBookIdea(idea) }),
+          h('button', { type: 'button', class: 'small', disabled: busy, text: idea.accepted ? 'Прибрати' : 'Відхилити', onclick: async () => {
+            try { await changeBookIdea(idea.id, { action: 'remove' }); render(); } catch (error) { toast(error.message); await reloadDraft(); }
+          } })));
+    }));
+}
+
 function viewDraft() {
   const d = state.draft;
   const box = h('div');
@@ -445,7 +603,7 @@ function viewDraft() {
   if (d.status !== 'submitted') box.append(h('div', { class: 'row', id: 'save-row' },
     h('button', { class: 'small', id: 'btn-save', text: '💾 Зберегти чернетку', onclick: saveDraft }),
     h('span', { class: 'muted', text: 'Зміни зберігаються й самі; кнопка — щоб відкласти роботу на потім.' })));
-  if (d.status === 'submitted') { box.append(viewSubmitted(d)); box.append(textPages(d) ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
+  if (d.status === 'submitted') { box.append(viewSubmitted(d)); if (photoBook(d) && d.bookIdeas?.length) box.append(viewBookIdeas(d, true)); box.append(textPages(d) ? pagesSection(d, mine, true) : photosSection(d, mine, true)); return box; }
   if (photoBook(d)) box.append(h('div', { class: 'card', id: 'book-workflow' },
     h('strong', { text: 'Матеріали книги' }),
     h('p', { class: 'muted', text: 'Додавайте фото сьогодні й повертайтеся до цієї чернетки пізніше. Перевіряйте опис ШІ й дописуйте, яку роль кожне фото має в книзі.' })));
@@ -465,7 +623,7 @@ function viewDraft() {
   }
   if (d.kind === 'instruction') box.append(viewInstructionMeta(d));
   if (photoBook(d)) {
-    box.append(photosSection(d, mine, false), viewActions(d, mine));
+    box.append(viewBookIdeas(d), photosSection(d, mine, false), viewActions(d, mine));
     if (d.structure) box.append(viewStructure(d));
     return box;
   }
@@ -539,7 +697,7 @@ function aiPlan(d) {
   }
   return plan;
 }
-const aiKey = (d, plan) => [d.draftId, d.photos.length, plan.map((p) => p.id + ':' + p.moduleIds.join(',')).join(';')].join('|');
+const aiKey = (d, plan) => [d.draftId, photoBook(d) ? d.revision : d.photos.length, plan.map((p) => p.id + ':' + p.moduleIds.join(',')).join(';')].join('|');
 const aiStored = () => { try { return localStorage.getItem(AI_MODEL_KEY) || ''; } catch (e) { return ''; } };
 const aiRemember = (id) => { try { localStorage.setItem(AI_MODEL_KEY, id); } catch (e) { /* без сховища — не критично */ } };
 
@@ -659,8 +817,8 @@ function viewActions(d, mine) {
   ensureAi(d);
   const aiWhy = !running && d.photos.length ? aiBlock(d) : '';
   const lock = running || state.writing || photosBusy || unsent || !d.photos.length || !!aiWhy;
-  if (running) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (book && job.kind === 'structure' ? 'ШІ складає план книги…' : JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
-  if (job && job.status === 'failed') box.append(h('p', { class: 'err', id: 'job-error', text: job.error || 'Фонова робота не вдалася. Спробуйте ще раз.' }));
+  if (running && !job.bookIdeaKind) box.append(h('p', { class: 'row', id: 'job-banner' }, h('span', { class: 'badge processing', text: 'працює' }), h('span', { text: (book && job.kind === 'structure' ? 'ШІ складає план книги…' : JOB_TEXT[job.kind] || 'ШІ працює…') + (job.moduleId ? ' ' + moduleTitle(d, job.moduleId) : '') })));
+  if (job && job.status === 'failed' && !job.bookIdeaKind) box.append(h('p', { class: 'err', id: 'job-error', text: job.error || 'Фонова робота не вдалася. Спробуйте ще раз.' }));
   if (!d.photos.length) box.append(h('p', { class: 'muted', text: `Спершу додайте ${unit.a}.` }));
   else if (photosBusy || unsent) box.append(h('p', { class: 'muted', id: textPages(d) ? 'ocr-banner' : null, text: unsent ? `Дочекайтесь, поки всі ${unit.a} надішлються.` : `${unit.b} ще ${unit.done}…` }));
   if (!running && d.photos.length) { const pick = viewAiPicker(d); if (pick) box.append(pick); }

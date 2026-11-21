@@ -17,7 +17,8 @@ import { getBook, saveBook } from '../bookStore';
 import { attachAssetsToBook } from '../media/mediaLibraryStore';
 import { buildBookFromManuscript } from '../../src/utils/manuscriptBook';
 import { insertBatchIntoBook, joinManuscriptPages } from '../../src/utils/manuscriptBatch';
-import type { UserRole } from '../../src/types';
+import type { Book, Section, UserRole } from '../../src/types';
+import type { BookIdea } from '../../shared/photoDraftContract';
 import type { CourseInput, InboxItem } from './photoDraftMapping';
 import type { WriteTextParams } from './photoDraftRoutes';
 
@@ -104,6 +105,55 @@ export async function createInboxScans(p: {
   return first;
 }
 
+/** Add the approved cards alongside the manuscript generated from the photos. */
+function addApprovedBookCards(
+  book: Book,
+  ideas: readonly BookIdea[],
+  photoChapters: readonly { photoIds?: string[] }[],
+): Book {
+  const accepted = ideas.filter((idea) => idea.accepted);
+  if (!accepted.length) return book;
+  const characters = accepted.filter((idea) => idea.kind === 'character').map((idea): Book['characters'][number] => ({
+    id: `char-gf-${idea.id}`,
+    bookId: book.id,
+    name: idea.title,
+    role: 'minor',
+    appearance: {},
+    personality: { strengths: [], weaknesses: [], fears: [], desires: [], goals: [], motivation: '', internalConflict: '' },
+    biography: idea.text,
+    relationships: [],
+    tags: ['GrabFusion'],
+  }));
+  const scenesByChapter = new Map<number, BookIdea[]>();
+  for (const scene of accepted.filter((idea) => idea.kind === 'scene')) {
+    const best = photoChapters.reduce((match, chapter, index) => {
+      const overlap = chapter.photoIds?.filter((id) => scene.photoIds.includes(id)).length ?? 0;
+      return overlap > match.overlap ? { index, overlap } : match;
+    }, { index: 0, overlap: 0 });
+    scenesByChapter.set(best.index, [...(scenesByChapter.get(best.index) ?? []), scene]);
+  }
+  let sceneOrder = 0;
+  const chapters = book.chapters.map((chapter, index) => {
+    const scenes = scenesByChapter.get(index);
+    if (!scenes?.length) return chapter;
+    const lastOrder = Math.max(0, ...chapter.sections.map((section) => section.order));
+    const sections = scenes.map((scene, offset): Section => {
+      const id = `sec-gf-${scene.id}`;
+      return {
+        id, chapterId: chapter.id, title: scene.title, order: lastOrder + offset + 1,
+        content: '', wordCount: 0, lastModified: book.updatedAt,
+        scene: {
+          id: `scene-gf-${scene.id}`, sectionId: id, title: scene.title, summary: scene.text,
+          act: 1, location: scene.location ?? '', timeOfDay: scene.timeOfDay ?? '', timelineOrder: ++sceneOrder,
+          intensityScore: 5, conflict: '', resolution: '', characters: [],
+        },
+      };
+    });
+    return { ...chapter, sections: [...chapter.sections, ...sections] };
+  });
+  return { ...book, characters: [...book.characters, ...characters], chapters };
+}
+
 /**
  * «Набір книги» без наявної книги (журнал #540): Studio САМА створює книгу з розпізнаним текстом (дашборд → «Книга & Текст»),
  * привʼязує фото сторінок до її медіатеки й лишає записи «Вхідних» як історію зі станом `inserted` — вставляти їх ще раз не треба
@@ -116,7 +166,8 @@ export async function createBookFromManuscript(p: {
   bookTitle: string;
   chapterTitle: string;
   items: InboxItem[];
-  photoChapters?: { title: string; text: string }[];
+  photoChapters?: { title: string; text: string; photoIds?: string[] }[];
+  bookIdeas?: BookIdea[];
   tokenId?: string | null;
   batchId: string;
 }): Promise<{ bookId: string; chapterTitle: string; pages: number } | null> {
@@ -151,6 +202,7 @@ export async function createBookFromManuscript(p: {
       chapterIds.set(chapter.title, inserted.chapterId);
     }
   }
+  if (p.photoChapters && p.bookIdeas?.length) book = addApprovedBookCards(book, p.bookIdeas, p.photoChapters);
   const saved = previous ?? await saveBook({ book: book as unknown as Record<string, unknown>, ownerId: p.ownerId });
   await attachAssetsToBook(p.items.map((i) => i.assetId), p.ownerId, saved.id);
   const existingScans = p.photoChapters

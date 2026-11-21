@@ -75,6 +75,8 @@ FIXTURE_DEFINITIONS: dict[str, str] = {
     "suggest-running": "DraftResponse",
     "get-draft-suggestion": "DraftResponse",
     "suggestion-accepted": "DraftResponse",
+    "book-idea-running": "DraftResponse",
+    "book-idea-accepted": "DraftResponse",
     "add-photo": "PhotoResponse",
     "retry-photo": "PhotoResponse",
     "put-photo-text": "PhotoResponse",

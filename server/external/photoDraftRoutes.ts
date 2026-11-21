@@ -25,6 +25,7 @@
  * ДО збереження фото, щоб викладач не накопичив кадрів, які не буде чим описати.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import { requirePermission } from '../auth';
 import { getBook } from '../bookStore';
@@ -49,6 +50,9 @@ import {
 } from './photoDraftStore';
 import {
   ASSUMPTION_STATUSES,
+  BOOK_IDEA_TEXT_MAX,
+  type BookIdea,
+  type BookIdeaKind,
   PHOTO_DRAFT_CONTRACT_VERSION,
   PHOTO_DRAFT_COURSE_SOURCES,
   PHOTO_DRAFT_INSTRUCTION_MODES,
@@ -76,6 +80,10 @@ import {
   type SubmitTarget,
 } from '../../shared/photoDraftContract';
 import type { DescribeContext } from './photoDraftPrompts';
+import {
+  assertPhotoBook, bookIdeaInput, BOOK_IDEA_LIMIT, BOOK_IDEA_MAX_TOKENS,
+  parseBookIdea, readBookIdeaKind, readBookIdeaPhotoIds,
+} from './photoDraftBookIdeas';
 import {
   applyGenerated,
   buildGeneratePrompt,
@@ -201,7 +209,8 @@ export interface PhotoDraftSinks {
     bookTitle: string;
     chapterTitle: string;
     items: InboxItem[];
-    photoChapters?: { title: string; text: string }[];
+    photoChapters?: { title: string; text: string; photoIds?: string[] }[];
+    bookIdeas?: BookIdea[];
     tokenId?: string | null;
     batchId: string;
   }) => Promise<{ bookId: string; chapterTitle: string; pages: number } | null>;
@@ -310,6 +319,7 @@ export function publicDraft(d: StoredDraft): PhotoDraft {
     notes: d.notes,
     structure: d.structure,
     assumptions: d.assumptions,
+    ...(d.bookIdeas?.length ? { bookIdeas: d.bookIdeas } : {}),
     job: visibleJob(d),
     submitted: d.submitted,
     createdAt: d.createdAt,
@@ -328,6 +338,15 @@ function summary(d: StoredDraft): PhotoDraftSummary {
     ...(d.kind === 'book' && d.newBookTitle ? { newBookTitle: d.newBookTitle } : {}),
     updatedAt: d.updatedAt,
   };
+}
+
+function assertRevision(draft: StoredDraft, revision: unknown): void {
+  if (!Number.isInteger(revision)) {
+    throw new DraftChangeError(400, 'bad_input', 'Передайте актуальну ревізію чернетки.');
+  }
+  if (revision !== draft.revision) {
+    throw new DraftChangeError(409, 'revision_conflict', 'Чернетку змінено з іншого пристрою. Оновіть і повторіть дію.');
+  }
 }
 
 /**
@@ -1192,7 +1211,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     moduleId: string | null,
     check: (d: StoredDraft) => void,
     estimate: (d: StoredDraft) => PassTokenEstimate,
-    lessonId: string | null = null
+    lessonId: string | null = null,
+    bookIdeaKind?: BookIdeaKind
   ) => {
     if (!deps.writeText) return fail(res, 503, 'server_error', 'Прохід ШІ не налаштовано на сервері.');
     const ownerId = owner(req);
@@ -1241,7 +1261,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         (d) => {
           assertJobStartable(d, check);
           const inModule = lessonId ? (findLesson(d, lessonId)?.module.moduleId ?? null) : moduleId;
-          d.job = { kind, status: 'running', moduleId: inModule, ...(lessonId ? { lessonId } : {}), error: null, startedAt };
+          d.job = { kind, status: 'running', moduleId: inModule, ...(lessonId ? { lessonId } : {}), ...(bookIdeaKind ? { bookIdeaKind } : {}), error: null, startedAt };
           return JSON.parse(JSON.stringify(d)) as StoredDraft;
         },
         { byTeacher: true, now }
@@ -1303,8 +1323,8 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         return fail(res, 409, 'wrong_status', 'У рукописі немає проходів «Розкласти» й «Написати»: моделі обирати нема для чого.');
       }
       const passParam = req.query.pass === undefined ? 'structure' : String(req.query.pass);
-      if (passParam !== 'structure' && passParam !== 'generate' && passParam !== 'lesson') {
-        return fail(res, 400, 'bad_input', 'pass — `structure`, `generate` або `lesson`.');
+      if (passParam !== 'structure' && passParam !== 'generate' && passParam !== 'lesson' && passParam !== 'book-idea') {
+        return fail(res, 400, 'bad_input', 'pass — `structure`, `generate`, `lesson` або `book-idea`.');
       }
       const pass: AiPass = passParam;
       let moduleId: string | null = null;
@@ -1317,6 +1337,11 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
         const m = d.structure?.modules.find((x) => x.moduleId === moduleId);
         if (!m) return fail(res, 404, 'module_not_found', 'Модуля немає в структурі.');
         est = estimateGeneratePass(generateSystemInstruction(d.kind, d.instructionMode, d.courseSource, d.kind === 'book' && !!d.newBookTitle), buildGeneratePrompt(d, m), m.lessons.length, PASS_MAX_TOKENS);
+      } else if (pass === 'book-idea') {
+        const kind = readBookIdeaKind(req.query.kind);
+        const photoIds = readBookIdeaPhotoIds(String(req.query.photoIds ?? '').split(','));
+        const input = bookIdeaInput(d, kind, photoIds);
+        est = estimateSuggestPass(input.system, input.prompt, BOOK_IDEA_MAX_TOKENS);
       } else {
         lessonId = String(req.query.lessonId ?? '');
         const found = findLesson(d, lessonId);
@@ -1537,6 +1562,88 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
     }
   });
 
+  app.post(`${BASE}/:draftId/book-ideas`, auth, requirePermission('canUseAi'), async (req, res) => {
+    try {
+      const kind = readBookIdeaKind(req.body?.kind);
+      const photoIds = readBookIdeaPhotoIds(req.body?.photoIds);
+      const begun = await startJob(req, res, 'suggest', null, (d) => {
+        assertRevision(d, req.body?.ifRevision);
+        if ((d.bookIdeas?.length ?? 0) >= BOOK_IDEA_LIMIT) {
+          throw new DraftChangeError(409, 'wrong_status', 'У чернетці вже 50 карток. Приберіть зайві перед створенням нових.');
+        }
+        bookIdeaInput(d, kind, photoIds);
+      }, (d) => {
+        const input = bookIdeaInput(d, kind, photoIds);
+        return estimateSuggestPass(input.system, input.prompt, BOOK_IDEA_MAX_TOKENS);
+      }, null, kind);
+      if (!begun) return;
+      const { ownerId, draftId, startedAt, snapshot, draft, charge, modelId } = begun;
+      finishJob(ownerId, draftId, startedAt, 'suggest', async () => {
+        let result: ReturnType<typeof parseBookIdea>;
+        try {
+          const out = await deps.writeText!({
+            ownerId, draftId, ...bookIdeaInput(snapshot, kind, photoIds),
+            maxTokens: BOOK_IDEA_MAX_TOKENS,
+            label: passLabel('Герої й сцени з нотаток (GrabFusion)', !!charge),
+            req, modelId, creditBilled: !!charge,
+          });
+          result = parseBookIdea(out.text, kind);
+          charge?.settleUsd(out.costUsd ?? 0);
+        } catch (err) {
+          charge?.release('Пропозицію з нотаток не створено');
+          throw err;
+        }
+        return (d) => {
+          if (d.revision !== draft.revision) {
+            d.job = { ...d.job!, status: 'failed', error: 'Чернетка змінилася під час генерації. Запустіть дію ще раз.' };
+            return;
+          }
+          d.bookIdeas = [...(d.bookIdeas ?? []), { id: randomUUID(), kind, photoIds, ...result, accepted: false }];
+          d.job = null;
+        };
+      });
+      res.status(202).json({ draft: publicDraft(draft) });
+    } catch (err) {
+      sendChangeError(res, err, 'book-ideas');
+    }
+  });
+
+  app.patch(`${BASE}/:draftId/book-ideas/:ideaId`, auth, async (req, res) => {
+    try {
+      const { action, ifRevision } = req.body ?? {};
+      if (action !== 'accept' && action !== 'remove') {
+        return fail(res, 400, 'bad_input', 'Оберіть додавання до чернетки або вилучення картки.');
+      }
+      const changed = await mutateDraft(String(req.params.draftId), owner(req), (d) => {
+        assertEditable(d);
+        assertPhotoBook(d);
+        assertRevision(d, ifRevision);
+        const idea = d.bookIdeas?.find((item) => item.id === req.params.ideaId);
+        if (!idea) throw new DraftChangeError(409, 'wrong_status', 'Ця картка вже відсутня в чернетці.');
+        if (action === 'remove') {
+          d.bookIdeas = d.bookIdeas!.filter((item) => item.id !== idea.id);
+          return;
+        }
+        const title = shortField(req.body.title, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Назва картки') ?? idea.title;
+        const text = req.body.text === undefined ? idea.text : req.body.text;
+        if (typeof text !== 'string' || !text.trim() || countNoteChars(text.trim()) > BOOK_IDEA_TEXT_MAX) {
+          throw new DraftChangeError(400, 'bad_input', `Введіть опис до ${BOOK_IDEA_TEXT_MAX} символів.`);
+        }
+        Object.assign(idea, { title, text: text.trim(), accepted: true });
+        if (idea.kind === 'scene') {
+          const location = shortField(req.body.location, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Місце');
+          const timeOfDay = shortField(req.body.timeOfDay, PHOTO_DRAFT_LIMITS.maxTitleChars, 'Час');
+          if (location !== undefined) idea.location = location ?? '';
+          if (timeOfDay !== undefined) idea.timeOfDay = timeOfDay ?? '';
+        }
+      }, { byTeacher: true, now });
+      if (!changed) return fail(res, 404, 'draft_not_found', 'Чернетку не знайдено.');
+      res.json({ draft: publicDraft(changed.draft) });
+    } catch (err) {
+      sendChangeError(res, err, 'book-idea');
+    }
+  });
+
   /** Рішення викладача щодо пропозиції: прийняти (можливо, виправлену) або відхилити. */
   app.post(`${BASE}/:draftId/lessons/:lessonId/suggestion`, auth, async (req, res) => {
     try {
@@ -1629,6 +1736,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             if (!sinks.createManuscriptBook) throw new Error('Створення книг не налаштовано.');
             const photoChapters = (d.structure?.modules ?? []).map((module) => ({
               title: module.title,
+              photoIds: module.lessons.flatMap((scene) => scene.photoIds),
               text: module.lessons.map((scene) => (scene.body ?? '').trim()).filter(Boolean).join('\n\n'),
             }));
             const items = [...d.photos].sort((a, b) => a.order - b.order).map((photo) => ({
@@ -1649,6 +1757,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
               bookTitle: d.newBookTitle,
               chapterTitle: photoChapters[0]?.title ?? d.newBookTitle,
               photoChapters,
+              bookIdeas: d.bookIdeas?.filter((idea) => idea.accepted),
               items,
               tokenId: d.tokenId,
               batchId: d.id,

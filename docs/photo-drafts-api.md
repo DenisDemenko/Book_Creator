@@ -110,6 +110,8 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
 | `POST /photo-drafts/:draftId/modules/:moduleId/generate` | 3 | 202 | `generate-running` |
 | `POST /photo-drafts/:draftId/lessons/:lessonId/suggest` | 3 | 202 | `suggest-running` |
 | `POST /photo-drafts/:draftId/lessons/:lessonId/suggestion` | 3 | 200 | `suggestion-accepted` |
+| `POST /photo-drafts/:draftId/book-ideas` | 3 | 202 | `book-idea-running` |
+| `PATCH /photo-drafts/:draftId/book-ideas/:ideaId` | 3 | 200 | `book-idea-accepted` |
 | `GET /photo-drafts/:draftId/ai-options` | 3 | 200 | `ai-options` |
 | `POST /photo-drafts/:draftId/submit` | 3 | 201 | `submit-course`, `submit-instruction`, `submit-book`, `submit-manuscript`, `submit-manuscript-existing-book` |
 
@@ -192,6 +194,14 @@ B (Python-сервіс GrabFusion). Їхню узгодженість перев
   лише прибирає пропозицію, `body` лишається як був. Обидва прибирають `suggestion`, тож повторне
   натискання безпечне; пропозиції вже немає → `409 wrong_status`. Відповідь — `200` з чернеткою;
   ревізія зростає (це дія викладача).
+- **`POST …/book-ideas`** — пропозиція для нової книги з фото.
+  Тіло `{ kind: "character" | "scene", photoIds: string[], ifRevision, modelId? }`. Від одного до восьми фото,
+  щонайменше з однією авторською нотаткою. Повертає `202 { draft }` з `job.bookIdeaKind`.
+  Після опитування картку можна переглянути в `draft.bookIdeas`.
+- **`PATCH …/book-ideas/:ideaId`** — `{ ifRevision, action: "accept" | "remove", title?, text?, location?, timeOfDay? }`.
+  Лише схвалені картки використовуються в плані й переносяться до книги в Studio. Сцена додається як картка
+  до глави з найбільшим збігом фото, а за відсутності збігу — до першої глави.
+- Оцінка вартості для пропозиції — `GET …/ai-options?pass=book-idea&kind=scene&photoIds=id1,id2`.
 - **`GET …/ai-options`** (з 1.4.0) — які моделі можна обрати для проходів 2–3 і скільки це коштуватиме в
   балах. Запит `?pass=structure` (типово), `?pass=generate&moduleId=…` (`404 module_not_found`,
   якщо модуля немає) або `?pass=lesson&lessonId=…` (з 1.7.0; `404 lesson_not_found`). Відповідь

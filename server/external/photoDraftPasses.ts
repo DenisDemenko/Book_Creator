@@ -21,6 +21,7 @@ import {
   PHOTO_DRAFT_LIMITS,
   countNoteChars,
   hasPageText,
+  type BookIdea,
   type DraftAssumption,
   type DraftLesson,
   type DraftModule,
@@ -75,6 +76,7 @@ export interface PassDraft {
   notes: DraftNote[];
   structure: DraftStructure | null;
   assumptions: DraftAssumption[];
+  bookIdeas?: BookIdea[];
 }
 
 const LEVEL_UK: Record<string, string> = { beginner: 'початківці', intermediate: 'середній рівень', advanced: 'просунутий рівень' };
@@ -223,10 +225,30 @@ export function structureSystemInstruction(kind: PhotoDraftKind, mode?: PhotoDra
   ].join('\n');
 }
 
+function approvedBookIdeaContext(draft: PassDraft, module?: DraftModule): string[] {
+  if (draft.kind !== 'book' || !draft.newBookTitle) return [];
+  const photoIds = module ? new Set(module.lessons.flatMap((s) => s.photoIds)) : null;
+  const relevant = (draft.bookIdeas ?? []).filter((idea) =>
+    idea.accepted && (idea.kind === 'character' || !photoIds || idea.photoIds.some((id) => photoIds.has(id)))
+  );
+  if (!relevant.length) return [];
+  return ['Картки, схвалені автором:', ...relevant.slice(0, 12).map((idea) =>
+    JSON.stringify({
+      kind: idea.kind,
+      title: idea.title,
+      location: idea.location || undefined,
+      timeOfDay: idea.timeOfDay || undefined,
+      text: clip(idea.text, 600),
+      photos: draft.photos.filter((photo) => idea.photoIds.includes(photo.photoId)).map((photo) => photo.order),
+    })
+  )];
+}
+
 export function buildStructurePrompt(draft: PassDraft): string {
   const lines = [`Що складаємо: ${KIND_WORDS[draft.kind].whole}.`, ...frame(draft), '', hasPageText(draft) ? 'Сторінки документа (за порядком):' : 'Кадри (за порядком зйомки):'];
   const photos = [...draft.photos].filter((p) => p.status !== 'processing').sort((a, b) => a.order - b.order);
   for (const photo of photos) lines.push('', photoBlock(draft, photo, PAGE_TEXT_IN_STRUCTURE));
+  lines.push(...approvedBookIdeaContext(draft));
   return lines.join('\n');
 }
 
@@ -408,6 +430,7 @@ export function buildGeneratePrompt(draft: PassDraft, module: DraftModule): stri
     }
   }
   if (module.summary) lines.push(`Про що: <<<${module.summary}>>>`);
+  lines.push(...approvedBookIdeaContext(draft, module));
   for (const lesson of module.lessons) {
     lines.push('', `=== ${draft.kind === 'book' && draft.newBookTitle ? 'Сцена' : 'Урок'} ${lesson.lessonId}: <<<${lesson.title}>>>`);
     if (lesson.goal) lines.push(`Мета (за потреби уточни): <<<${lesson.goal}>>>`);

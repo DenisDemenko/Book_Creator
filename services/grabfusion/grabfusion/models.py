@@ -118,6 +118,7 @@ class Job:
     status: str  # running | failed
     moduleId: str | None = None
     lessonId: str | None = None  # лише suggest (1.7.0)
+    bookIdeaKind: str | None = None
     error: str | None = None
     startedAt: str = ""
 
@@ -156,6 +157,7 @@ class Draft:
     notes: list[Note] = field(default_factory=list)
     structure: Structure | None = None
     assumptions: list[Assumption] = field(default_factory=list)
+    bookIdeas: list[dict[str, Any]] = field(default_factory=list)
     job: Job | None = None
     submitted: Target | None = None
     createdAt: str = ""

@@ -394,9 +394,52 @@ const note = await call('PUT', `${PD}/${photoBookDraftId}/notes/bridge`, {
   token: grab, body: { photoIds: [sources.photos[0].photoId], text: 'Тут Марта вирішує повернутися.' },
 });
 t('нотатка автора збережена окремо від опису', note.status === 200 && (await get(photoBookDraftId)).photos[0].description === 'Кадр.');
+const ideasPath = `${PD}/${photoBookDraftId}/book-ideas`;
+const requestIdea = async (kind: string, photoIds = [sources.photos[0].photoId]) => call('POST', ideasPath, {
+  token: grab, body: { kind, photoIds, ifRevision: (await get(photoBookDraftId)).revision },
+});
+t('пропозиція без нотатки відхиляється', (await requestIdea('scene', [sources.photos[1].photoId])).status === 400);
+t('кадр поза чернеткою відхиляється', (await requestIdea('scene', ['ph_missing'])).status === 404);
+writeImpl = ({ system, prompt }) => {
+  const input = JSON.parse(prompt);
+  t('запит містить вибраний кадр і нотатку, а не всі фото',
+    input.photos.length === 1 && input.photos[0].description === 'Кадр.' &&
+    input.notes[0].text.includes('Марта вирішує'));
+  return JSON.stringify(system.includes('Запропонуй одного героя')
+    ? { title: 'Марта', text: 'Прагне повернутися до млина.' }
+    : { title: 'Повернення', text: 'Марта повертається до млина, щоб згадати подію.', location: 'Млин', timeOfDay: 'ніч' });
+};
+for (const kind of ['character', 'scene']) {
+  const response = await requestIdea(kind);
+  t(`пропозиція ${kind} запускається у фоні`,
+    response.status === 202 && response.data.draft.job?.bookIdeaKind === kind && ok(response, 'DraftResponse'));
+  await flush();
+  const draftWithIdeas = await get(photoBookDraftId);
+  const idea = draftWithIdeas.bookIdeas?.find((item: any) => item.kind === kind);
+  t(`пропозиція ${kind} очікує рішення автора`, !!idea && !idea.accepted && idea.photoIds[0] === sources.photos[0].photoId);
+  const reviewed = await call('PATCH', `${ideasPath}/${idea.id}`, {
+    token: grab, body: { action: 'accept', ifRevision: draftWithIdeas.revision, text: idea.text + ' Уточнення автора.' },
+  });
+  t(`картку ${kind} збережено з авторською правкою`, reviewed.status === 200 &&
+    reviewed.data.draft.bookIdeas.some((item: any) => item.id === idea.id && item.accepted && item.text.includes('Уточнення автора.')));
+}
+const staleReview = await call('PATCH', `${ideasPath}/${(await get(photoBookDraftId)).bookIdeas[0].id}`, {
+  token: grab, body: { action: 'remove', ifRevision: 1 },
+});
+t('застаріла ревізія не може вилучити картку', staleReview.status === 409 && staleReview.data.kind === 'revision_conflict');
+await requestIdea('character');
+await flush();
+const beforeReject = await get(photoBookDraftId);
+const pendingIdea = beforeReject.bookIdeas.find((item: any) => !item.accepted);
+const removed = await call('PATCH', `${ideasPath}/${pendingIdea.id}`, {
+  token: grab, body: { action: 'remove', ifRevision: beforeReject.revision },
+});
+t('відхилена пропозиція зникає, дві схвалені картки лишаються',
+  removed.status === 200 && removed.data.draft.bookIdeas.length === 2 &&
+  removed.data.draft.bookIdeas.every((item: any) => item.accepted));
 writeImpl = ({ prompt }) => {
   if (prompt.includes('Кадри (за порядком зйомки)')) {
-    t('план отримує і опис, і нотатку автора', prompt.includes('Кадр.') && prompt.includes('Нотатка автора: <<<Тут Марта'));
+    t('план отримує і опис, і нотатку автора', prompt.includes('Кадр.') && prompt.includes('Нотатка автора: <<<Тут Марта') && prompt.includes('Картки, схвалені автором:'));
     return JSON.stringify({ modules: sources.photos.map((photo: any, index: number) => ({
       title: `Глава ${index + 1}`, lessons: [{ title: `Сцена ${index + 1}`, photoIds: [photo.photoId] }],
     })) });
@@ -419,6 +462,9 @@ t('submit створює нову книгу з двома главами, а д
   (storedPhotoBook?.book.chapters as unknown[])?.length === 2 &&
   (await scanStore.listScans('u-a', { bookId: newBook.data.target.id })).some((scan) => scan.text.includes('Нотатка автора')),
   JSON.stringify(newBook.data.blockers ?? newBook.data.error));
+t('прийняті картки переносяться в Studio як герой і сцена потрібної глави',
+  (storedPhotoBook?.book.characters as any[])?.some((character) => character.name === 'Марта' && character.biography.includes('Уточнення автора.')) &&
+  (storedPhotoBook?.book.chapters as any[])?.[0]?.sections.some((section: any) => section.scene?.title === 'Повернення' && section.scene.location === 'Млин' && section.scene.timeOfDay === 'ніч'));
 t('повторне надсилання не створює дубль', (await call('POST', `${PD}/${photoBookDraftId}/submit`, { token: grab })).status === 409);
 
 console.log('\nЗвичайні скани та фікстури');

@@ -94,6 +94,10 @@ class Sim:
             if not d["title"]:
                 d["title"] = ref["title"]
             d["status"] = "structured"
+        elif job.get("bookIdeaKind"):
+            idea = self.pending.pop(d["draftId"], None)
+            if idea:
+                d.setdefault("bookIdeas", []).append(idea)
         elif job["kind"] == "suggest":
             found = self._find_lesson(d, job.get("lessonId", ""))
             if found is not None:
@@ -192,6 +196,10 @@ class Sim:
         if method == "GET" and name.endswith("/ai-options"):
             return self._ai_options(d, params.get("q_pass", "structure"), params.get("q_moduleId", ""),
                                     params.get("q_lessonId", ""))
+        if method == "POST" and name.endswith("/book-ideas"):
+            return self._propose_book_idea(d, body)
+        if method == "PATCH" and "/book-ideas/" in name:
+            return self._review_book_idea(d, params["ideaId"], body)
         if method == "POST" and name.endswith("/structure"):
             return self._structure(d, body)
         if method == "POST" and name.endswith("/generate"):
@@ -427,7 +435,7 @@ class Sim:
     def _ai_options(self, d: dict[str, Any], pass_name: str, module_id: str, lesson_id: str = "") -> Result:
         if d["kind"] == "manuscript":
             return _err(409, "wrong_status", "Для рукопису проходів 2–3 немає.")
-        if pass_name not in {"structure", "generate", "lesson"}:
+        if pass_name not in {"structure", "generate", "lesson", "book-idea"}:
             return _err(400, "bad_input", "pass — structure, generate або lesson.")
         weight = len(d["photos"])
         if pass_name == "generate":
@@ -508,6 +516,51 @@ class Sim:
                     "lessonId": lesson_id, "error": None, "startedAt": _now()}
         self.ticks[d["draftId"]] = SUGGEST_TICKS
         return 202, {"draft": copy.deepcopy(d)}
+
+    def _propose_book_idea(self, d: dict[str, Any], body: Any) -> Result:
+        bad = self._check_model(body)
+        if bad:
+            return bad
+        if d["kind"] != "book" or not d.get("newBookTitle"):
+            return _err(409, "wrong_status", "Ця дія доступна в книзі з фото.")
+        if d.get("job") and d["job"]["status"] == "running":
+            return _err(409, "job_running", "Уже виконується фонова робота.")
+        if not isinstance(body, dict) or body.get("ifRevision") != d["revision"]:
+            return _err(409, "revision_conflict", "Оновіть чернетку.")
+        kind, ids = body.get("kind"), body.get("photoIds")
+        if kind not in ("character", "scene") or not isinstance(ids, list) or not 1 <= len(ids) <= 8:
+            return _err(400, "bad_input", "Оберіть вид картки та фото.")
+        if any(not self._photo(d, pid) for pid in ids):
+            return _err(404, "photo_not_found", "Кадру немає.")
+        note = next((n["text"] for n in d["notes"] if any(pid in n["photoIds"] for pid in ids)), None)
+        if not note:
+            return _err(400, "bad_input", "Додайте нотатку до вибраного фото.")
+        self.pending[d["draftId"]] = {
+            "id": self._next("idea"), "kind": kind, "photoIds": list(dict.fromkeys(ids)),
+            "title": "Герой з нотаток" if kind == "character" else "Сцена з нотаток",
+            "text": note, "accepted": False,
+        }
+        d["job"] = {"kind": "suggest", "bookIdeaKind": kind, "status": "running", "moduleId": None,
+                    "error": None, "startedAt": _now()}
+        self.ticks[d["draftId"]] = SUGGEST_TICKS
+        self._bump(d)
+        return 202, {"draft": copy.deepcopy(d)}
+
+    def _review_book_idea(self, d: dict[str, Any], idea_id: str, body: Any) -> Result:
+        if not isinstance(body, dict) or body.get("ifRevision") != d["revision"]:
+            return _err(409, "revision_conflict", "Оновіть чернетку.")
+        idea = next((item for item in d.get("bookIdeas", []) if item["id"] == idea_id), None)
+        if idea is None:
+            return _err(409, "wrong_status", "Картки вже немає.")
+        if body.get("action") == "accept":
+            idea.update({key: body[key] for key in ("title", "text", "location", "timeOfDay") if key in body})
+            idea["accepted"] = True
+        elif body.get("action") == "remove":
+            d["bookIdeas"].remove(idea)
+        else:
+            return _err(400, "bad_input", "Оберіть дію.")
+        self._bump(d)
+        return 200, {"draft": copy.deepcopy(d)}
 
     def _resolve_suggestion(self, d: dict[str, Any], lesson_id: str, body: Any) -> Result:
         action = body.get("action") if isinstance(body, dict) else None

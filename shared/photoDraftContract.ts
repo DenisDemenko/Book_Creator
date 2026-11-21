@@ -327,8 +327,24 @@ export interface DraftAssumption {
   photoId: string | null;
 }
 
+export const BOOK_IDEA_MAX_PHOTOS = 8;
+export const BOOK_IDEA_TEXT_MAX = 2400;
+export type BookIdeaKind = 'character' | 'scene';
+
+export interface BookIdea {
+  id: string;
+  kind: BookIdeaKind;
+  photoIds: string[];
+  title: string;
+  text: string;
+  accepted: boolean;
+  location?: string;
+  timeOfDay?: string;
+}
+
 export interface DraftJob {
   kind: PhotoDraftJobKind;
+  bookIdeaKind?: BookIdeaKind;
   status: PhotoDraftJobStatus;
   /** Для `generate` — модуль, текст якого пишеться; для `suggest` — модуль уроку. */
   moduleId: string | null;
@@ -376,6 +392,7 @@ export interface PhotoDraft {
   notes: DraftNote[];
   structure: DraftStructure | null;
   assumptions: DraftAssumption[];
+  bookIdeas?: BookIdea[];
   job: DraftJob | null;
   submitted: SubmitTarget | null;
   createdAt: string;
@@ -438,7 +455,7 @@ export type PassModelStatus = (typeof PASS_MODEL_STATUSES)[number];
  * Проходи ШІ, за які списуються бали: розкласти кадри / написати текст модуля /
  * підказати текст одного уроку (`lesson`, з 1.7.0 — найдешевший, бо вихід ≤500 символів).
  */
-export const AI_PASSES = ['structure', 'generate', 'lesson'] as const;
+export const AI_PASSES = ['structure', 'generate', 'lesson', 'book-idea'] as const;
 export type AiPass = (typeof AI_PASSES)[number];
 
 export interface PassModelOption {
@@ -619,6 +636,8 @@ export const PHOTO_DRAFT_ROUTES: readonly PhotoDraftRoute[] = [
   { method: 'POST', path: '/photo-drafts/:draftId/modules/:moduleId/generate', status: 202, fixture: 'generate-running', response: 'DraftResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/lessons/:lessonId/suggest', status: 202, fixture: 'suggest-running', response: 'DraftResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/lessons/:lessonId/suggestion', status: 200, fixture: 'suggestion-accepted', response: 'DraftResponse', stage: 3 },
+  { method: 'POST', path: '/photo-drafts/:draftId/book-ideas', status: 202, fixture: 'book-idea-running', response: 'DraftResponse', stage: 3 },
+  { method: 'PATCH', path: '/photo-drafts/:draftId/book-ideas/:ideaId', status: 200, fixture: 'book-idea-accepted', response: 'DraftResponse', stage: 3 },
   { method: 'GET', path: '/photo-drafts/:draftId/ai-options', status: 200, fixture: 'ai-options', response: 'AiOptionsResponse', stage: 3 },
   { method: 'POST', path: '/photo-drafts/:draftId/submit', status: 201, fixture: 'submit-course', response: 'SubmitResponse', stage: 3 },
 ] as const;

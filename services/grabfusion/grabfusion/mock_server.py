@@ -65,6 +65,8 @@ ROUTES: list[Route] = [
     _r("POST", "/photo-drafts/:draftId/modules/:moduleId/generate", 202, "generate-running"),
     _r("POST", "/photo-drafts/:draftId/lessons/:lessonId/suggest", 202, "suggest-running"),
     _r("POST", "/photo-drafts/:draftId/lessons/:lessonId/suggestion", 200, "suggestion-accepted"),
+    _r("POST", "/photo-drafts/:draftId/book-ideas", 202, "book-idea-running"),
+    _r("PATCH", "/photo-drafts/:draftId/book-ideas/:ideaId", 200, "book-idea-accepted"),
     _r("GET", "/photo-drafts/:draftId/ai-options", 200, "ai-options"),
     _r("POST", "/photo-drafts/:draftId/submit", 201, "submit-course"),
 ]

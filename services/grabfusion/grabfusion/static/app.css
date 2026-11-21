@@ -121,3 +121,14 @@ details>summary{cursor:pointer;font:600 .95rem var(--font-display);letter-spacin
 .modal-win h3{margin:0;font:600 1.05rem var(--font-display)}
 .modal-win textarea{width:100%}
 @media (min-width:640px){.modal{align-items:center}}
+
+.book-idea { border-top: 1px solid var(--line, #bbb); margin-top: 12px; padding-top: 12px; }
+.book-idea-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.book-idea-dialog { width: min(34rem, calc(100% - 24px)); max-height: 90dvh; overflow: auto; }
+.book-idea-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.book-idea-dialog > button { margin: 8px 8px 0 0; }
+.book-idea-sources { max-height: 32dvh; overflow: auto; }
+.book-idea-source { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.book-idea-source input { width: auto; flex: none; }
+.book-idea-source img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+.book-idea-source span { display: block; overflow-wrap: anywhere; }

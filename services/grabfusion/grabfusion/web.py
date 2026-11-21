@@ -223,9 +223,11 @@ def build_router(deps: Deps) -> APIRouter:
     @router.get("/drafts/{draft_id}/ai-options")
     def ai_options(draft_id: str, pass_name: str = Query("structure", alias="pass"),
                    moduleId: str | None = Query(None), lessonId: str | None = Query(None),
+                   kind: str | None = Query(None), photoIds: str | None = Query(None),
                    s: Session = Depends(current)) -> Any:
         params = {"pass": pass_name, **({"moduleId": moduleId} if moduleId else {}),
-                  **({"lessonId": lessonId} if lessonId else {})}
+                  **({"lessonId": lessonId} if lessonId else {}),
+                  **({"kind": kind, "photoIds": photoIds} if kind and photoIds else {})}
         return call(s, lambda c: c.raw("GET", f"/photo-drafts/{draft_id}/ai-options", params=params))
 
     @router.post("/drafts/{draft_id}/modules/{module_id}/generate", status_code=202)
@@ -247,6 +249,16 @@ def build_router(deps: Deps) -> APIRouter:
         body = await _json_body(request)
         return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/lessons/{lesson_id}/suggestion",
                                        json=body))
+
+    @router.post("/drafts/{draft_id}/book-ideas", status_code=202)
+    async def propose_book_idea(draft_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        body = await _json_body(request)
+        return call(s, lambda c: c.raw("POST", f"/photo-drafts/{draft_id}/book-ideas", json=body))
+
+    @router.patch("/drafts/{draft_id}/book-ideas/{idea_id}")
+    async def review_book_idea(draft_id: str, idea_id: str, request: Request, s: Session = Depends(current)) -> Any:
+        body = await _json_body(request)
+        return call(s, lambda c: c.raw("PATCH", f"/photo-drafts/{draft_id}/book-ideas/{idea_id}", json=body))
 
     @router.post("/drafts/{draft_id}/submit", status_code=201)
     def submit(draft_id: str, s: Session = Depends(current)) -> Any:

@@ -491,6 +491,24 @@
       },
       "additionalProperties": true
     },
+    "BookIdeaKind": {
+      "type": "string",
+      "enum": ["character", "scene"]
+    },
+    "BookIdea": {
+      "type": "object",
+      "required": ["id", "kind", "photoIds", "title", "text", "accepted"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"$ref": "#/definitions/BookIdeaKind"},
+        "photoIds": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8, "uniqueItems": true},
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "text": {"type": "string", "minLength": 1, "maxLength": 2400},
+        "accepted": {"type": "boolean"},
+        "location": {"type": "string", "maxLength": 160},
+        "timeOfDay": {"type": "string", "maxLength": 160}
+      }
+    },
     "Job": {
       "type": "object",
       "required": [
@@ -503,6 +521,9 @@
       "properties": {
         "kind": {
           "$ref": "#/definitions/JobKind"
+        },
+        "bookIdeaKind": {
+          "$ref": "#/definitions/BookIdeaKind"
         },
         "status": {
           "$ref": "#/definitions/JobStatus"
@@ -654,6 +675,11 @@
           "items": {
             "$ref": "#/definitions/Assumption"
           }
+        },
+        "bookIdeas": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {"$ref": "#/definitions/BookIdea"}
         },
         "job": {
           "oneOf": [
@@ -956,7 +982,8 @@
       "enum": [
         "structure",
         "generate",
-        "lesson"
+        "lesson",
+        "book-idea"
       ]
     },
     "PassModelOption": {
