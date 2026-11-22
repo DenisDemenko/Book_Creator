@@ -124,7 +124,13 @@ export function toCourseInput(draft: StoredDraft, opts: { at: string; ai?: { cal
 export const TECHNICAL_MAX_SOURCES = 20;
 export const TECHNICAL_MAX_STEPS = 60;
 
-const STEP_LINE = /^\s*\*\*(Деталі|Інструменти|Увага|Результат кроку):\*\*\s*(.*)$/;
+const STEP_FIELDS = new Map<string, keyof ParsedStepBody>([
+  ['Деталі', 'components'], ['Details', 'components'],
+  ['Інструменти', 'toolsResources'], ['Tools', 'toolsResources'],
+  ['Увага', 'warning'], ['Caution', 'warning'],
+  ['Результат кроку', 'successCriterion'], ['Step result', 'successCriterion'],
+]);
+const STEP_LINE = /^\s*\*\*([^:]+):\*\*\s*(.*)$/;
 
 export interface ParsedStepBody {
   description: string;
@@ -142,7 +148,7 @@ export interface ParsedStepBody {
  * підписаних рядків увесь текст лишається описом.
  */
 export function parseStepBody(body: string | null, title: string): ParsedStepBody {
-  const fields: Record<string, string[]> = { Деталі: [], Інструменти: [], Увага: [], 'Результат кроку': [] };
+  const fields = { components: [] as string[], toolsResources: [] as string[], warning: [] as string[], successCriterion: [] as string[] };
   const rest: string[] = [];
   let first = true;
   for (const line of String(body ?? '').replace(/\r\n/g, '\n').split('\n')) {
@@ -152,17 +158,18 @@ export function parseStepBody(body: string | null, title: string): ParsedStepBod
     }
     if (line.trim()) first = false;
     const m = STEP_LINE.exec(line);
-    if (m) {
-      if (m[2].trim()) fields[m[1]].push(m[2].trim());
+    const field = m && STEP_FIELDS.get(m[1]);
+    if (m && field) {
+      if (m[2].trim()) fields[field].push(m[2].trim());
     } else rest.push(line);
   }
   const description = rest.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return {
     description: description || title,
-    components: fields['Деталі'].join('; '),
-    toolsResources: fields['Інструменти'].join('; '),
-    warning: fields['Увага'].join('; '),
-    successCriterion: fields['Результат кроку'].join('; '),
+    components: fields.components.join('; '),
+    toolsResources: fields.toolsResources.join('; '),
+    warning: fields.warning.join('; '),
+    successCriterion: fields.successCriterion.join('; '),
   };
 }
 

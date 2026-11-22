@@ -20,7 +20,8 @@ body{margin:0;background:var(--background);color:var(--foreground);font:400 16px
 .brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--accent-dk);font-weight:600;white-space:nowrap}
 .brand .mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;font:700 .7rem var(--font-display);letter-spacing:-.02em}
 .top h1{flex:1;min-width:0;margin:0;font:600 .85rem/1.2 var(--font-display);letter-spacing:-.01em;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.top-actions{display:flex;gap:4px;align-items:center}
+.top-actions{display:flex;gap:4px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+button.language-toggle{font-weight:700;min-width:44px;min-height:44px;color:var(--accent-dk);padding:6px}
 .pill{font-size:.75rem;font-weight:500;color:var(--accent-dk);background:var(--accent-soft);border-radius:999px;padding:2px 10px}
 main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
 
@@ -44,6 +45,15 @@ textarea{field-sizing:content;min-height:3.4em;resize:vertical}
 
 /* Картки: 16 px, біла поверхня, тонка межа */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+.draft-card{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px}
+.draft-card .grow{min-width:12rem;overflow-wrap:anywhere}
+.draft-card-actions{flex-shrink:0;max-width:100%}
+.draft-card-actions .small{min-height:44px}
+.studio-action{display:inline-grid;place-items:center;text-decoration:none;color:var(--accent-dk);border-color:var(--field-line);background:var(--accent-soft)}
+@media (max-width:639px){
+  .draft-card-actions{flex-basis:100%}
+  .studio-action{flex-basis:100%;order:1;text-align:center}
+}
 .card.hero{border-radius:24px;padding:24px}
 h2,h3{font-family:var(--font-display);font-weight:600;letter-spacing:-.02em;line-height:1.25;color:var(--foreground)}
 h2{font-size:1.25rem;margin:0 0 8px}
@@ -141,3 +151,5 @@ details>summary{cursor:pointer;font:600 .95rem var(--font-display);letter-spacin
 .photo-preview img[hidden] { display: none; }
 .photo-preview-close:hover { background: #303030; }
 .photo-preview-close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); z-index: 1; min-width: 44px; min-height: 44px; padding: 0; background: #202020; color: white; border: 1px solid #797979; border-radius: 50%; }
+
+#actions,#blockers{scroll-margin-top:76px}

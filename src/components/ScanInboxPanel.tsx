@@ -62,6 +62,7 @@ interface ScanDraft {
 
 interface ScanInboxPanelProps {
   book: Book;
+  initiallyOpen?: boolean;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   onRevealChapterText?: (target: DescribeRevealTarget) => void;
   showToast: (msg: string) => void;
@@ -69,9 +70,9 @@ interface ScanInboxPanelProps {
 
 const POLL_MS = 30_000;
 
-export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBook, onRevealChapterText, showToast }) => {
+export const ScanInboxPanel: React.FC<ScanInboxPanelProps> = ({ book, onUpdateBook, onRevealChapterText, showToast, initiallyOpen = false }) => {
   const { t, lang } = useLanguage();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const [scans, setScans] = useState<ScanItem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, ScanDraft>>({});
   const [loading, setLoading] = useState(false);

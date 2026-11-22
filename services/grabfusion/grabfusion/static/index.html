@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <base href="__BASE_HREF__">
-<title>GrabFusion — інструкції й курси з фото</title>
+<title data-translate>GrabFusion — книги, курси й інструкції з фото</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap" media="print" onload="this.media='all'">
 <meta name="theme-color" content="#f4ece1">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" href="manifest.webmanifest" id="app-manifest">
 <link rel="icon" type="image/png" sizes="64x64" href="static/icons/favicon-64.png">
 <link rel="apple-touch-icon" href="static/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -23,18 +23,20 @@
   <span class="brand"><span class="mark" aria-hidden="true">FL</span><span class="brand-text">Fusion Lab</span></span>
   <h1 id="title">GrabFusion</h1>
   <div class="top-actions">
-    <span id="net" class="net" hidden>Без звʼязку</span>
-    <button id="btn-install" class="link" hidden>Встановити</button>
-    <button id="btn-back" class="link" hidden>← Чернетки</button>
-    <button id="btn-logout" class="link" hidden>Вийти</button>
+    <span id="net" data-translate class="net" hidden>Без звʼязку</span>
+    <button id="btn-install" data-translate class="link" hidden>Встановити</button>
+    <button id="btn-back" data-translate class="link" hidden>← Чернетки</button>
+    <button id="btn-language" class="link language-toggle" type="button" lang="en" aria-label="Switch to English">EN</button>
+    <button id="btn-logout" data-translate class="link" hidden>Вийти</button>
   </div>
 </header>
 <div id="install-hint" class="hint" hidden>
-  <span>Щоб встановити застосунок: натисніть <b>«Поділитися»</b> у Safari → <b>«На початковий екран»</b>.</span>
-  <button id="install-hint-close" class="link" aria-label="Закрити підказку">✕</button>
+  <span><span data-translate>Щоб встановити застосунок: натисніть</span> <b data-translate>«Поділитися»</b> <span data-translate>у Safari →</span> <b data-translate>«На початковий екран»</b>.</span>
+  <button id="install-hint-close" class="link" data-translate-label="Закрити підказку" aria-label="Закрити підказку">✕</button>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <main id="app"></main>
+<script src="static/i18n.js" defer></script>
 <script src="static/sealed.js" defer></script>
 <script src="static/private.js" defer></script>
 <script src="static/app.js" defer></script>

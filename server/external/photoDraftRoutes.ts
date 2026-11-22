@@ -1772,7 +1772,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
               batchId: d.id,
             });
             if (!made) throw new Error('Немає тексту для створення книги.');
-            target = { kind: 'book', id: made.bookId, studioUrl: '/' };
+            target = { kind: 'book', id: made.bookId, studioUrl: `/projects/${encodeURIComponent(made.bookId)}/editor?from=grabfusion` };
           } else if (d.kind === 'manuscript') {
             const items = toManuscriptItems(d);
             // Нової книги ще немає — Studio створює її сама (дашборд, «Книга & Текст», медіатека); збій чи порожній текст — як раніше, «Вхідні».
@@ -1795,7 +1795,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
               }
             }
             if (made) {
-              target = { kind: 'book', id: made.bookId, studioUrl: '/' };
+              target = { kind: 'book', id: made.bookId, studioUrl: `/projects/${encodeURIComponent(made.bookId)}/editor?from=grabfusion` };
             } else {
               const id = await sinks.createInboxScans({
                 ownerId,

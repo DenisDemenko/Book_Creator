@@ -62,6 +62,7 @@ export interface DescribeRevealTarget {
 }
 
 interface MediaLibraryViewProps {
+  openPhoneInbox?: boolean;
   book: Book;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   authUser?: AuthUser | null;
@@ -165,7 +166,7 @@ const SORT_LABEL_KEY: Record<MediaSortMethod, string> = {
   size: 'mediaLibraryView.sortSize',
 };
 
-export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser, onRevealChapterText, initialTab }) => {
+export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpdateBook, authUser, onRevealChapterText, initialTab, openPhoneInbox }) => {
   // Т2.3 В7: «Медіатека» (галерея, як і була) чи «За сутностями» (герої,
   // локації, предмети, сцени — той самий паспорт і ті самі зв'язки, лише
   // подання). Не забуваємо режим при зміні книги: `/visual-library` завжди
@@ -1030,7 +1031,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({ book, onUpda
 
       {/* WriterScan: вхідні скани з телефону й підключення застосунку. */}
       {isRegistered && (
-        <ScanInboxPanel book={book} onUpdateBook={onUpdateBook} onRevealChapterText={onRevealChapterText} showToast={showToast} />
+        <ScanInboxPanel initiallyOpen={openPhoneInbox} book={book} onUpdateBook={onUpdateBook} onRevealChapterText={onRevealChapterText} showToast={showToast} />
       )}
 
       {/* Media Grid */}

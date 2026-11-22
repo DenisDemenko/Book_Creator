@@ -96,6 +96,10 @@ const body = '## Закріплюємо ніжку\n\nВставте ніжку 
 const sb = mapping.parseStepBody(body, 'Закріплюємо ніжку');
 t('заголовок відкидається, опис — решта', sb.description === 'Вставте ніжку в паз до упору.', sb.description);
 t('підписані рядки — окремими полями', sb.components === 'ніжка 4 шт' && sb.toolsResources === 'молоток; киянка' && sb.warning === 'не бити по торцю' && sb.successCriterion === 'ніжка не хитається');
+const enStep = mapping.parseStepBody('**Details:** leg\n**Tools:** mallet\n**Caution:** avoid the end grain\n**Step result:** the leg is firm\n**Custom:** keep this line', 'Step 1');
+t('англійські підписи потрапляють у ті самі поля, довільний рядок лишається в описі',
+  enStep.components === 'leg' && enStep.toolsResources === 'mallet' && enStep.warning === 'avoid the end grain' &&
+  enStep.successCriterion === 'the leg is firm' && enStep.description === '**Custom:** keep this line');
 t('без підписаних рядків увесь текст — опис', mapping.parseStepBody('Просто текст.\n\nДругий абзац.', 'К').description === 'Просто текст.\n\nДругий абзац.');
 t('порожній текст — опис = назва кроку (поле не може бути порожнім)', mapping.parseStepBody(null, 'Назва').description === 'Назва' && mapping.parseStepBody('## Лише заголовок', 'Назва').description === 'Назва');
 t('кілька рядків одного підпису зливаються', mapping.parseStepBody('x\n**Увага:** а\n**Увага:** б', 'К').warning === 'а; б');

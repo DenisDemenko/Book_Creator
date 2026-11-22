@@ -20,7 +20,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 MANIFEST = {
     "id": "./",
-    "name": "GrabFusion — інструкції й курси з фото",
+    "name": "GrabFusion — книги, курси й інструкції з фото",
     "short_name": "GrabFusion",
     "description": "Зніміть або відскануйте — отримайте інструкцію, курс чи главу книги для Fusion Lab Studio.",
     "lang": "uk",
@@ -38,8 +38,15 @@ MANIFEST = {
     ],
 }
 
+MANIFEST_EN = {
+    **MANIFEST,
+    "name": "GrabFusion — Books, courses, and guides from photos",
+    "description": "Turn photos and scans into books, courses, and guides for Fusion Lab Studio.",
+    "lang": "en",
+}
+
 # Усе, що потрібно, щоб сторінка відкрилась без звʼязку (шлях відносно області SW).
-SHELL_PATHS = ["./", "static/app.css", "static/app.js", "static/sealed.js", "static/private.js", "manifest.webmanifest",
+SHELL_PATHS = ["./", "static/app.css", "static/app.js", "static/i18n.js", "static/sealed.js", "static/private.js", "manifest.webmanifest", "manifest.webmanifest?lang=en",
                "static/icons/icon-192.png", "static/icons/icon-512.png", "static/icons/apple-touch-icon.png",
                "static/icons/favicon-64.png"]
 
@@ -104,8 +111,8 @@ def create_app(settings: Settings | None = None, *, store: SessionStore | None =
         return Response(html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
 
     @app.get("/manifest.webmanifest")
-    def manifest() -> Response:
-        return Response(json.dumps(MANIFEST, ensure_ascii=False), media_type="application/manifest+json",
+    def manifest(lang: str = "uk") -> Response:
+        return Response(json.dumps(MANIFEST_EN if lang == "en" else MANIFEST, ensure_ascii=False), media_type="application/manifest+json",
                         headers={"Cache-Control": "no-cache"})
 
     @app.get("/sw.js")

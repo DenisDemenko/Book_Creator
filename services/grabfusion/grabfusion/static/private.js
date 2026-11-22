@@ -50,7 +50,7 @@ const newDraftId = () => 'pd_' + NovaSealed.newItemId().slice(0, 12).replace(/[^
 /* ---------- створення локальної чернетки ---------- */
 async function startPrivateDraft(body, storeId) {
   const store = privateStoreReady().find((s) => s.id === storeId) || privateStoreReady()[0];
-  if (!store) throw new Error('Для вас немає локального сервера, що приймає знімки. Його підключає адміністратор Studio.');
+  if (!store) throw new Error(tr('Для вас немає локального сервера, що приймає знімки. Його підключає адміністратор Studio.'));
   const draft = Object.assign({ draftId: newDraftId(), storeId: store.id, storeName: store.name, createdAt: new Date().toISOString() }, body);
   await pPutDraft(draft);
   state.privateDraft = draft;
@@ -60,7 +60,7 @@ async function startPrivateDraft(body, storeId) {
 
 async function openPrivateDraft(draftId) {
   const draft = (await pDrafts()).find((d) => d.draftId === draftId);
-  if (!draft) { toast('Чернетку не знайдено.'); return; }
+  if (!draft) { toast(tr('Чернетку не знайдено.')); return; }
   state.privateDraft = draft;
   state.privateItems = await pItems(draftId);
   go('private-draft');
@@ -80,7 +80,7 @@ async function addPrivateFiles(files) {
     const bad = PRIVATE_MIMES.indexOf(mime) < 0;
     order += 1;
     const item = { itemId: NovaSealed.newItemId(), draftId: draft.draftId, order, blob, mime, bytes: blob.size, state: bad ? 'failed' : 'queued',
-      error: bad ? 'Формат не підтримується (наприклад HEIC). У налаштуваннях камери оберіть «Найсумісніший» і зніміть ще раз.' : '', createdAt: new Date().toISOString() };
+      error: bad ? tr('Формат не підтримується (наприклад HEIC). У налаштуваннях камери оберіть «Найсумісніший» і зніміть ще раз.') : '', createdAt: new Date().toISOString() };
     await pPutItem(item); state.privateItems.push(item);
   }
   render(true); void flushPrivate();
@@ -95,7 +95,7 @@ function privateHeader(draft, item) {
 
 async function sendPrivateItem(draft, item) {
   const store = (state.privateStores || []).find((s) => s.id === draft.storeId);
-  if (!store || !store.inboxKey) throw Object.assign(new Error('Сервер не приймає знімки (немає ключа). Спробуйте пізніше.'), { retry: false });
+  if (!store || !store.inboxKey) throw Object.assign(new Error(tr('Сервер не приймає знімки (немає ключа). Спробуйте пізніше.')), { retry: false });
   const plain = NovaSealed.encodePayload(privateHeader(draft, item), new Uint8Array(await item.blob.arrayBuffer()));
   const sealed = await NovaSealed.seal(store.inboxKey, plain, NovaSealed.aadFor(draft.storeId, item.itemId));
   let resp;
@@ -103,13 +103,13 @@ async function sendPrivateItem(draft, item) {
     resp = await fetch('api/private-inbox/' + encodeURIComponent(draft.storeId) + '/' + encodeURIComponent(item.itemId), {
       method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: sealed,
     });
-  } catch (e) { throw Object.assign(new Error('Немає звʼязку.'), { retry: true }); }
+  } catch (e) { throw Object.assign(new Error(tr('Немає звʼязку.')), { retry: true }); }
   let data = null;
   try { data = await resp.json(); } catch (e) { /* не JSON */ }
-  if (resp.status === 401) { state.user = null; go('pair'); throw Object.assign(new Error('Потрібно підключитись заново.'), { retry: false, stop: true }); }
+  if (resp.status === 401) { state.user = null; go('pair'); throw Object.assign(new Error(tr('Потрібно підключитись заново.')), { retry: false, stop: true }); }
   if (resp.ok) return data;
   const retry = resp.status >= 500 || resp.status === 429;
-  throw Object.assign(new Error((data && data.error) || 'Помилка сервера.'), { retry, status: resp.status });
+  throw Object.assign(new Error(grabApiMessage(data?.kind, data?.error || 'Помилка сервера.')), { retry, status: resp.status });
 }
 
 async function flushPrivate() {
@@ -166,7 +166,7 @@ async function pollPrivate() {
 
 /* ---------- екрани ---------- */
 function privateBadge(it) {
-  return h('span', { class: 'badge ' + (it.state === 'delivered' ? 'described' : it.state === 'failed' || it.state === 'expired' ? 'failed' : 'queued'), 'data-private-state': it.state, text: PRIVATE_STATE[it.state] || it.state });
+  return h('span', { class: 'badge ' + (it.state === 'delivered' ? 'described' : it.state === 'failed' || it.state === 'expired' ? 'failed' : 'queued'), 'data-private-state': it.state, text: tr(PRIVATE_STATE[it.state]) || it.state });
 }
 
 function viewPrivateDraft() {
@@ -175,36 +175,36 @@ function viewPrivateDraft() {
   const box = h('div', { id: 'private-draft' });
   const store = (state.privateStores || []).find((s) => s.id === d.storeId);
   const delivered = items.filter((i) => i.state === 'delivered').length;
-  box.append(h('p', { class: 'muted', text: [PRIVATE_KINDS[d.kind], d.title, d.craft, d.audience].filter(Boolean).join(' · ') + ` · знімків: ${items.length}` + (delivered ? `, забрано сервером: ${delivered}` : '') }));
+  box.append(h('p', { class: 'muted', text: [tr(PRIVATE_KINDS[d.kind]), d.title, d.craft, d.audience].filter(Boolean).join(' · ') + tr(" · знімків: {0}", items.length) + (delivered ? tr(", забрано сервером: {0}", delivered) : '') }));
   box.append(h('div', { class: 'card', id: 'private-note' },
-    h('strong', { text: '🔒 Приватна чернетка: на ваш локальний сервер' }),
-    h('p', { class: 'muted', text: `Знімки шифруються на цьому телефоні ключем вашого сервера «${d.storeName}» і йдуть до нього через Studio, яка бачить лише шифротекст. Розпізнає й перевіряє текст сам сервер на вашому комп'ютері: ШІ у хмарі не залучається.` }),
-    h('p', { class: 'muted', text: 'Далі: на компʼютері відкрийте Studio → «Приватні матеріали» → «З телефона» — там розпізнаний текст, перевірка й створення ' + (d.kind === 'course' ? 'курсу' : d.kind === 'instruction' ? 'інструкції' : 'книги') + '.' }),
-    store && !store.online ? h('p', { class: 'err', id: 'private-offline', text: 'Сервер зараз не на звʼязку. Знімки лежатимуть у Studio в зашифрованому вигляді до 72 годин — увімкніть компʼютер із сервером, і він їх забере.' }) : null));
+    h('strong', { text: tr('🔒 Приватна чернетка: на ваш локальний сервер') }),
+    h('p', { class: 'muted', text: tr("Знімки шифруються на цьому телефоні ключем вашого сервера «{0}» і йдуть до нього через Studio, яка бачить лише шифротекст. Розпізнає й перевіряє текст сам сервер на вашому комп'ютері: ШІ у хмарі не залучається.", d.storeName) }),
+    h('p', { class: 'muted', text: tr('Далі: на компʼютері відкрийте Studio → «Приватні матеріали» → «З телефона» — там розпізнаний текст, перевірка й створення ') + (d.kind === 'course' ? tr('курсу') : d.kind === 'instruction' ? tr('інструкції') : tr('книги')) + '.' }),
+    store && !store.online ? h('p', { class: 'err', id: 'private-offline', text: tr('Сервер зараз не на звʼязку. Знімки лежатимуть у Studio в зашифрованому вигляді до 72 годин — увімкніть компʼютер із сервером, і він їх забере.') }) : null));
   const onFiles = (e) => { addPrivateFiles([...e.target.files]); e.target.value = ''; };
   box.append(h('div', { class: 'shoot' },
-    h('label', { class: 'btn primary', for: 'pfile-cam', id: 'plbl-cam', text: '📷 Зняти' }),
-    h('label', { class: 'btn', for: 'pfile-gal', id: 'plbl-gal', text: 'З галереї' }),
+    h('label', { class: 'btn primary', for: 'pfile-cam', id: 'plbl-cam', text: tr('📷 Зняти') }),
+    h('label', { class: 'btn', for: 'pfile-gal', id: 'plbl-gal', text: tr('З галереї') }),
     h('input', { type: 'file', id: 'pfile-cam', accept: 'image/*', capture: 'environment', onchange: onFiles }),
     h('input', { type: 'file', id: 'pfile-gal', accept: 'image/*', multiple: true, onchange: onFiles })));
   const list = h('div', { class: 'frames', id: 'pframes' });
-  if (!items.length) list.append(h('p', { class: 'muted', text: 'Скануйте або фотографуйте сторінки по порядку. Кожен знімок одразу шифрується й надсилається.' }));
+  if (!items.length) list.append(h('p', { class: 'muted', text: tr('Скануйте або фотографуйте сторінки по порядку. Кожен знімок одразу шифрується й надсилається.') }));
   items.forEach((it, i) => {
     const url = it.blob ? (state.urls.has(it.itemId) ? state.urls.get(it.itemId) : (state.urls.set(it.itemId, URL.createObjectURL(it.blob)), state.urls.get(it.itemId))) : null;
     list.append(h('div', { class: 'card frame', 'data-private-item': it.itemId },
-      url ? photoPreview(url, `Знімок №${i + 1}`) : h('div', { class: 'muted', text: '✓' }),
+      url ? photoPreview(url, tr("Знімок №{0}", i + 1)) : h('div', { class: 'muted', text: '✓' }),
       h('div', null,
-        h('strong', { text: (d.kind === 'manuscript' || d.kind === 'course' ? 'Сторінка ' : 'Знімок ') + (i + 1) }),
-        h('div', null, privateBadge(it), it.state === 'failed' || (it.state === 'queued' && it.error) ? h('div', { class: 'err', text: it.error }) : null),
+        h('strong', { text: (d.kind === 'manuscript' || d.kind === 'course' ? tr('Сторінка ') : tr('Знімок ')) + (i + 1) }),
+        h('div', null, privateBadge(it), it.state === 'failed' || (it.state === 'queued' && it.error) ? h('div', { class: 'err', text: grabApiMessage(it.errorKind, it.error) }) : null),
         h('div', { class: 'row' },
-          it.state === 'failed' || it.state === 'expired' ? h('button', { class: 'small', text: 'Спробувати ще', onclick: async () => { if (!it.blob) return; it.state = 'queued'; it.error = ''; await pPutItem(it); render(true); void flushPrivate(); } }) : null,
-          it.state === 'queued' || it.state === 'failed' ? h('button', { class: 'small danger', text: 'Прибрати', onclick: async () => { await pDelItem(it.itemId); state.privateItems = await pItems(d.draftId); render(true); } }) : null))));
+          it.state === 'failed' || it.state === 'expired' ? h('button', { class: 'small', text: tr('Спробувати ще'), onclick: async () => { if (!it.blob) return; it.state = 'queued'; it.error = ''; await pPutItem(it); render(true); void flushPrivate(); } }) : null,
+          it.state === 'queued' || it.state === 'failed' ? h('button', { class: 'small danger', text: tr('Прибрати'), onclick: async () => { await pDelItem(it.itemId); state.privateItems = await pItems(d.draftId); render(true); } }) : null))));
   });
-  box.append(h('h3', { text: 'Знімки' }), list);
+  box.append(h('h3', { text: tr('Знімки') }), list);
   box.append(h('p', { class: 'row' },
-    h('button', { id: 'private-done', text: 'Готово', onclick: async () => { await openPrivateList(); } }),
-    h('button', { class: 'small danger', id: 'private-delete', text: 'Видалити чернетку з телефона', onclick: async () => {
-      if (!window.confirm('Прибрати цю чернетку з телефона? Те, що вже забрав сервер, лишається на сервері.')) return;
+    h('button', { id: 'private-done', text: tr('Готово'), onclick: async () => { await openPrivateList(); } }),
+    h('button', { class: 'small danger', id: 'private-delete', text: tr('Видалити чернетку з телефона'), onclick: async () => {
+      if (!window.confirm(tr('Прибрати цю чернетку з телефона? Те, що вже забрав сервер, лишається на сервері.'))) return;
       await pDelDraft(d.draftId); state.privateDraft = null; await openPrivateList();
     } })));
   return box;
@@ -220,11 +220,15 @@ async function openPrivateList() {
 function privateListSection() {
   const drafts = state.privateDrafts || [];
   if (!drafts.length) return null;
-  const box = h('div', { id: 'private-list' }, h('h3', { text: '🔒 Приватні (на мій сервер)' }));
+  const box = h('div', { id: 'private-list' }, h('h3', { text: tr('🔒 Приватні (на мій сервер)') }));
   for (const d of drafts) {
-    box.append(h('div', { class: 'card row', 'data-private-draft': d.draftId },
-      h('div', { class: 'grow' }, h('strong', { text: d.title || 'Без назви' }), h('div', { class: 'muted', text: `${PRIVATE_KINDS[d.kind]} · сервер «${d.storeName}»` })),
-      h('button', { text: 'Відкрити', onclick: () => openPrivateDraft(d.draftId) })));
+    box.append(h('div', { class: 'card draft-card', 'data-private-draft': d.draftId },
+      h('div', { class: 'grow' }, h('strong', { text: d.title || tr('Без назви') }), h('div', { class: 'muted', text: tr("{0} · сервер «{1}»", tr(PRIVATE_KINDS[d.kind]), d.storeName) })),
+      h('div', { class: 'row draft-card-actions' },
+        h('button', { text: tr('Відкрити'), onclick: () => openPrivateDraft(d.draftId) }),
+        h('button', { class: 'studio-action', type: 'button', text: tr('Відкрити у Студії книг'), onclick: async () => {
+          if (await ensureStudioOrigin()) location.assign(state.studioOrigin + '/#private-materials');
+        } }))));
   }
   return box;
 }

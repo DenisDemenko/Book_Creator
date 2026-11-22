@@ -420,6 +420,25 @@ export async function cacheBookFromServer(book: Book, revision: number): Promise
   await saveMeta(META_ACTIVE_BOOK, book.id);
 }
 
+/** Read an authenticated snapshot before adding it to the browser cache. */
+export async function fetchServerBook(bookId: string, signal?: AbortSignal): Promise<{ book: Book; revision: number }> {
+  const response = await fetch(`/api/books/${encodeURIComponent(bookId)}`, { credentials: 'same-origin', signal });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Книгу не знайдено в доступному серверному сховищі. Перевірте, чи увійшли тим самим обліковим записом, під яким її зберігали.');
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Немає доступу до цієї книги. Увійдіть у свій акаунт.');
+    }
+    throw new Error(`Сервер не зміг відкрити книгу (HTTP ${response.status}).`);
+  }
+  const { book, revision } = await response.json();
+  if (book?.id !== bookId || !Array.isArray(book.chapters) || !Number.isInteger(revision) || revision < 1) {
+    throw new Error('Сервер повернув неповні дані книги. Відкриття скасовано.');
+  }
+  return { book, revision };
+}
+
 /**
  * Записує книгу лише в це сховище браузера — БЕЗ дзеркала на сервер чи локальний сервер. Для відкриття приватної книги з
  * локального сервера: вона вже там, повторний PUT був би зайвим.

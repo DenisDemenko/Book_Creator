@@ -643,7 +643,8 @@ class Sim:
         if d["kind"] == "manuscript" or (d["kind"] == "book" and d.get("newBookTitle")):
             if not d["bookId"]:
                 # Контракт 1.5.0: без наявної книги Studio створює її сама, ціль — `book` (id книги, дашборд).
-                target = {"kind": "book", "id": self._next("BK"), "studioUrl": "/"}
+                book_id = self._next("BK")
+                target = {"kind": "book", "id": book_id, "studioUrl": f"/projects/{book_id}/editor?from=grabfusion"}
             else:
                 tid = self._next("scn")
                 target = {"kind": "inbox", "id": tid, "studioUrl": f"/media?tab=inbox&bookId={d['bookId']}"}

@@ -70,6 +70,13 @@ export function PrivateMaterialsSection({
     void load();
   }, [load, refreshKey]);
 
+  const hasStores = !!states?.length;
+  useEffect(() => {
+    if (hasStores && window.location.hash === '#private-materials') {
+      document.getElementById('private-materials')?.scrollIntoView();
+    }
+  }, [hasStores]);
+
   if (!states || states.length === 0) return null;
 
   const open = async (store: PrivateStoreInfo, doc: PrivateDocSummary) => {
@@ -99,7 +106,7 @@ export function PrivateMaterialsSection({
   };
 
   return (
-    <section data-private-materials className="nova-glass-dark rounded-2xl p-5 border border-emerald-500/30">
+    <section id="private-materials" data-private-materials className="nova-glass-dark rounded-2xl p-5 border border-emerald-500/30">
       <div className="flex items-center gap-2 mb-1">
         <Lock className="w-5 h-5 text-emerald-300" />
         <h2 className="text-base font-bold text-slate-100">Приватні матеріали</h2>

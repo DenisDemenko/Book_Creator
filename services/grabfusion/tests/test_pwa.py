@@ -73,6 +73,9 @@ def test_manifest(mock_url):
     assert r.headers["cache-control"] == "no-cache"
     m = r.json()
     assert m["display"] == "standalone" and m["lang"] == "uk" and m["short_name"] == "GrabFusion"
+    english = make(mock_url, BASE).get(BASE + "/manifest.webmanifest?lang=en").json()
+    assert english["lang"] == "en" and english["id"] == m["id"] and english["scope"] == m["scope"]
+    assert "Books, courses, and guides" in english["name"]
     # відносні адреси — працюють під будь-яким префіксом
     assert m["start_url"] == "./" and m["scope"] == "./" and not m["start_url"].startswith("/")
     assert all(not i["src"].startswith("/") for i in m["icons"])

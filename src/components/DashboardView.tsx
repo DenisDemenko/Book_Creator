@@ -30,7 +30,7 @@ import { CoursesBlock, InstructionsBlock, PhoneDraftsBlock, useMyWorks } from '.
 import { GrabfusionConnectModal } from './GrabfusionConnectModal';
 import { loadInstructionDraft } from '../utils/instructionDraft';
 import { apiPath } from '../utils/basePath';
-import { cacheBookLocally, listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
+import { cacheBookLocally, fetchServerBook, listBooks, loadBook, saveMeta, META_ACTIVE_BOOK, type BookSummary } from '../utils/storage';
 import { getPrivateDoc, setPendingPrivateStore, usablePrivateStores, type PrivateDocSummary, type PrivateStoreInfo } from '../utils/privateStore';
 import { PrivateMaterialsSection } from './PrivateMaterialsSection';
 import { PrivateScanReview } from './PrivateScanReview';
@@ -256,25 +256,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         'На цьому пристрої вже збережена копія цієї книги. Завантажити серверну версію замість локальної? Якщо маєте незбережені локальні правки, натисніть «Скасувати».'
       )) return;
 
-      const response = await fetch(`/api/books/${encodeURIComponent(bookId)}`, {
-        credentials: 'same-origin',
-      });
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('Книгу не знайдено в доступному серверному сховищі. Перевірте, чи увійшли тим самим обліковим записом, під яким її зберігали.');
-        }
-        if (response.status === 401 || response.status === 403) {
-          throw new Error('Немає доступу до цієї книги. Увійдіть у свій акаунт.');
-        }
-        throw new Error(`Сервер не зміг відкрити книгу (HTTP ${response.status}).`);
-      }
-      const stored = await response.json();
-      const restored = stored?.book as Book | undefined;
-      if (!restored || restored.id !== bookId || !Array.isArray(restored.chapters) ||
-          !Number.isInteger(stored.revision) || stored.revision < 1) {
-        throw new Error('Сервер повернув неповні дані книги. Відкриття скасовано.');
-      }
-      await onOpenExistingBook(restored, stored.revision);
+      const { book: restored, revision } = await fetchServerBook(bookId);
+      await onOpenExistingBook(restored, revision);
     } catch (error) {
       setOpenBookError(error instanceof Error ? error.message : 'Не вдалося відкрити книгу.');
     } finally {

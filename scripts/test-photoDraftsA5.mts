@@ -466,6 +466,7 @@ const newBook = await call('POST', `${PD}/${photoBookDraftId}/submit`, { token: 
 const storedPhotoBook = newBook.data.target?.id ? await bookStore.getBook(newBook.data.target.id) : null;
 t('submit створює нову книгу з двома главами, а джерела прив’язано до неї',
   newBook.status === 201 && newBook.data.target.kind === 'book' &&
+  newBook.data.target.studioUrl === `/projects/${encodeURIComponent(newBook.data.target.id)}/editor?from=grabfusion` &&
   (storedPhotoBook?.book.chapters as unknown[])?.length === 2 &&
   (await scanStore.listScans('u-a', { bookId: newBook.data.target.id })).some((scan) => scan.text.includes('Нотатка автора')),
   JSON.stringify(newBook.data.blockers ?? newBook.data.error));

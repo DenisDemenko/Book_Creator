@@ -97,6 +97,7 @@ import {
   loadBook,
   saveBook,
   cacheBookFromServer,
+  fetchServerBook,
   loadMeta,
   saveMeta,
   saveSnapshotData,
@@ -274,7 +275,14 @@ function StudioApp() {
    * Читається один раз — далі адресу веде стан (вкладка й книга), а «назад»
    * повертає стан з адреси (popstate нижче).
    */
-  const initialRouteRef = useRef(typeof window !== 'undefined' ? parseAppPath(window.location.pathname, API_BASE) : null);
+  const initialRouteRef = useRef(parseAppPath(window.location.pathname, API_BASE));
+  const entrySearch = useRef(new URLSearchParams(window.location.search)).current;
+  const openImportedBook = entrySearch.get('from') === 'grabfusion' && initialRouteRef.current?.tab === 'editor';
+  const phoneInboxRef = useRef(entrySearch.get('tab') === 'inbox' &&
+    window.location.pathname.replace(/\/$/, '').endsWith('/media'));
+  const inboxBookId = phoneInboxRef.current ? entrySearch.get('bookId') : null;
+  const routedBookId = openImportedBook ? initialRouteRef.current?.projectId : inboxBookId;
+  const [awaitingRoutedBook, setAwaitingRoutedBook] = useState(!!routedBookId);
   /** Герой відкритого профілю (сторінка «Профіль персонажа», /characters/:id). */
   const [coreCharacterId, setCoreCharacterId] = useState<string | undefined>(initialRouteRef.current?.characterId);
   // Т5.2: вкладка Graph Studio (/admin/graph-studio/<вкладка>).
@@ -800,9 +808,9 @@ function StudioApp() {
         // перезавантажується), і тоді в адресі ще стара книга — перемагати
         // має саме нова активна, а адреса підлаштується під неї.
         let storedBook = activeBook;
-        const routeBookId = initialRouteRef.current?.projectId;
+        const routeBookId = initialRouteRef.current?.projectId || inboxBookId;
         const navigation = (performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined)?.type;
-        if (routeBookId && activeBook?.id !== routeBookId && navigation !== 'reload') {
+        if (routeBookId && activeBook?.id !== routeBookId && (routedBookId === routeBookId || navigation !== 'reload')) {
           const routed = await loadBook(routeBookId).catch(() => undefined);
           if (cancelled) return;
           if (routed) {
@@ -812,7 +820,8 @@ function StudioApp() {
             console.warn(`[routes] книги ${routeBookId} з адреси немає на цьому пристрої — відкрито активну`);
           }
         }
-        if (initialRouteRef.current) setCurrentTab(initialRouteRef.current.tab);
+        if (phoneInboxRef.current) setCurrentTab('media');
+        else if (initialRouteRef.current) setCurrentTab(initialRouteRef.current.tab);
 
         if (storedBook) {
           setBook(storedBook);
@@ -862,6 +871,35 @@ function StudioApp() {
     };
   }, []);
 
+  // A freshly imported book can exist on the server before the phone has a local copy.
+  useEffect(() => {
+    if (!awaitingRoutedBook || !routedBookId || isHydrating) return;
+    if (book.id === routedBookId) { setAwaitingRoutedBook(false); return; }
+    if (auth.loading || !auth.user || auth.user.isGuest) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const { book: routed, revision } = await fetchServerBook(routedBookId, controller.signal);
+        if (controller.signal.aborted) return;
+        await cacheBookFromServer(routed, revision);
+        if (controller.signal.aborted) return;
+        setBook(routed);
+        setActiveChapterId(routed.chapters[0]?.id || '');
+        setActiveSectionId(routed.chapters[0]?.sections[0]?.id || '');
+        setCurrentTab(phoneInboxRef.current ? 'media' : 'editor');
+      } catch {
+        if (controller.signal.aborted) return;
+        setCurrentTab('dashboard');
+        setStorageError(lang === 'en'
+          ? 'Could not open the linked book. Check that you are signed in with the account you use in GrabFusion.'
+          : 'Не вдалося відкрити книгу. Перевірте, чи ви увійшли під тим самим обліковим записом, що й у GrabFusion.');
+      } finally {
+        if (!controller.signal.aborted) setAwaitingRoutedBook(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang]);
+
   // Роль користувача приходить із сервера разом із профілем — окрім
   // випадку, коли роль для ЦІЄЇ книги зафіксована прийнятим cowork-
   // запрошенням (дизайнер/видавець/перекладач не можуть сам собі повернути
@@ -892,20 +930,27 @@ function StudioApp() {
   // перший раз адреса лише уточнюється (replaceState), далі кожен перехід —
   // запис в історії, тож «назад» у браузері повертає попередню вкладку.
   useEffect(() => {
-    if (isHydrating) return;
+    if (isHydrating || awaitingRoutedBook) return;
     if (creativeBibleRef.current || creativeAccessIdRef.current || creativeWorkspaceIdRef.current) return;
     const path = buildAppPath(
       { projectId: book.id, tab: currentTab, characterId: currentTab === 'core-character' ? coreCharacterId : undefined, graphTab },
       API_BASE
     );
     if (!path) return;
-    if (window.location.pathname !== path) {
-      const url = `${path}${window.location.search}${window.location.hash}`;
+    const currentUrl = new URL(window.location.href);
+    if (openImportedBook) currentUrl.searchParams.delete('from');
+    if (phoneInboxRef.current) {
+      currentUrl.searchParams.delete('tab');
+      currentUrl.searchParams.delete('bookId');
+    }
+    const search = openImportedBook || phoneInboxRef.current ? currentUrl.search : window.location.search;
+    const url = `${path}${search}${window.location.hash}`;
+    if (url !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
       if (routeSyncedRef.current) window.history.pushState({ tab: currentTab }, '', url);
       else window.history.replaceState({ tab: currentTab }, '', url);
     }
     routeSyncedRef.current = true;
-  }, [isHydrating, book.id, currentTab, coreCharacterId, graphTab]);
+  }, [isHydrating, awaitingRoutedBook, book.id, currentTab, coreCharacterId, graphTab, openImportedBook]);
 
   const bookIdRef = useRef(book.id);
   bookIdRef.current = book.id;
@@ -1028,7 +1073,7 @@ function StudioApp() {
    */
   const starterBookIdentityRef = useRef<string | null>(null);
   useEffect(() => {
-    if (isHydrating || auth.loading) return;
+    if (isHydrating || auth.loading || awaitingRoutedBook) return;
     const user = auth.user;
     if (!user || user.isGuest) return;
 
@@ -1061,7 +1106,7 @@ function StudioApp() {
     return () => {
       cancelled = true;
     };
-  }, [isHydrating, auth.loading, auth.user, book.id, hasUnsavedChanges, currentRole, persistBook]);
+  }, [isHydrating, auth.loading, auth.user, book.id, hasUnsavedChanges, currentRole, persistBook, awaitingRoutedBook]);
 
   // --- Авторство книги: службове «Невідомий автор» не має лишатись у тексті ---
   //
@@ -1079,7 +1124,7 @@ function StudioApp() {
   // Після заміни умова хибна, тож ефект на кожній наступній правці книги
   // виходить одразу — циклу немає.
   useEffect(() => {
-    if (isHydrating || auth.loading) return;
+    if (isHydrating || auth.loading || awaitingRoutedBook) return;
     const user = auth.user;
     if (!user || user.isGuest) return;
 
@@ -1089,7 +1134,7 @@ function StudioApp() {
     const repaired: Book = { ...book, ...fixed };
     setBook(repaired);
     void persistBook(repaired);
-  }, [book, isHydrating, auth.loading, auth.user, persistBook]);
+  }, [book, isHydrating, auth.loading, auth.user, persistBook, awaitingRoutedBook]);
 
   // --- Одноразова міграція режиму обтікання зображень ---
   //
@@ -1946,7 +1991,7 @@ function StudioApp() {
 
   // Поки книга читається зі сховища — показуємо заставку, щоб користувач
   // не встиг почати правити початкові дані, які потім будуть перезаписані.
-  if (isHydrating || auth.loading) {
+  if (isHydrating || auth.loading || (awaitingRoutedBook && !!auth.user && !auth.user.isGuest)) {
       return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center gap-4">
         <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
@@ -2572,6 +2617,7 @@ function StudioApp() {
         {currentTab === 'media' && (
           <MediaLibraryView
             book={book}
+            openPhoneInbox={phoneInboxRef.current}
             onUpdateBook={handleUpdateBook}
             authUser={auth.user}
             onRevealChapterText={handleRevealChapterText}

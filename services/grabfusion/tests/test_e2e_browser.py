@@ -401,7 +401,8 @@ def test_stage6_manuscript_pages(stack3, browser_page, tmp_path):
     assert "Книгу створено в Studio" in page.inner_text("#submitted")
     assert "Долина тиші" in page.inner_text("#submitted-text")
     assert page.locator("#places li").count() == 3
-    assert page.get_attribute("#open-studio", "href").endswith("/")
+    assert "/projects/BK" in page.get_attribute("#open-studio", "href")
+    assert page.get_attribute("#open-studio", "href").endswith("/editor?from=grabfusion")
     _shot(page, "s6-3-submitted")
     assert not errors, errors
 
@@ -453,3 +454,30 @@ def test_private_path_seals_photo_on_the_phone(stack, browser_page, tmp_path):
     page.wait_for_selector("#private-list")
     assert "Секретна полиця" in page.inner_text("#private-list")
     assert not errors, errors
+
+def test_draft_card_studio_action_and_language_switch(stack3, browser_page):
+    url, _ = stack3
+    base_context, _ = browser_page
+    with base_context.browser.new_context(viewport={"width": 390, "height": 800}, is_mobile=True, has_touch=True) as context:
+        page = context.new_page()
+        page.goto(url)
+        page.locator("#code").fill("GF-OK")
+        page.locator("form.hero button[type=submit]").click()
+        page.locator("#choose-instruction").click()
+        title = "Відкрити"
+        page.locator("#f-title").fill(title)
+        page.locator("#btn-language").click()
+        assert page.locator("html").get_attribute("lang") == "en"
+        assert page.locator("#f-title").input_value() == title
+        page.locator("#create-form button[type=submit]").click()
+        page.locator("#btn-back").click()
+        draft = page.locator("[data-draft]").filter(has=page.locator("strong", has_text=title)).first
+        assert draft.locator("strong").inner_text() == title
+        draft.get_by_role("button", name="Open in Book Studio", exact=True).click()
+        page.locator("#actions").wait_for()
+        assert "Add photos first." in page.locator("#actions").inner_text()
+        page.reload()
+        assert page.locator("html").get_attribute("lang") == "en"
+        assert page.locator("[data-open-studio]").first.inner_text() == "Open in Book Studio"
+        page.locator("#btn-language").click()
+        assert page.locator("[data-open-studio]").first.inner_text() == "Відкрити у Студії книг"
