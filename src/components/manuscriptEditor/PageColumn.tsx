@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { usePageScale, type PageScaleMode } from './usePageScale';
+import { useIsMobile } from '../../hooks/useIsMobile';
+
+/** Телефон: відступ аркуша від країв екрана і «поле» паперу навколо тексту, px. */
+const MOBILE_GUTTER_PX = 16;
+const MOBILE_PAPER_BLEED_PX = 12;
 import { PX_PER_MM, buildRulerMarks, formatMm } from '../../utils/mmUnits';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../../utils/pageFormats';
 import type { PaginationSnapshot } from '../../utils/pageBreaker';
@@ -99,7 +104,19 @@ export const PageColumn: React.FC<PageColumnProps> = ({
   pageGeometry,
 }) => {
   const { t } = useLanguage();
-  const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor, showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0, scaleMode);
+  /**
+   * Телефон: аркуш вписується в ширину з полем MOBILE_GUTTER_PX по боках,
+   * а папір візуально продовжується на MOBILE_PAPER_BLEED_PX за межі
+   * текстового блока (тінь-«поле» того ж кольору, тож на ширину тексту й
+   * пагінацію це не впливає). Без цього рядки впирались у край екрана.
+   */
+  const isMobile = useIsMobile();
+  const { outerRef, scale, widthPx } = usePageScale(
+    widthMm,
+    zoomFactor,
+    (showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0) + (isMobile ? MOBILE_GUTTER_PX * 2 : 0),
+    scaleMode
+  );
   const innerRef = useRef<HTMLDivElement>(null);
   const [naturalHeightPx, setNaturalHeightPx] = useState(0);
 
@@ -289,7 +306,9 @@ export const PageColumn: React.FC<PageColumnProps> = ({
             left: '50%',
             marginLeft: -widthPx / 2,
             background: '#fffefc',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            boxShadow: isMobile && scale > 0
+              ? `0 0 0 ${MOBILE_PAPER_BLEED_PX / scale}px #fffefc, 0 4px 24px rgba(0,0,0,0.4)`
+              : '0 4px 24px rgba(0,0,0,0.4)',
           }}
         >
           <div ref={innerRef}>{children}</div>

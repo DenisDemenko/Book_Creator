@@ -26,7 +26,12 @@ import {
   Blocks,
   History,
   Mic,
+  Menu,
+  MoreHorizontal,
+  X,
 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { NavigationTab, Book, UserRole, CollaboratorPresence, RealtimeSyncStatus, AuthUser } from '../types';
 import { ALL_ROLES, getRoleInfo } from '../utils/rbac';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -76,6 +81,8 @@ interface HeaderNavProps {
   onToggleTheme?: () => void;
   /** Роль зафіксована прийнятим cowork-запрошенням для цієї книги — перемикач ролей вимкнено. */
   roleLocked?: boolean;
+  /** Телефон: відкрити бічне меню студії як висувну шухляду (SidebarNav). */
+  onOpenMobileNav?: () => void;
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
@@ -106,6 +113,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   theme = 'dark',
   onToggleTheme,
   roleLocked = false,
+  onOpenMobileNav,
 }) => {
   const { lang, toggleLang, t } = useLanguage();
   const { selectedColor } = useSunLighting();
@@ -153,6 +161,36 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
       /* приватний режим браузера — стан просто не переживе перезавантаження */
     }
   }, [collapsed]);
+  /**
+   * Телефон: шапка — ОДИН рядок 56 px (меню, емблема, книга, «Зберегти»,
+   * «Ще»). Усі інші кнопки — у панелі «Ще», що випадає з-під шапки.
+   * Раніше на телефоні шапка переносилась у три-чотири рядки (~240 px —
+   * третина екрана), а `--app-header-h` лишалась 86 px, тож липке меню й
+   * канва рахували висоту неправильно й заходили під шапку.
+   */
+  const isMobile = useIsMobile();
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const mobileMoreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isMobile) setMobileMoreOpen(false);
+  }, [isMobile]);
+  useEffect(() => {
+    if (!mobileMoreOpen) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (mobileMoreRef.current?.contains(target)) return;
+      if ((target as Element).closest?.('#header-mobile-more-btn')) return;
+      setMobileMoreOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('touchstart', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('touchstart', close);
+    };
+  }, [mobileMoreOpen]);
+  /** На телефоні згортання шапки не діє: вона й так згорнута в один рядок. */
+  const showControls = isMobile ? mobileMoreOpen : !collapsed;
   const userMenuRef = useRef<HTMLDivElement>(null);
   const pluginsRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<boolean>(false);
@@ -242,123 +280,34 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     return null;
   })();
 
-  return (
-    <header
-      className="sticky top-0 z-40 w-full min-h-[var(--app-header-h)] bg-slate-950/75 border-b border-white/[0.06] backdrop-blur-2xl"
-      style={sunVars}
-    >
-      {/* pr-20 праворуч: у тому кутку висить плаваюча кнопка чату підтримки
-          з підписом (SupportChatWidget.tsx, fixed top-1.5 right-4). Без
-          цього відступу вона лягала б поверх чипа «Формат: A4 …» на
-          екранах, де шапка заповнена. */}
-      <div className={`max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 ${collapsed ? 'py-1' : 'py-2'} flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5`}>
-        {/* Ряд 1 — інформаційні блоки (неклікабельні).
-            `contents` на обгортці рядка: рядок більше НЕ окремий рядок, його
-            вміст стає безпосередніми елементами шапки. Так шапка з двох
-            рядків (інформація + кнопки) стала одним, і канва введення тексту
-            виграла понад 40 пікселів висоти — за прямим проханням власника:
-            «канва має бути максимально високою». */}
-        <div className="contents">
-          {/* Brand & Book Title */}
-          <div className="flex items-center gap-3">
-            {/* Емблема — 80% висоти шапки (--app-header-h, 86px → ~69px),
-                за прямим проханням власника. Розмір рахується від тієї
-                самої змінної, що задає висоту шапки, тому лишиться
-                пропорційним, якщо висоту колись змінять. Кнопка на
-                shrink-0: інакше у вузькому вікні flex-рядок стиснув би
-                саме її, а не довгий заголовок книги поруч. */}
+  /**
+   * Кнопки шапки. На комп’ютері — у рядку шапки (`contents`); на телефоні —
+   * випадна панель «Ще» в `document.body`: шапка має прозорість
+   * BlocksOpacityProvider, і панель усередині неї просвічувала б текст.
+   */
+  const controlsPanel = showControls ? (
+        <div
+          ref={mobileMoreRef}
+          className={
+            isMobile
+              ? 'fixed left-2 right-2 top-[calc(var(--app-header-h)+6px)] z-[215] p-3 rounded-2xl bg-slate-950/[0.97] border border-white/10 backdrop-blur-xl shadow-2xl shadow-black/60 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2'
+              : 'contents'
+          }
+          data-mobile-more-panel={isMobile ? 'open' : undefined}
+          style={isMobile ? sunVars : undefined}
+        >
+          {isMobile && (
             <button
-              onClick={() => onSelectTab('start')}
-              className="flex items-center justify-center shrink-0 rounded-xl hover:bg-white/[0.06] transition-all focus:outline-hidden"
-              style={{
-                width: 'calc(var(--app-header-h) * 0.8)',
-                height: 'calc(var(--app-header-h) * 0.8)',
-              }}
-              title={t('header.goToStart')}
+              type="button"
+              onClick={() => { setMobileMoreOpen(false); onStartSiteTour?.(); }}
+              className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2.5 text-xs font-bold [color:var(--sun-soft)] hover:bg-cyan-400/20"
             >
-              <img src={fusionLabLogo} alt="" className="w-full h-full object-contain p-0.5" />
+              {t('onboardingTour.startBtn')}
             </button>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold tracking-widest [color:var(--sun-acc)] uppercase font-mono">
-                  FUSION LAB STUDIO
-                </span>
-                <span className="hidden sm:inline-block w-1 h-1 rounded-full bg-slate-700" />
-                <span className="hidden sm:inline text-[11px] font-medium [color:var(--sun-acc-70)]">
-                  {t('header.brandSubtitle')}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm font-bold [color:var(--sun-soft)] truncate max-w-[140px] sm:max-w-[200px] xl:max-w-[240px]">
-                  {book.title || t('header.untitledBook')}
-                </h1>
-                <span className="text-xs text-slate-600">/</span>
-                <span className="text-xs [color:var(--sun-acc-80)] truncate max-w-[120px]">
-                  {book.author}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <button type="button" onClick={onStartSiteTour} className="shrink-0 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-xs font-bold [color:var(--sun-soft)] hover:bg-cyan-400/20">
-            {t('onboardingTour.startBtn')}
-          </button>
-
-          {/* Info chips: збереження, ID, слова, формат/сторінки.
-              `2xl` — не випадково: чіпи показуються лише тоді, коли шапка
-              справді влазить в ОДИН рядок. На 1280–1536 вони переносили
-              другий рядок, і канва втрачала 40 пікселів висоти тексту —
-              саме те, чого власник просив не робити. */}
-          {!collapsed && (
-          <div className="hidden 2xl:flex items-center gap-2">
-            {saveIndicator && (
-              <div
-                id="save-state-indicator"
-                className={`px-2.5 py-1 rounded-lg badge-glass text-[11px] font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 ${saveIndicator.cls}`}
-                title={saveIndicator.title}
-                aria-live="polite"
-              >
-                {saveIndicator.icon}
-                <span>{saveIndicator.text}</span>
-              </div>
-            )}
-
-            {/* Book ID Pill */}
-            <div className="px-2 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5 font-mono">
-              <Fingerprint className="w-3 h-3 [color:var(--sun-acc)]" />
-              <span className="[color:var(--sun-acc)] font-bold">{book.id || 'BK-2084-CYBER'}</span>
-              <button
-                onClick={handleCopyId}
-                className="p-0.5 rounded hover:bg-white/10 [color:var(--sun-acc-70)] hover:[color:var(--sun-soft)] transition-colors"
-                title={t('header.copyBookId')}
-              >
-                {copiedId ? <Check className="w-3 h-3 [color:var(--sun-acc)]" /> : <Copy className="w-3 h-3" />}
-              </button>
-            </div>
-
-            <div className="px-2.5 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5">
-              <span className="[color:var(--sun-acc-80)]">{t('header.wordsLabel')}</span>
-              <span className="font-semibold [color:var(--sun-soft)] font-mono">{totalWords.toLocaleString(locale)}</span>
-            </div>
-
-            <div className="px-2.5 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5">
-              <span className="[color:var(--sun-acc-80)]">{t('header.formatLabel')}</span>
-              <span className="font-semibold [color:var(--sun-acc)]">{book.layoutConfig.formatPreset}</span>
-              <span className="[color:var(--sun-acc-70)]">{t('header.pagesShort', { n: totalPages })}</span>
-            </div>
-          </div>
           )}
-        </div>
-
-        {/* Ряд 2 — клікабельні кнопки. Той самий прийом: `contents` вкладає
-            їх у спільний рядок шапки, а не в окремий. У згорнутому стані
-            ряд ховається повністю — лишається тільки блок бренду й книга. */}
-        {!collapsed && (
-        <div className="contents">
           <div className="flex items-center gap-2 flex-wrap">
             {/* Primary Save Button */}
-            {currentRole !== 'reader' ? (
+            {isMobile ? null : currentRole !== 'reader' ? (
               <button
                 id="save-book-btn"
                 onClick={onSave}
@@ -514,7 +463,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
             {/* Перемикач мови інтерфейсу: UA / EN */}
             <button
               id="language-toggle-btn"
@@ -648,11 +597,197 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             </button>
           </div>
         </div>
+  ) : null;
+
+  return (
+    <header
+      className={`sticky top-0 z-40 w-full bg-slate-950/75 border-b border-white/[0.06] backdrop-blur-2xl ${
+        isMobile ? 'h-[var(--app-header-h)] pt-[env(safe-area-inset-top)]' : 'min-h-[var(--app-header-h)]'
+      }`}
+      style={sunVars}
+      data-mobile-header={isMobile ? 'on' : undefined}
+    >
+      {/* pr-20 праворуч: у тому кутку висить плаваюча кнопка чату підтримки
+          з підписом (SupportChatWidget.tsx, fixed top-1.5 right-4). Без
+          цього відступу вона лягала б поверх чипа «Формат: A4 …» на
+          екранах, де шапка заповнена. */}
+      <div
+        className={
+          isMobile
+            ? 'h-full px-2 flex flex-nowrap items-center gap-1.5'
+            : `max-w-[1780px] mx-auto px-4 sm:px-6 pr-20 sm:pr-24 ${collapsed ? 'py-1' : 'py-2'} flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5`
+        }
+      >
+        {isMobile && onOpenMobileNav && (
+          <button
+            type="button"
+            id="header-mobile-nav-btn"
+            onClick={onOpenMobileNav}
+            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl [color:var(--sun-acc)] hover:bg-white/[0.06] active:scale-95 transition-all"
+            aria-label={t('header.mobileMenu')}
+            title={t('header.mobileMenu')}
+          >
+            <Menu className="w-5 h-5" />
+          </button>
         )}
+        {/* Ряд 1 — інформаційні блоки (неклікабельні).
+            `contents` на обгортці рядка: рядок більше НЕ окремий рядок, його
+            вміст стає безпосередніми елементами шапки. Так шапка з двох
+            рядків (інформація + кнопки) стала одним, і канва введення тексту
+            виграла понад 40 пікселів висоти — за прямим проханням власника:
+            «канва має бути максимально високою». */}
+        <div className="contents">
+          {/* Brand & Book Title */}
+          <div className={`flex items-center ${isMobile ? 'gap-2 flex-1 min-w-0' : 'gap-3'}`}>
+            {/* Емблема — 80% висоти шапки (--app-header-h, 86px → ~69px),
+                за прямим проханням власника. Розмір рахується від тієї
+                самої змінної, що задає висоту шапки, тому лишиться
+                пропорційним, якщо висоту колись змінять. Кнопка на
+                shrink-0: інакше у вузькому вікні flex-рядок стиснув би
+                саме її, а не довгий заголовок книги поруч. */}
+            <button
+              onClick={() => onSelectTab('start')}
+              className="flex items-center justify-center shrink-0 rounded-xl hover:bg-white/[0.06] transition-all focus:outline-hidden"
+              style={{
+                width: isMobile ? 36 : 'calc(var(--app-header-h) * 0.8)',
+                height: isMobile ? 36 : 'calc(var(--app-header-h) * 0.8)',
+              }}
+              title={t('header.goToStart')}
+            >
+              <img src={fusionLabLogo} alt="" className="w-full h-full object-contain p-0.5" />
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <div className={`${isMobile ? 'hidden' : 'flex'} items-center gap-2`}>
+                <span className="text-[10px] font-bold tracking-widest [color:var(--sun-acc)] uppercase font-mono">
+                  FUSION LAB STUDIO
+                </span>
+                <span className="hidden sm:inline-block w-1 h-1 rounded-full bg-slate-700" />
+                <span className="hidden sm:inline text-[11px] font-medium [color:var(--sun-acc-70)]">
+                  {t('header.brandSubtitle')}
+                </span>
+              </div>
+              {isMobile ? (
+                <div className="min-w-0 leading-tight">
+                  <h1 className="text-[13px] font-bold [color:var(--sun-soft)] truncate">
+                    {book.title || t('header.untitledBook')}
+                  </h1>
+                  <span className="block text-[11px] [color:var(--sun-acc-80)] truncate">
+                    {book.author}
+                  </span>
+                </div>
+              ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm font-bold [color:var(--sun-soft)] truncate max-w-[140px] sm:max-w-[200px] xl:max-w-[240px]">
+                  {book.title || t('header.untitledBook')}
+                </h1>
+                <span className="text-xs text-slate-600">/</span>
+                <span className="text-xs [color:var(--sun-acc-80)] truncate max-w-[120px]">
+                  {book.author}
+                </span>
+              </div>
+              )}
+            </div>
+          </div>
+
+          {!isMobile && (
+          <button type="button" onClick={onStartSiteTour} className="shrink-0 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-xs font-bold [color:var(--sun-soft)] hover:bg-cyan-400/20">
+            {t('onboardingTour.startBtn')}
+          </button>
+          )}
+
+          {/* Телефон: «Зберегти» іконкою та «Ще» — завжди в рядку шапки. */}
+          {isMobile && (
+            <>
+              {currentRole !== 'reader' && (
+                <button
+                  type="button"
+                  id="save-book-btn-mobile"
+                  onClick={onSave}
+                  disabled={isSaving}
+                  className={`relative shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-all active:scale-95 ${
+                    hasUnsavedChanges ? '[background-color:var(--sun-acc-15)] [color:var(--sun-acc)]' : '[color:var(--sun-acc-70)] hover:bg-white/[0.06]'
+                  }`}
+                  aria-label={t('header.saveTitle')}
+                  title={t('header.saveTitle')}
+                >
+                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                  {hasUnsavedChanges && !isSaving && (
+                    <span className="absolute top-2 right-2 w-2 h-2 rounded-full [background-color:var(--sun-acc)]" />
+                  )}
+                </button>
+              )}
+              <button
+                type="button"
+                id="header-mobile-more-btn"
+                onClick={() => setMobileMoreOpen((v) => !v)}
+                aria-expanded={mobileMoreOpen}
+                className={`shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-all active:scale-95 ${
+                  mobileMoreOpen ? 'badge-glass [color:var(--sun-soft)]' : '[color:var(--sun-acc)] hover:bg-white/[0.06]'
+                }`}
+                aria-label={t('header.mobileMore')}
+                title={t('header.mobileMore')}
+              >
+                {mobileMoreOpen ? <X className="w-5 h-5" /> : <MoreHorizontal className="w-5 h-5" />}
+              </button>
+            </>
+          )}
+
+          {/* Info chips: збереження, ID, слова, формат/сторінки.
+              `2xl` — не випадково: чіпи показуються лише тоді, коли шапка
+              справді влазить в ОДИН рядок. На 1280–1536 вони переносили
+              другий рядок, і канва втрачала 40 пікселів висоти тексту —
+              саме те, чого власник просив не робити. */}
+          {!collapsed && !isMobile && (
+          <div className="hidden 2xl:flex items-center gap-2">
+            {saveIndicator && (
+              <div
+                id="save-state-indicator"
+                className={`px-2.5 py-1 rounded-lg badge-glass text-[11px] font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 ${saveIndicator.cls}`}
+                title={saveIndicator.title}
+                aria-live="polite"
+              >
+                {saveIndicator.icon}
+                <span>{saveIndicator.text}</span>
+              </div>
+            )}
+
+            {/* Book ID Pill */}
+            <div className="px-2 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5 font-mono">
+              <Fingerprint className="w-3 h-3 [color:var(--sun-acc)]" />
+              <span className="[color:var(--sun-acc)] font-bold">{book.id || 'BK-2084-CYBER'}</span>
+              <button
+                onClick={handleCopyId}
+                className="p-0.5 rounded hover:bg-white/10 [color:var(--sun-acc-70)] hover:[color:var(--sun-soft)] transition-colors"
+                title={t('header.copyBookId')}
+              >
+                {copiedId ? <Check className="w-3 h-3 [color:var(--sun-acc)]" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </div>
+
+            <div className="px-2.5 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5">
+              <span className="[color:var(--sun-acc-80)]">{t('header.wordsLabel')}</span>
+              <span className="font-semibold [color:var(--sun-soft)] font-mono">{totalWords.toLocaleString(locale)}</span>
+            </div>
+
+            <div className="px-2.5 py-1 rounded-lg badge-glass text-xs flex items-center gap-1.5">
+              <span className="[color:var(--sun-acc-80)]">{t('header.formatLabel')}</span>
+              <span className="font-semibold [color:var(--sun-acc)]">{book.layoutConfig.formatPreset}</span>
+              <span className="[color:var(--sun-acc-70)]">{t('header.pagesShort', { n: totalPages })}</span>
+            </div>
+          </div>
+          )}
+        </div>
+
+        {/* Ряд 2 — клікабельні кнопки. Той самий прийом: `contents` вкладає
+            їх у спільний рядок шапки, а не в окремий. У згорнутому стані
+            ряд ховається повністю — лишається тільки блок бренду й книга. */}
+        {controlsPanel && (isMobile && typeof document !== 'undefined' ? createPortal(controlsPanel, document.body) : controlsPanel)}
 
         {/* Згортання/розгортання верхньої панелі по вертикалі (на прохання
             власника: «потрібна вся висота екрану»). Кнопка лишається
             видимою і в згорнутому стані — інакше не було б як розгорнути. */}
+        {!isMobile && (
         <button
           id="header-collapse-btn"
           onClick={() => setCollapsed((v) => !v)}
@@ -665,6 +800,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             {collapsed ? t('header.expandPanel') : t('header.collapsePanel')}
           </span>
         </button>
+        )}
       </div>
     </header>
   );

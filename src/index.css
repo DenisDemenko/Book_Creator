@@ -317,6 +317,21 @@ html[data-header-collapsed='true'] {
     var(--aurora-glow-layers);
 }
 
+/* Телефон (< 768 px): шапка завжди один рядок 56 px (HeaderNav, isMobile),
+   решта кнопок — у випадній панелі «Ще». Канва й меню рахують себе від цієї
+   ж змінної, тож тепер вони починаються рівно під шапкою, а не під 86 px,
+   коли справжня шапка займала ~240 px. Бічне меню — шухляда (SidebarNav),
+   тож горизонтального прокручування сторінки бути не повинно взагалі. */
+@media (max-width: 767px) {
+  :root,
+  html[data-header-collapsed='true'] {
+    --app-header-h: calc(56px + env(safe-area-inset-top));
+  }
+  .app-shell-root {
+    overflow-x: clip;
+  }
+}
+
 :is(
   [class~="rounded-lg"],
   [class~="rounded-xl"],

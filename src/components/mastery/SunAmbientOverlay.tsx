@@ -46,7 +46,7 @@ export const SunAmbientOverlay: React.FC = () => {
 
       {/* 2. Top-Center Subtle Focus Progress Bar (When not in full pause) */}
       {!isPauseActive && intensityFactor > 0.05 && (
-        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-40 pointer-events-none transition-all duration-500 opacity-80 hover:opacity-100">
+        <div className="hidden md:block fixed top-2 left-1/2 -translate-x-1/2 z-40 pointer-events-none transition-all duration-500 opacity-80 hover:opacity-100">
           <div className="bg-[#fdfcfc]/90 backdrop-blur-md px-3 py-1 rounded-full border border-white shadow-sm flex items-center gap-2 text-[11px] font-bold text-gray-700">
             <span
               className="w-2 h-2 rounded-full animate-pulse"
