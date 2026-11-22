@@ -317,6 +317,21 @@ html[data-header-collapsed='true'] {
     var(--aurora-glow-layers);
 }
 
+/* Телефон (< 768 px): шапка завжди один рядок 56 px (HeaderNav, isMobile),
+   решта кнопок — у випадній панелі «Ще». Канва й меню рахують себе від цієї
+   ж змінної, тож тепер вони починаються рівно під шапкою, а не під 86 px,
+   коли справжня шапка займала ~240 px. Бічне меню — шухляда (SidebarNav),
+   тож горизонтального прокручування сторінки бути не повинно взагалі. */
+@media (max-width: 767px) {
+  :root,
+  html[data-header-collapsed='true'] {
+    --app-header-h: calc(56px + env(safe-area-inset-top));
+  }
+  .app-shell-root {
+    overflow-x: clip;
+  }
+}
+
 :is(
   [class~="rounded-lg"],
   [class~="rounded-xl"],
@@ -1419,6 +1434,63 @@ html[data-header-collapsed='true'] {
 }
 .nova-manuscript-editor .nova-ai-draft p:last-child {
   margin-bottom: 0;
+}
+
+/* Підписи кнопок AI-чернетки: на комп’ютері — лише значки (див. вище),
+   на телефоні — значок + слово, кнопки по 34 px. Розміри діляться на
+   `--page-scale` (масштаб аркуша з PageColumn.tsx): мітка живе всередині
+   аркуша, який на телефоні стиснутий до ~0.7, і без цього 34 px стали б
+   24 px, а 10-піксельні значки — 7-піксельними (скарга власника 22.11.2026). */
+.nova-ai-btn-text { display: none; }
+.nova-manuscript-editor .nova-ai-draft-part { width: auto; padding: 0 0.35em; white-space: nowrap; }
+@media (max-width: 767px) {
+  .nova-manuscript-editor .nova-ai-draft {
+    padding: calc(10px / var(--page-scale, 1)) 1em 0.6em;
+  }
+  .nova-manuscript-editor .nova-ai-draft-label {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 0 calc(10px / var(--page-scale, 1));
+    gap: calc(6px / var(--page-scale, 1));
+    padding: calc(5px / var(--page-scale, 1));
+    padding-left: calc(10px / var(--page-scale, 1));
+    border-radius: calc(20px / var(--page-scale, 1));
+    font-size: calc(13px / var(--page-scale, 1));
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .nova-manuscript-editor .nova-ai-draft-label button {
+    width: auto;
+    height: calc(34px / var(--page-scale, 1));
+    margin: 0;
+    padding: 0 calc(12px / var(--page-scale, 1));
+    gap: calc(5px / var(--page-scale, 1));
+    border-radius: 999px;
+    font-size: inherit;
+    font-weight: 700;
+  }
+  .nova-manuscript-editor .nova-ai-draft-label .nova-ai-draft-accept {
+    color: #6ee7b7;
+    background: rgba(52, 211, 153, 0.16);
+    border: 1px solid rgba(52, 211, 153, 0.55);
+  }
+  .nova-manuscript-editor .nova-ai-draft-label .nova-ai-draft-part {
+    color: #fcd34d;
+    background: rgba(251, 191, 36, 0.14);
+    border-color: rgba(251, 191, 36, 0.5);
+  }
+  .nova-manuscript-editor .nova-ai-draft-label .nova-ai-draft-reject {
+    color: #fca5a5;
+    background: rgba(248, 113, 113, 0.14);
+    border: 1px solid rgba(248, 113, 113, 0.5);
+  }
+  .nova-manuscript-editor .nova-ai-draft-label button:disabled {
+    opacity: 0.45;
+  }
+  .nova-ai-btn-text { display: inline; }
 }
 
 /* Текст, написаний моделлю, друкується ІНШИМ шрифтом, ніж текст автора:

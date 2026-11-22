@@ -8,6 +8,8 @@ import { acceptAiOrigin, normalizeAiOrigin, type AiTextOrigin } from '../../../s
 
 export interface AiDraftBlockOptions {
  label:string; reviewLabel:string; rejectLabel:string; acceptedLabel?:string; reviewer?:()=>string;
+ /** Короткі підписи кнопок. На комп’ютері приховані (лише значки), на телефоні — видимі: значок 10 px без слова не зрозуміти й не влучити пальцем. */
+ buttonTexts?:{accept:string;part:string;reject:string};
 }
 /** Uses a single transaction: undo restores the exact draft, IDs and selection. */
 export function reviewAiBlock(editor:any,pos:number,actor:string,selectionOnly=false) {
@@ -30,18 +32,19 @@ const AiDraftBlockView=({node,getPos,editor,extension}:ReactNodeViewProps)=>{
  const options=extension.options as AiDraftBlockOptions;
  const origin=normalizeAiOrigin(node.attrs.provenance);
  const [details,setDetails]=useState(false);
+ const texts=options.buttonTexts||{accept:'Прийняти',part:'Виділене',reject:'Відхилити'};
  const accept=(partial=false)=>{const pos=getPos();if(typeof pos==='number')reviewAiBlock(editor,pos,options.reviewer?.()||'local-author',partial);};
  return <NodeViewWrapper as="div" data-ai-draft={origin?undefined:''} data-ai-generated={origin?.id}
   className={'nova-ai-draft'+(origin?' nova-ai-accepted':'')}>
   <div className="nova-ai-draft-label" contentEditable={false}>
    <span>{origin?(options.acceptedLabel||'Згенеровано ШІ · прийнято автором'):('✨ '+options.label)}</span>
    {origin?<button type="button" aria-label="AI metadata" onClick={()=>setDetails(!details)}>ⓘ</button>:<>
-    <button type="button" title={options.reviewLabel} aria-label={options.reviewLabel} data-ai-draft-accept disabled={!editor.isEditable}
-     onMouseDown={e=>e.preventDefault()} onClick={()=>accept()}>✓</button>
-    <button type="button" title="Прийняти виділену частину / Accept selection" data-ai-selection-accept disabled={!editor.isEditable}
-     onMouseDown={e=>e.preventDefault()} onClick={()=>accept(true)}>✓ ▤</button>
-    <button type="button" title={options.rejectLabel} aria-label={options.rejectLabel} data-ai-draft-reject disabled={!editor.isEditable}
-     onMouseDown={e=>e.preventDefault()} onClick={()=>{const pos=getPos();if(typeof pos==='number')editor.view.dispatch(editor.state.tr.delete(pos,pos+node.nodeSize));}}>⊘</button>
+    <button type="button" className="nova-ai-draft-accept" title={options.reviewLabel} aria-label={options.reviewLabel} data-ai-draft-accept disabled={!editor.isEditable}
+     onMouseDown={e=>e.preventDefault()} onClick={()=>accept()}><span aria-hidden="true">✓</span><span className="nova-ai-btn-text">{texts.accept}</span></button>
+    <button type="button" className="nova-ai-draft-accept nova-ai-draft-part" title="Прийняти виділену частину / Accept selection" data-ai-selection-accept disabled={!editor.isEditable}
+     onMouseDown={e=>e.preventDefault()} onClick={()=>accept(true)}><span aria-hidden="true">✓ ▤</span><span className="nova-ai-btn-text">{texts.part}</span></button>
+    <button type="button" className="nova-ai-draft-reject" title={options.rejectLabel} aria-label={options.rejectLabel} data-ai-draft-reject disabled={!editor.isEditable}
+     onMouseDown={e=>e.preventDefault()} onClick={()=>{const pos=getPos();if(typeof pos==='number')editor.view.dispatch(editor.state.tr.delete(pos,pos+node.nodeSize));}}><span aria-hidden="true">⊘</span><span className="nova-ai-btn-text">{texts.reject}</span></button>
    </>}
    {details&&origin&&<small className="break-all">{origin.id} · {origin.acceptedAt} · {origin.acceptedBy}{origin.modelId?' · '+origin.modelId:''}</small>}
   </div>

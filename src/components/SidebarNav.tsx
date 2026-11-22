@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useIsMobile } from '../hooks/useIsMobile';
 import {
   LayoutDashboard,
   Rocket,
@@ -46,6 +48,7 @@ import {
   ShieldAlert,
   UsersRound,
   Languages,
+  X,
 } from 'lucide-react';
 import { NavigationTab, Book, UserRole } from '../types';
 import { canAccessTab } from '../utils/rbac';
@@ -74,6 +77,9 @@ interface SidebarNavProps {
   onQuickAi: () => void;
   /** Відкрити сторінку довідки (кнопка внизу навігації). */
   onOpenHelp: () => void;
+  /** Телефон: меню — висувна шухляда зліва; відкрита чи ні, керує App (кнопка ☰ у шапці). */
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 /** Ключ localStorage для персистентності стану згорнутого/розгорнутого сайдбара. */
@@ -265,20 +271,41 @@ function isGroupOpen(state: Record<string, boolean>, groupId: string): boolean {
  */
 export const SidebarNav: React.FC<SidebarNavProps> = ({
   currentTab,
-  onSelectTab,
   book,
   logCount = 0,
   currentRole,
   extraTabs = [],
   focus = null,
-  onQuickAi,
-  onOpenHelp,
+  onOpenHelp: onOpenHelpProp,
+  onSelectTab: onSelectTabProp,
+  onQuickAi: onQuickAiProp,
+  mobileOpen = false,
+  onCloseMobile,
 }) => {
   const { t } = useLanguage();
   // Акцент «Сонечка»: кольоровий текст навігації слідує за вибраним
   // кольором сонця (той самий механізм, що й у HeaderNav).
   const sunVars = useSunAccentVars();
-  const [collapsed, setCollapsed] = useState<boolean>(readInitialCollapsed);
+  const [collapsedPref, setCollapsed] = useState<boolean>(readInitialCollapsed);
+  /**
+   * Телефон: постійна смуга іконок забирала ~17 % ширини екрана й стискала
+   * аркуш до нечитабельного. Тепер меню ховається повністю й виїжджає
+   * шухлядою з підписами (кнопка ☰ у шапці); вибір пункту її закриває.
+   */
+  const isMobile = useIsMobile();
+  const collapsed = isMobile ? false : collapsedPref;
+  const afterPick = () => { if (isMobile) onCloseMobile?.(); };
+  const onSelectTab = (tab: NavigationTab) => { onSelectTabProp(tab); afterPick(); };
+  const onQuickAi = () => { onQuickAiProp(); afterPick(); };
+  const onOpenHelp = () => { onOpenHelpProp(); afterPick(); };
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseMobile?.(); };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prevOverflow; };
+  }, [isMobile, mobileOpen, onCloseMobile]);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(readInitialGroups);
   const focusTabs = focus?.tabs ?? [];
   // Меню показує ОДИН блок за раз (запит власника 10.11.2026): `null` — перелік блоків, інакше — id відкритого блоку
@@ -437,13 +464,43 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     </button>
   );
 
-  return (
+  const tree = (
+    <>
+    {isMobile && mobileOpen && (
+      <div
+        aria-hidden="true"
+        onClick={onCloseMobile}
+        className="fixed inset-0 z-[220] bg-black/55 backdrop-blur-[2px] animate-in fade-in"
+        data-mobile-nav-backdrop
+      />
+    )}
     <aside
       style={sunVars}
-      className={`sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/75 border-r border-white/[0.06] backdrop-blur-2xl transition-[width] duration-200 ease-out ${
-        collapsed ? 'w-16' : 'w-64'
-      }`}
+      data-mobile-nav={isMobile ? (mobileOpen ? 'open' : 'closed') : undefined}
+      aria-hidden={isMobile && !mobileOpen ? true : undefined}
+      className={
+        isMobile
+          ? `fixed top-0 left-0 bottom-0 z-[221] w-[min(18rem,85vw)] flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-950/95 border-r border-white/[0.08] backdrop-blur-2xl shadow-2xl transition-transform duration-200 ease-out ${
+              mobileOpen ? 'translate-x-0' : '-translate-x-full invisible'
+            }`
+          : `sticky top-[var(--app-header-h)] shrink-0 flex flex-col h-[var(--app-sidebar-h)] bg-slate-950/75 border-r border-white/[0.06] backdrop-blur-2xl transition-[width] duration-200 ease-out ${
+              collapsed ? 'w-16' : 'w-64'
+            }`
+      }
     >
+      {isMobile && (
+        <div className="flex items-center justify-between gap-2 px-3 h-14 shrink-0 border-b border-white/[0.06]">
+          <span className="text-[11px] font-bold tracking-widest uppercase font-mono [color:var(--sun-acc)]">Fusion Lab Studio</span>
+          <button
+            type="button"
+            onClick={onCloseMobile}
+            className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-300 hover:bg-white/[0.06]"
+            aria-label={t('header.sidebarCollapse')}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
       <nav className="flex-1 overflow-y-auto no-scrollbar py-2 px-2 space-y-1">
         {/* Т6.4: «Мій простір» — завжди першим; розділи простору ролі — під ним. */}
         {canAccessTab(currentRole, 'my-space') && (
@@ -585,8 +642,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         </button>
       </div>
 
-      {/* Перемикач згортання/розгортання сайдбара */}
-      <div className="border-t border-white/[0.06] p-2">
+      {/* Перемикач згортання/розгортання сайдбара (на телефоні не потрібен — там шухляда) */}
+      <div className={`border-t border-white/[0.06] p-2 ${isMobile ? 'hidden' : ''}`}>
         <button
           id="sidebar-collapse-toggle"
           onClick={toggleCollapsed}
@@ -601,5 +658,10 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         </button>
       </div>
     </aside>
+    </>
   );
+  // Телефон: шухляда — у `document.body`. Усередині студії предки мають
+  // прозорість (BlocksOpacityProvider) і тому власний контекст накладання:
+  // там навіть z-[90] лягав би під нижню панель «Інструменти» й сонечко.
+  return isMobile && typeof document !== 'undefined' ? createPortal(tree, document.body) : tree;
 };

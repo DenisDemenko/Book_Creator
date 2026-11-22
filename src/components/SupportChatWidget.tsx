@@ -184,10 +184,10 @@ export const SupportChatWidget: React.FC = () => {
           рівно стільки вільного місця, скільки треба кнопці. Підпис під
           нею ховається на вузьких вікнах (xl:block) — там це місце вже
           зайняте чипами. */}
-      <div className="fixed top-1.5 right-4 z-40 flex flex-col items-center gap-1">
+      <div className="fixed bottom-[calc(60px+env(safe-area-inset-bottom))] right-3 md:bottom-auto md:top-1.5 md:right-4 z-40 flex flex-col items-center gap-1">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="relative w-12 h-12 rounded-full bg-amber-500 text-slate-950 shadow-xl flex items-center justify-center hover:scale-105 transition-transform"
+          className="relative w-11 h-11 md:w-12 md:h-12 rounded-full bg-amber-500 text-slate-950 shadow-xl flex items-center justify-center hover:scale-105 transition-transform"
           title={t('supportChat.openButtonTitle')}
         >
           {open ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
@@ -203,7 +203,7 @@ export const SupportChatWidget: React.FC = () => {
       </div>
 
       {open && (
-        <div className="fixed top-36 right-6 z-40 w-[340px] max-w-[calc(100vw-2rem)] h-[440px] max-h-[70vh] bg-slate-950 border border-white/[0.1] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed left-2 right-2 bottom-[calc(112px+env(safe-area-inset-bottom))] md:left-auto md:bottom-auto md:top-36 md:right-6 z-40 md:w-[340px] md:max-w-[calc(100vw-2rem)] h-[440px] max-h-[60vh] md:max-h-[70vh] bg-slate-950 border border-white/[0.1] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2 text-slate-100 font-bold text-xs">
               <MessageCircle className="w-4 h-4 text-amber-400" />

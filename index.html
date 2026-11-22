@@ -2,7 +2,8 @@
 <html lang="uk" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale=1: iOS Safari інакше сам збільшує сторінку при фокусі на полі з текстом < 16 px (знімок власника 22.11.2026 — шапка й текст зʼїхали за правий край). Жестовий зум у iOS від цього не вимикається. viewport-fit=cover — щоб працювали env(safe-area-inset-*). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
     <title>Цифрова Майстерня Письменника — AI Платформа</title>
     <meta name="description" content="Повний цикл створення книги від ідеї та сценарію до AI-редагування, ілюстрацій, верстки та публікації." />
     <link rel="preconnect" href="https://fonts.googleapis.com">

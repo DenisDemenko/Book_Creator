@@ -222,6 +222,9 @@ function StudioApp() {
   const [isNotesImportOpen, setIsNotesImportOpen] = useState<boolean>(false);
   /** Сторінка довідки (кнопка у футері). Стан тут, бо футер — частина оболонки. */
   const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
+  /** Телефон: бічне меню студії відкрите як шухляда (кнопка ☰ у шапці). */
+  const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
   const [isCreateBookModalOpen, setIsCreateBookModalOpen] = useState<boolean>(false);
   const [isImportBookModalOpen, setIsImportBookModalOpen] = useState<boolean>(false);
   const [isImportWizardModalOpen, setIsImportWizardModalOpen] = useState<boolean>(false);
@@ -2225,6 +2228,7 @@ function StudioApp() {
         syncStatus={syncStatus}
         onOpenCollab={() => setIsCollabDrawerOpen(true)}
         unreadChatCount={chatMessages.length}
+        onOpenMobileNav={() => setMobileNavOpen(true)}
       />
 
       {book.privateStore && !TABS_WITHOUT_OPEN_BOOK.has(currentTab) && <PrivateBookBadge storeId={book.privateStore.storeId} docId={book.id} />}
@@ -2393,6 +2397,8 @@ function StudioApp() {
         currentRole={currentRole}
         onQuickAi={() => setIsQuickAiOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
+        mobileOpen={mobileNavOpen}
+        onCloseMobile={closeMobileNav}
       />
 
       {/* Внутрішня межа помилок: падіння одного модуля не забирає з собою

@@ -22,6 +22,7 @@ import {
   type Rect,
   type ToolDockState,
 } from '../utils/toolDockLayout';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 /**
  * Плаваючий блок інструментів редактора «Книга та текст».
@@ -72,6 +73,9 @@ interface FloatingToolDockProps {
   children: (layout: { orientation: 'horizontal' | 'vertical'; width: number }) => React.ReactNode;
 }
 
+/** Висота згорнутої нижньої панелі на телефоні — стільки місця звільняє під неї поле тексту. */
+const MOBILE_BAR_H = 48;
+
 const toRect = (r: DOMRect): Rect => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
 
 function readState(key: string): ToolDockState {
@@ -104,6 +108,15 @@ export const FloatingToolDock: React.FC<FloatingToolDockProps> = ({
   const boxRef = useRef<HTMLDivElement>(null);
   const [boxSize, setBoxSize] = useState({ width: 0, height: 0 });
   const startRef = useRef({ px: 0, py: 0, x: 0, y: 0, w: 0, undocked: false });
+  /**
+   * Телефон: перетягувати/магнітити блок пальцем на екрані 390 px немає де —
+   * розгорнутий блок накривав увесь аркуш (див. скриншот власника 22.11.2026).
+   * Там він — нижня панель на всю ширину: згорнута смужка «Інструменти» і
+   * розгортання вгору до 60 % висоти зі скролом. Збережене розташування
+   * для комп’ютера при цьому не чіпається.
+   */
+  const isMobile = useIsMobile();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -157,8 +170,8 @@ export const FloatingToolDock: React.FC<FloatingToolDockProps> = ({
   // прилиплий донизу блок тоді стоїть біля низу ВІКНА, і поле має звільнити
   // ще й ту частину, що сховалась за краєм.
   const bottomOverflow = anchor ? Math.max(0, Math.round(anchor.bottom - window.innerHeight)) : 0;
-  const reserve = reserveFor(state.dock, boxSize);
-  if (state.dock === 'bottom') reserve.bottom += bottomOverflow;
+  const reserve = isMobile ? { top: 0, bottom: MOBILE_BAR_H, left: 0, right: 0 } : reserveFor(state.dock, boxSize);
+  if (!isMobile && state.dock === 'bottom') reserve.bottom += bottomOverflow;
   const reserveKey = JSON.stringify(reserve);
   useEffect(() => {
     onReserveChange?.(JSON.parse(reserveKey));
@@ -248,7 +261,50 @@ export const FloatingToolDock: React.FC<FloatingToolDockProps> = ({
     };
   }, [drag, anchor, preview, state.dock]);
 
-  if (!anchor || typeof document === 'undefined') return null;
+  if (typeof document === 'undefined') return null;
+
+  if (isMobile) {
+    const mobileWidth = window.innerWidth;
+    const mobileOrientation: 'horizontal' | 'vertical' = mobileWidth < 420 ? 'vertical' : 'horizontal';
+    return createPortal(
+      <div
+        ref={boxRef}
+        data-editor-tool-dock
+        data-dock="mobile-sheet"
+        data-mobile-open={mobileOpen ? 'true' : 'false'}
+        style={{ ...style, zIndex }}
+        className={`fixed left-0 right-0 bottom-0 flex flex-col rounded-t-2xl border-t border-x border-slate-700 bg-slate-900/95 backdrop-blur-md shadow-[0_-12px_40px_rgba(0,0,0,0.45)] pb-[env(safe-area-inset-bottom)] transition-opacity duration-300 ${
+          hidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setMobileOpen((v) => !v)}
+          aria-expanded={mobileOpen}
+          className="relative w-full flex items-center gap-2 px-4 pt-1 shrink-0 select-none"
+          style={{ height: MOBILE_BAR_H }}
+          title={mobileOpen ? labels.minimize : labels.expand}
+        >
+          <span className="absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-1 rounded-full bg-slate-600" aria-hidden="true" />
+          <span className="flex-1 min-w-0 text-left text-[11px] font-bold uppercase tracking-wider text-slate-300 truncate">{labels.title}</span>
+          {mobileOpen ? <ChevronsDownUp className="w-4 h-4 [color:var(--sun-acc)]" /> : <ChevronsUpDown className="w-4 h-4 [color:var(--sun-acc)]" />}
+        </button>
+        {mobileOpen && (
+          <div
+            role="toolbar"
+            aria-label={labels.title}
+            aria-orientation={mobileOrientation}
+            className="px-3 pb-3 pt-1 max-h-[60vh] overflow-y-auto overscroll-contain flex flex-wrap items-center gap-2 text-xs text-slate-300 border-t border-slate-800"
+          >
+            {children({ orientation: mobileOrientation, width: mobileWidth })}
+          </div>
+        )}
+      </div>,
+      document.body
+    );
+  }
+
+  if (!anchor) return null;
 
   const width = dockWidth(state, anchor);
   const orientation: 'horizontal' | 'vertical' = state.dock === 'left' || state.dock === 'right' || width < 420 ? 'vertical' : 'horizontal';

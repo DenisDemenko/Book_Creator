@@ -1,10 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { usePageScale, type PageScaleMode } from './usePageScale';
+import { useIsMobile } from '../../hooks/useIsMobile';
+
+import { PenLine } from 'lucide-react';
 import { PX_PER_MM, buildRulerMarks, formatMm } from '../../utils/mmUnits';
 import { PAGE_FORMAT_QUICK_OPTIONS } from '../../utils/pageFormats';
 import type { PaginationSnapshot } from '../../utils/pageBreaker';
 import type { PageGeometry } from '../../utils/pageGeometry';
 import { useLanguage } from '../../i18n/LanguageContext';
+
+/** Телефон: відступ аркуша від країв екрана і «поле» паперу навколо тексту, px. */
+const MOBILE_GUTTER_PX = 16;
+const MOBILE_PAPER_BLEED_PX = 12;
 
 interface PageColumnProps {
   children: React.ReactNode;
@@ -99,8 +106,41 @@ export const PageColumn: React.FC<PageColumnProps> = ({
   pageGeometry,
 }) => {
   const { t } = useLanguage();
-  const { outerRef, scale, widthPx } = usePageScale(widthMm, zoomFactor, showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0, scaleMode);
+  /**
+   * Телефон: аркуш вписується в ширину з полем MOBILE_GUTTER_PX по боках,
+   * а папір візуально продовжується на MOBILE_PAPER_BLEED_PX за межі
+   * текстового блока (тінь-«поле» того ж кольору, тож на ширину тексту й
+   * пагінацію це не впливає). Без цього рядки впирались у край екрана.
+   */
+  const isMobile = useIsMobile();
+  const { outerRef, scale, widthPx } = usePageScale(
+    widthMm,
+    zoomFactor,
+    (showVerticalRuler ? VERTICAL_RULER_WIDTH_PX : 0) + (isMobile ? MOBILE_GUTTER_PX * 2 : 0),
+    scaleMode
+  );
   const innerRef = useRef<HTMLDivElement>(null);
+  /** Телефон: чи стоїть курсор у тексті аркуша (для підпису й рамки). */
+  const [sheetFocused, setSheetFocused] = useState(false);
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el || !isMobile) return;
+    const sync = () => setSheetFocused(!!el.contains(document.activeElement));
+    const later = () => window.setTimeout(sync, 0);
+    el.addEventListener('focusin', sync);
+    el.addEventListener('focusout', later);
+    sync();
+    return () => {
+      el.removeEventListener('focusin', sync);
+      el.removeEventListener('focusout', later);
+    };
+  }, [isMobile]);
+  const focusSheetEditor = () => {
+    const pm = innerRef.current?.querySelector<HTMLElement>('[contenteditable="true"]');
+    if (!pm) return;
+    pm.focus();
+    pm.scrollIntoView({ block: 'nearest' });
+  };
   const [naturalHeightPx, setNaturalHeightPx] = useState(0);
 
   /**
@@ -201,7 +241,7 @@ export const PageColumn: React.FC<PageColumnProps> = ({
           у видимій верхній частині панелі), і не штовхає розкладку вниз.
           Поза transform:scale листа — тому масштабування самого аркуша
           його не зменшує й не збільшує, як і просив власник. */}
-      {formatBadgeText && (
+      {formatBadgeText && !isMobile && (
         <div className="sticky top-0 z-30 h-0 pointer-events-none" aria-hidden={false}>
           <div
             className="absolute top-1 right-2 text-[10px] font-mono text-slate-400/80 whitespace-nowrap select-none bg-slate-950/40 backdrop-blur-[1px] px-1.5 py-0.5 rounded"
@@ -209,6 +249,31 @@ export const PageColumn: React.FC<PageColumnProps> = ({
           >
             {formatBadgeText}
           </div>
+        </div>
+      )}
+      {/* Телефон: підпис над аркушем. Власник на iPhone не зрозумів, що білий
+          прямокутник і є полем введення тексту книги (22.11.2026) — тут прямо
+          сказано, що це, і що на нього треба торкнутись. Під час набору
+          підпис стає бурштиновим, а навколо аркуша з’являється рамка. Тап по
+          підпису теж ставить курсор у текст. */}
+      {isMobile && (
+        <div className="shrink-0 px-4 pt-2.5 pb-1">
+          <button
+            type="button"
+            onClick={focusSheetEditor}
+            data-mobile-sheet-label={sheetFocused ? 'editing' : 'idle'}
+            className={`w-full flex items-center gap-2 px-3.5 py-2 rounded-full border text-[13px] font-semibold text-left transition-colors ${
+              sheetFocused
+                ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-[0_0_18px_rgba(251,191,36,0.45)]'
+                : 'bg-slate-900/85 text-slate-100 border-white/15 backdrop-blur'
+            }`}
+          >
+            <PenLine className="w-4 h-4 shrink-0" />
+            <span className="shrink-0">{t('editor.mobileSheetLabel')}</span>
+            <span className={`min-w-0 truncate font-normal ${sheetFocused ? 'text-slate-900/80' : 'text-slate-400'}`}>
+              · {sheetFocused ? t('editor.mobileSheetEditing') : t('editor.mobileSheetHint')}
+            </span>
+          </button>
         </div>
       )}
       <div className="flex flex-1 min-h-0">
@@ -271,7 +336,7 @@ export const PageColumn: React.FC<PageColumnProps> = ({
           ))}
         </div>
       )}
-      <div style={{ height: displayHeightPx * scale, position: 'relative', flex: 1, minWidth: 0 }}>
+      <div style={{ height: displayHeightPx * scale, position: 'relative', flex: 1, minWidth: 0, marginTop: isMobile ? MOBILE_PAPER_BLEED_PX + 4 : undefined, marginBottom: isMobile ? MOBILE_PAPER_BLEED_PX + 24 : undefined }}>
         <div
           style={{
             width: widthPx,
@@ -289,7 +354,15 @@ export const PageColumn: React.FC<PageColumnProps> = ({
             left: '50%',
             marginLeft: -widthPx / 2,
             background: '#fffefc',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            // Телефон: папір продовжується полем навколо тексту, а край
+            // аркуша обведено — у спокої тонко, під час набору бурштиновою
+            // рамкою (видно, що саме це поле зараз приймає текст).
+            boxShadow: isMobile && scale > 0
+              ? `0 0 0 ${MOBILE_PAPER_BLEED_PX / scale}px #fffefc, 0 0 0 ${(MOBILE_PAPER_BLEED_PX + (sheetFocused ? 3 : 1)) / scale}px ${
+                  sheetFocused ? '#f59e0b' : 'rgba(148,163,184,0.55)'
+                }, 0 4px 24px rgba(0,0,0,0.4)`
+              : '0 4px 24px rgba(0,0,0,0.4)',
+            ['--page-scale' as string]: scale || 1,
           }}
         >
           <div ref={innerRef}>{children}</div>

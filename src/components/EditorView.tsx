@@ -170,6 +170,7 @@ import {
 } from '../utils/helpers';
 import { getRoleInfo } from '../utils/rbac';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { usePlanAccess } from '../hooks/usePlanAccess';
 import { synthesizeNarration, NarrationClientError, type NarrationLang } from '../utils/narrationClient';
 import { analyzeSection, aggregateScores } from '../utils/competenceAnalysis';
@@ -312,6 +313,11 @@ const PAGE_ZOOM_PRESETS = [20, 50, 70, 80, 90, 100, 110, 120, 150];
  * виводиться з тієї самої змінної, що й шапка, тож розходження неможливе.
  */
 const EDITOR_SURFACE_HEIGHT = 'calc(100vh - var(--app-header-h) - 19px)';
+/**
+ * Телефон: `100vh` у Safari рахує висоту БЕЗ адресного рядка, тож низ канви
+ * ховався під ним. `dvh` — видима висота; 19 px запасу там не потрібні.
+ */
+const EDITOR_SURFACE_HEIGHT_MOBILE = 'calc(100dvh - var(--app-header-h))';
 
 /**
  * Кнопка тулбара, у якій видно ЛИШЕ іконку, а зміст підписано в підказці.
@@ -929,6 +935,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftLabel: t('editor.aiDraftLabel'),
         aiDraftReviewLabel: t('editor.aiDraftReviewLabel'),
         aiDraftRejectLabel: t('editor.aiDraftRejectLabel'),
+        aiDraftButtonTexts: {
+          accept: t('editor.aiDraftBtnAccept'),
+          part: t('editor.aiDraftBtnPart'),
+          reject: t('editor.aiDraftBtnReject'),
+        },
       },
       () => focusParagraphModeRef.current,
       () => bookRef.current.characters,
@@ -963,6 +974,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
         aiDraftLabel: 'AI draft',
         aiDraftReviewLabel: '✓ Mark as reviewed',
         aiDraftRejectLabel: 'Reject AI addition',
+        aiDraftButtonTexts: { accept: 'Accept', part: 'Selection', reject: 'Reject' },
       },
       () => focusParagraphModeRef.current,
       () => bookRef.current.characters,
@@ -2246,13 +2258,21 @@ export const EditorView: React.FC<EditorViewProps> = ({
    */
   const [zoomToFit, setZoomToFit] = usePersistentState<boolean>('nova_editor_pageZoomFit', false);
   /** Той самий режим для обох компонентів аркуша (колонка й лінійка) — вони МУСЯТЬ мати однаковий масштаб. */
-  const pageScaleMode: PageScaleMode = zoomToFit && !isFocusWindow ? 'fit' : 'zoom';
+  /**
+   * Телефон: аркуш A5 у «чесних» 100 % — це ~560 px при екрані 390 px, тож
+   * текст обрізався зліва/справа й прокручувався вбік. На телефоні аркуш
+   * завжди вміщається в ширину (вибраний відсоток лишається стелею), а
+   * лінійки (мм) не показуються: на такій ширині вони лише крадуть місце.
+   */
+  const isMobile = useIsMobile();
+  const pageScaleMode: PageScaleMode = (zoomToFit || isMobile) && !isFocusWindow ? 'fit' : 'zoom';
   const pageZoomFactor = isFocusWindow ? focusZoom : editorZoom / 100;
   const [customEditorZoom, setCustomEditorZoom] = useState<string>('');
   // Показ лінійки (горизонтальної й вертикальної) над/збоку від аркуша —
   // перемикач на панелі поруч, як просив власник; за замовчуванням увімкнено,
   // бо лінійка й раніше завжди була видима без окремого перемикача.
   const [rulerVisible, setRulerVisible] = usePersistentState<boolean>('nova_editor_rulerVisible', true);
+  const showRulers = rulerVisible && !isMobile;
 
   // --- Теги-вставки (з Бази знань): вставити / сховати / перейти ---
   const [tagsHidden, setTagsHidden] = usePersistentState<boolean>('nova_editor_hideTags', false);
@@ -2873,7 +2893,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
    * місця вмикає/вимикає обидві лінійки (горизонтальну й вертикальну)
    * скрізь одразу.
    */
-  const renderRulerToggle = () => (
+  const renderRulerToggle = () => isMobile ? null : (
     <button
       type="button"
       onClick={() => setRulerVisible((v) => !v)}
@@ -5332,7 +5352,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       className={`editor-shell-glass flex flex-col lg:flex-row overflow-hidden bg-slate-900 text-slate-100 relative ${
         tagsHidden ? 'nova-hide-tags ' : ''
       }${isFocusWindow ? 'nova-fullscreen-editor w-full h-full min-h-0' : 'flex-1 min-h-0'}`}
-      style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: EDITOR_SURFACE_HEIGHT, maxHeight: EDITOR_SURFACE_HEIGHT }}
+      style={isFocusWindow ? { ...sunVars } : { ...sunVars, height: isMobile ? EDITOR_SURFACE_HEIGHT_MOBILE : EDITOR_SURFACE_HEIGHT, maxHeight: isMobile ? EDITOR_SURFACE_HEIGHT_MOBILE : EDITOR_SURFACE_HEIGHT }}
     >
       {/* Тут раніше лежав фоновий canvas «світлові хвилі як від води»
           (WaterCausticsCanvas) із пультом керування «Вода і відблиски».
@@ -5595,11 +5615,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
                 zoomFactor={pageZoomFactor}
                 scaleMode={pageScaleMode}
                 className="flex-1 min-h-0"
-                showVerticalRuler={rulerVisible}
+                showVerticalRuler={showRulers}
                 pagination={uaPagination}
                 pageGeometry={pageGeometry}
                 ruler={
-                  rulerVisible ? (
+                  showRulers ? (
                     <PageRuler
                       sheetWidthMm={pageGeometry.pageWidthMm}
                       textWidthMm={pageGeometry.contentWidthMm}
@@ -5698,11 +5718,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       zoomFactor={pageZoomFactor}
                       scaleMode={pageScaleMode}
                       className="flex-1 min-h-0 rounded-xl border border-slate-800/80"
-                      showVerticalRuler={rulerVisible}
+                      showVerticalRuler={showRulers}
                       pagination={uaPagination}
                       pageGeometry={pageGeometry}
                       ruler={
-                        rulerVisible ? (
+                        showRulers ? (
                           <PageRuler
                             sheetWidthMm={pageGeometry.pageWidthMm}
                             textWidthMm={pageGeometry.contentWidthMm}
@@ -5739,11 +5759,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
                       zoomFactor={pageZoomFactor}
                       scaleMode={pageScaleMode}
                       className="flex-1 min-h-0 rounded-xl border border-slate-800/80"
-                      showVerticalRuler={rulerVisible}
+                      showVerticalRuler={showRulers}
                       pagination={enPagination}
                       pageGeometry={pageGeometry}
                       ruler={
-                        rulerVisible ? (
+                        showRulers ? (
                           <PageRuler
                             sheetWidthMm={pageGeometry.pageWidthMm}
                             textWidthMm={pageGeometry.contentWidthMm}
@@ -5780,11 +5800,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
                   zoomFactor={pageZoomFactor}
                   scaleMode={pageScaleMode}
                   className="flex-1 min-h-0 rounded-xl border border-slate-800"
-                  showVerticalRuler={rulerVisible}
+                  showVerticalRuler={showRulers}
                   pagination={enPagination}
                   pageGeometry={pageGeometry}
                   ruler={
-                    rulerVisible ? (
+                    showRulers ? (
                       <PageRuler
                         sheetWidthMm={pageGeometry.pageWidthMm}
                         textWidthMm={pageGeometry.contentWidthMm}
@@ -6991,7 +7011,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
           data-right-panel-expand
           data-tour="editor__5"
           style={sunVars as React.CSSProperties}
-          className="absolute right-0 top-1/2 z-30 flex h-24 w-6 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-slate-800 bg-slate-950/90 backdrop-blur-xl [color:var(--sun-acc)] shadow-lg transition-colors hover:[background-color:var(--sun-acc-20)] hover:[color:var(--sun-soft)]"
+          className="absolute right-0 top-1/2 z-30 flex h-16 w-4 md:h-24 md:w-6 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-slate-800 bg-slate-950/90 backdrop-blur-xl [color:var(--sun-acc)] shadow-lg transition-colors hover:[background-color:var(--sun-acc-20)] hover:[color:var(--sun-soft)]"
           title={t('editor.rightPanelExpand')}
           aria-label={t('editor.rightPanelExpand')}
           aria-expanded={false}
@@ -7416,11 +7436,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
               zoomFactor={pageZoomFactor}
               scaleMode={pageScaleMode}
               className="flex-1 min-h-0 rounded-xl border border-slate-800"
-              showVerticalRuler={rulerVisible}
+              showVerticalRuler={showRulers}
               pagination={enPagination}
               pageGeometry={pageGeometry}
               ruler={
-                rulerVisible ? (
+                showRulers ? (
                   <PageRuler
                     sheetWidthMm={pageGeometry.pageWidthMm}
                     textWidthMm={pageGeometry.contentWidthMm}

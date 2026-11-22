@@ -26,6 +26,8 @@ export interface ManuscriptAiTextOptions {
   aiDraftLabel: string;
   aiDraftReviewLabel: string;
   aiDraftRejectLabel: string;
+  /** Короткі підписи кнопок AI-чернетки — показуються на телефоні поруч зі значками. */
+  aiDraftButtonTexts?: { accept: string; part: string; reject: string };
   reviewer?: () => string;
   acceptedLabel?: string;
 }
@@ -103,6 +105,7 @@ export function buildManuscriptExtensions(
       label: aiText.aiDraftLabel,
       reviewLabel: aiText.aiDraftReviewLabel,
       rejectLabel: aiText.aiDraftRejectLabel,
+      buttonTexts: aiText.aiDraftButtonTexts,
       reviewer: aiText.reviewer,
       acceptedLabel: aiText.acceptedLabel,
     }),
