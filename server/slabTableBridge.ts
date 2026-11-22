@@ -46,7 +46,7 @@ export async function tableBridge(
   body?: unknown,
   deps: { fetch?: typeof fetch; settings?: BridgeSettings; actorUid?: string } = {},
 ) {
-  if (!/^\/cad\/(table|cabinet|wardrobe)\/[a-fA-F0-9-]+\/(obj|stl|dxf|dwg|all|engraving|json|project)$/.test(path) && !/^\/(state|facade-state|wardrobe-production|cabinet-production|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
+  if (!/^\/cad\/(table|cabinet|wardrobe)\/[a-fA-F0-9-]+\/(obj|stl|dxf|dwg|all|engraving|json|project)$/.test(path) && !/^\/(state|facade-state|material-prices|wardrobe-production|cabinet-production|slabs|costs|production|resin-textures|leg-settings|leg-designs|leg-plates)(\/[a-zA-Z0-9-]+)?$/.test(path))
     throw new Error("Некоректний маршрут конструктора.");
   const settings = deps.settings ?? (await readBridgeSettings());
   const response = await (deps.fetch ?? fetch)(
@@ -149,6 +149,8 @@ export function registerSlabTableRoutes(app: Express) {
           });
       }
     };
+  app.get('/api/admin/slab-tables/material-prices', requireAdmin, proxy('GET', () => '/material-prices'));
+  app.put('/api/admin/slab-tables/material-prices', requireAdmin, proxy('PUT', () => '/material-prices'));
   app.get(
     "/api/admin/slab-tables/facade-state",
     requireSlabInventory,

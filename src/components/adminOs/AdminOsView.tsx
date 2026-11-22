@@ -1,4 +1,5 @@
 import { FundingPanel } from './FundingPanel';
+import { MaterialPricesPanel } from './MaterialPricesPanel';
 import { SlabInventoryPanel } from './SlabInventoryPanel';
 import { PrivateStoresPanel } from './PrivateStoresPanel';
 /**
@@ -336,7 +337,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
     if (view === 'products') return <AdminProductsView />;
     if (view === 'crowdfunding') return authUser?.role === 'admin' ? <FundingPanel /> : <p>Потрібен доступ адміністратора.</p>;
     if (view === 'slab-tables') return <SlabInventoryPanel inventoryOnly={authUser?.role !== 'admin'} />;
-    if (view === 'cabinet-facades') return <SlabInventoryPanel category="cabinet_facade" inventoryOnly />;
+    if (view === 'cabinet-facades') return authUser?.role === 'admin' ? <MaterialPricesPanel /> : <SlabInventoryPanel category="cabinet_facade" inventoryOnly />;
     if (view === 'private-stores') return authUser?.role === 'admin' ? <PrivateStoresPanel /> : <p>Потрібен доступ адміністратора.</p>;
     if (view === 'price-management') return <FurnitureCalculatorPanel />;
     if (view === 'procurement') return <AdminProcurementView />;

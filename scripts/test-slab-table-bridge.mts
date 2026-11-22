@@ -89,7 +89,18 @@ const app = new Proxy(
   },
 ) as Express;
 registerSlabTableRoutes(app);
-assert.equal(routes.length, 23);
+assert.equal(routes.length, 25);
+assert.equal(routes.filter((route) => route.path === "/api/admin/slab-tables/material-prices" && route.handlers[0] === requireAdmin).length, 2);
+const catalogue = await tableBridge("PUT", "/material-prices", { expectedVersion: 1, boards: [] }, {
+  settings: { url: "https://example.test", key: "test-only-key" },
+  fetch: async (url, options) => {
+    assert.equal(String(url), "https://example.test/bridge/tables/material-prices");
+    assert.equal(options?.method, "PUT");
+    assert.deepEqual(JSON.parse(String(options?.body)), { expectedVersion: 1, boards: [] });
+    return new Response(JSON.stringify({ version: 2, boards: [] }));
+  },
+});
+assert.equal(catalogue.version, 2);
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/drawings-templates" && r.handlers[0] === requireAdmin), "the list of PDF templates is for the administrator only");
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/drawings/:id" && r.handlers[0] === requireAdmin), "the PDF drawings are for the administrator only");
 assert.ok(routes.some((r) => r.path === "/api/admin/slab-tables/resin-textures/:id" && r.handlers[0] === requireAdmin), "texture edit route is admin-only");
@@ -119,7 +130,7 @@ for (const principal of [
   assert.equal(next, false);
 }
 console.log(
-  "All twenty-three Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
+  "All twenty-five Studio routes guarded; inventory has shared designer access, costs/production/textures remain admin-only.",
 );
 
 let facadeForwarded = false;
