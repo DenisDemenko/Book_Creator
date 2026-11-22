@@ -387,6 +387,7 @@ function viewPrototype() {
 
   return h('div', null, h('section', { class: 'card' }, heading,
     h('p', null, tr('Виберіть фото та книгу. ШІ опише видимі деталі й запропонує характер для вигаданого героя.')),
+    h('p', { class: 'muted', text: tr('Знімайте людей лише з їхньої згоди. ШІ не впізнає особу і не робить висновків про справжню людину: фото — лише відправна точка для вигаданого героя.') }),
     h('label', { for: select.id }, tr('Книга'), select),
     sources, library,
     form.preview && h('div', { class: 'frame' }, photoPreview(form.preview, tr('Фото прототипу'))),

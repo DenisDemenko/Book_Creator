@@ -23,6 +23,7 @@ const GRAB_EN = {
   "Зберегти героя": "Save character",
   "Виберіть фото та книгу. ШІ опише видимі деталі й запропонує характер для вигаданого героя.": "Choose a photo and a book. AI will describe visible details and suggest a fictional character personality.",
   "Фото прототипу": "Reference photo",
+  "Знімайте людей лише з їхньої згоди. ШІ не впізнає особу і не робить висновків про справжню людину: фото — лише відправна точка для вигаданого героя.": "Only photograph people with their consent. AI does not identify the person or draw conclusions about them: the photo is just a starting point for a fictional character.",
   "Нотатка автора (необовʼязково)": "Author’s note (optional)",
   "Розпізнати": "Analyze photo",
   "ШІ готує опис героя…": "AI is preparing the description…",
