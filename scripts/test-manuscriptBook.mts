@@ -128,7 +128,7 @@ async function makeManuscript(body: Record<string, unknown>, pages = 2) {
   const sub = await call('POST', `${PD}/${id}/submit`, { token: tok });
   t('submit — 201, ціль `book`, відповідь за схемою', sub.status === 201 && sub.data.target.kind === 'book' && conforms('SubmitResponse', sub.data) === '', JSON.stringify(sub.data.target) + ' ' + conforms('SubmitResponse', sub.data));
   const bookId: string = sub.data.target.id;
-  t('studioUrl веде на дашборд', sub.data.target.studioUrl === '/');
+  t('studioUrl відкриває редактор створеної книги', sub.data.target.studioUrl === `/projects/${encodeURIComponent(bookId)}/editor?from=grabfusion`);
   const stored = await bookStore.getBook(bookId);
   t('книга є на сервері й належить автору', !!stored && stored.ownerId === 'u-a' && stored.title === 'Долина тиші');
   const listed = await bookStore.listBooks('u-a');
