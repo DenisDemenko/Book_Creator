@@ -15,6 +15,7 @@ from typing import Any, Callable
 import httpx
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from . import contract
 from .errors import StudioError
@@ -198,6 +199,68 @@ def build_router(deps: Deps) -> APIRouter:
     @router.delete("/drafts/{draft_id}")
     def discard_draft(draft_id: str, s: Session = Depends(current)) -> Any:
         return call(s, lambda c: c.raw("DELETE", f"/photo-drafts/{draft_id}"))
+
+    @router.get("/character-prototypes/books")
+    def prototype_books(s: Session = Depends(current)) -> Any:
+        return call(s, lambda c: c.raw("GET", "/photo-drafts/character-prototypes/books"))
+
+    def prototype_book_path(book_id: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", book_id) or book_id in {".", ".."}:
+            raise StudioError("book_not_found", "Книгу не знайдено.")
+        return f"/photo-drafts/character-prototypes/books/{book_id}"
+
+    @router.get("/character-prototypes/books/{book_id}/photos")
+    def prototype_library(book_id: str, s: Session = Depends(current)) -> Any:
+        path = prototype_book_path(book_id) + "/photos"
+        return call(s, lambda c: c.raw("GET", path))
+
+    @router.get("/character-prototypes/books/{book_id}/photos/{asset_id}")
+    def prototype_thumbnail(book_id: str, asset_id: str, s: Session = Depends(current)) -> Response:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", asset_id):
+            raise StudioError("photo_not_found", "Фото не знайдено.")
+        path = prototype_book_path(book_id) + f"/photos/{asset_id}"
+        data = call(s, lambda c: c.raw("GET", path))["image"]
+        raw = base64.b64decode(data.split(",", 1)[1], validate=True)
+        return Response(prepare_photo(raw, max_side=960, max_bytes=1024 * 1024),
+                        media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+
+    async def prototype_source(file: UploadFile | None, asset_id: str | None) -> dict[str, str]:
+        if asset_id and not file:
+            return {"assetId": asset_id}
+        if file is None or asset_id:
+            raise StudioError("bad_image", "Виберіть одне фото.")
+        lim = deps.limits_cached()
+        raw = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise StudioError("image_too_large", "Файл завеликий.")
+        jpeg = await run_in_threadpool(prepare_photo, raw, max_side=lim.recommendedMaxSidePx,
+                                       max_bytes=lim.maxImageBytes)
+        return {"image": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}
+
+    @router.post("/character-prototypes/books/{book_id}/describe", status_code=202)
+    async def describe_prototype(book_id: str, file: UploadFile | None = File(None),
+                                 assetId: str | None = Form(None), note: str = Form(""),
+                                 language: str = Form("uk"), s: Session = Depends(current)) -> Any:
+        path = prototype_book_path(book_id) + "/describe"
+        body = await prototype_source(file, assetId)
+        body.update(note=note, language=language)
+        return await run_in_threadpool(call, s, lambda c: c.raw("POST", path, json=body))
+
+    @router.get("/character-prototypes/jobs/{job_id}")
+    def prototype_job(job_id: str, s: Session = Depends(current)) -> Any:
+        if not re.fullmatch(r"[a-f0-9-]{36}", job_id):
+            raise StudioError("draft_not_found", "Опис більше недоступний.")
+        return call(s, lambda c: c.raw("GET", f"/photo-drafts/character-prototypes/jobs/{job_id}"))
+
+    @router.post("/character-prototypes/books/{book_id}/save")
+    async def save_prototype(book_id: str, jobId: str = Form(...), name: str = Form(...),
+                             visible: str = Form(...), fiction: str = Form(...),
+                             file: UploadFile | None = File(None), assetId: str | None = Form(None),
+                             s: Session = Depends(current)) -> Any:
+        path = prototype_book_path(book_id) + "/save"
+        body = await prototype_source(file, assetId)
+        body.update(jobId=jobId, name=name, visible=visible, fiction=fiction)
+        return await run_in_threadpool(call, s, lambda c: c.raw("POST", path, json=body))
 
     @router.post("/drafts/{draft_id}/photos", status_code=202)
     async def add_photo(draft_id: str, clientId: str = Form(...), file: UploadFile = File(...),

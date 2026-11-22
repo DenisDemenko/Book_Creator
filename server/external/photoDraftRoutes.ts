@@ -26,6 +26,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { registerCharacterPrototypeRoutes } from './characterPrototypeRoutes';
 import type { Express, Request, Response } from 'express';
 import { requirePermission } from '../auth';
 import { getBook } from '../bookStore';
@@ -124,6 +125,7 @@ export interface DescribePhotoParams {
   mimeType: string;
   base64: string;
   context: DescribeContext;
+  prototype?: { language: 'uk' | 'en' };
   req: Request;
 }
 
@@ -230,7 +232,7 @@ export interface PhotoDraftSinks {
 
 export interface PhotoDraftDeps {
   /** Прохід 1. У продукті — модель зору ядра AI (photoDraftDescriber.ts). */
-  describe: (p: DescribePhotoParams) => Promise<{ description: string; tags: string[]; modelId: string }>;
+  describe: (p: DescribePhotoParams) => Promise<{ description: string; tags: string[]; modelId: string; fiction?: string }>;
   /** Прохід 1 для `kind: manuscript` (A5): дослівне розпізнавання сторінки. У продукті — scanRecognizer.recognizeScanWithCoreVision. */
   recognize?: (p: RecognizeParams) => Promise<{ text: string; modelId: string }>;
   /** Облік і перевірка сховища тарифу (у продукті — mediaStorage.checkAndRecordStorageUpload). */
@@ -526,6 +528,7 @@ function sendChangeError(res: Response, err: unknown, where: string): void {
 // ---------------------------------------------------------------------------
 
 export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): void {
+  registerCharacterPrototypeRoutes(app, deps);
   const now = deps.now || (() => new Date());
   clockNow = now;
   const schedule =

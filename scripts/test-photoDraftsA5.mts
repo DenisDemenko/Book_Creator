@@ -158,7 +158,8 @@ app.use((req: any, _res, next) => {
 });
 xroutes.registerExternalApiRoutes(app, { recognize: async () => ({ text: 'x', modelId: 'm' }), schedule: () => undefined });
 routes.registerPhotoDraftRoutes(app, {
-  describe: async () => {
+  describe: async (params) => {
+    if (params.prototype) return { description: 'Темна куртка.', fiction: 'Герой шукає зниклий лист.', tags: [], modelId: 'v' };
     seen.describe++;
     return { description: 'Кадр.', tags: [], modelId: 'v' };
   },
@@ -506,6 +507,43 @@ t('фікстура limits відповідає схемі й версії', con
 t('усі відповіді сервера відповідають схемі контракту', errs.length === 0, errs.slice(0, 4).join(' | '));
 t('версія контракту не нижча за 1.3.0 (рукопис зʼявився в ній)', /^1\.([3-9]|\d{2,})\.\d+$/.test(contract.PHOTO_DRAFT_CONTRACT_VERSION), contract.PHOTO_DRAFT_CONTRACT_VERSION);
 t('вид manuscript у переліку, маршрут PUT text описано', (contract.PHOTO_DRAFT_KINDS as readonly string[]).includes('manuscript') && contract.PHOTO_DRAFT_ROUTES.some((r) => r.method === 'PUT' && r.path.endsWith('/text')));
+
+console.log('\nГерой із фото для наявної книги');
+const PROTO = PD + '/character-prototypes';
+const foreignCode = await call('POST', '/api/external-tokens/pairing-code', { session: 'u-b', body: { scope: 'photo-drafts' } });
+const foreignToken = (await call('POST', '/api/external/v1/pair', { body: { code: foreignCode.data.code } })).data.token;
+const photoLibrary = await import('../server/media/mediaLibraryStore');
+const listed = await call('GET', PROTO + '/books', { token: grab });
+t('вибір книги не видає чужі книги', listed.data.books.some((entry: any) => entry.id === 'book-a') && !listed.data.books.some((entry: any) => entry.id === 'book-b'));
+const blockedPrototype = await call('POST', PROTO + '/books/book-b/describe', { token: grab, body: { image } });
+t('розпізнавання для чужої книги закрите', blockedPrototype.status === 404);
+const queuedPrototype = await call('POST', PROTO + '/books/book-a/describe', { token: grab, body: { image } });
+const jobId = queuedPrototype.data.jobId;
+const heroPath = PROTO + '/books/book-a/save';
+const approved = { jobId, image, name: 'Марта', visible: 'Темно-синя куртка.', fiction: 'Смілива героїня, яка розшукує лист.' };
+t('перед завершенням ШІ збереження закрите', (await call('POST', heroPath, { token: grab, body: approved })).status === 409);
+await flush();
+const proposal = await call('GET', PROTO + '/jobs/' + jobId, { token: grab });
+t('розпізнавання повертає окремі поля й не додає героя', proposal.data.draft?.visible === 'Темна куртка.' && proposal.data.draft?.fiction.includes('лист') &&
+  !((await bookStore.getBook('book-a'))?.book.characters as any[] | undefined)?.some((entry) => entry.name === 'Марта'));
+t('чужий токен не читає пропозицію', (await call('GET', PROTO + '/jobs/' + jobId, { token: foreignToken })).status === 404);
+const changedImage = 'data:image/jpeg;base64,' + Buffer.concat([JPEG, Buffer.from([1])]).toString('base64');
+t('затвердження вимагає того самого фото', (await call('POST', heroPath, { token: grab, body: { ...approved, image: changedImage } })).status === 400);
+const committed = await call('POST', heroPath, { token: grab, body: approved });
+const hero = ((await bookStore.getBook('book-a'))?.book.characters as any[])?.find((entry) => entry.id === committed.data.characterId);
+const portrait = (await photoLibrary.listAssets('u-a', { bookId: 'book-a' })).find((entry) => hero?.avatarUrl?.endsWith('/' + entry.id));
+t('затверджена картка має текст автора і фото в медіатеці книги', committed.status === 201 &&
+  hero?.biography === approved.fiction && hero?.appearance?.distinguishingMarks === approved.visible && portrait?.bookId === 'book-a' &&
+  committed.data.studioUrl.includes('grabfusionCharacter=' + hero.id));
+const repeated = await call('POST', heroPath, { token: grab, body: approved });
+t('повтор не створює дубль героя', repeated.status === 200 && repeated.data.characterId === committed.data.characterId);
+const storedPhotoQuote = await call('POST', PROTO + '/books/book-a/describe', { token: grab, body: { assetId: portrait?.id } });
+await flush();
+const reuse = await call('POST', heroPath, { token: grab, body: {
+  ...approved, jobId: storedPhotoQuote.data.jobId, image: undefined, assetId: portrait?.id, name: 'Марія',
+} });
+const reuseHero = ((await bookStore.getBook('book-a'))?.book.characters as any[])?.find((entry) => entry.id === reuse.data.characterId);
+t('фото з медіатеки повторно використовується без копії', reuse.status === 201 && reuseHero?.avatarUrl === hero?.avatarUrl);
 
 server.close();
 console.log(`\n${pass} пройдено, ${fail} не пройдено`);

@@ -97,6 +97,7 @@ import {
   loadBook,
   saveBook,
   cacheBookFromServer,
+  cacheBookLocally,
   fetchServerBook,
   loadMeta,
   saveMeta,
@@ -281,6 +282,7 @@ function StudioApp() {
   const initialRouteRef = useRef(parseAppPath(window.location.pathname, API_BASE));
   const entrySearch = useRef(new URLSearchParams(window.location.search)).current;
   const openImportedBook = entrySearch.get('from') === 'grabfusion' && initialRouteRef.current?.tab === 'editor';
+  const grabfusionCharacterId = openImportedBook ? entrySearch.get('grabfusionCharacter') || undefined : undefined;
   const phoneInboxRef = useRef(entrySearch.get('tab') === 'inbox' &&
     window.location.pathname.replace(/\/$/, '').endsWith('/media'));
   const inboxBookId = phoneInboxRef.current ? entrySearch.get('bookId') : null;
@@ -877,18 +879,32 @@ function StudioApp() {
   // A freshly imported book can exist on the server before the phone has a local copy.
   useEffect(() => {
     if (!awaitingRoutedBook || !routedBookId || isHydrating) return;
-    if (book.id === routedBookId) { setAwaitingRoutedBook(false); return; }
+    if (book.id === routedBookId && (!grabfusionCharacterId || book.characters?.some((entry) => entry.id === grabfusionCharacterId))) {
+      setAwaitingRoutedBook(false);
+      return;
+    }
     if (auth.loading || !auth.user || auth.user.isGuest) return;
     const controller = new AbortController();
     (async () => {
       try {
         const { book: routed, revision } = await fetchServerBook(routedBookId, controller.signal);
         if (controller.signal.aborted) return;
-        await cacheBookFromServer(routed, revision);
+        let selected = routed;
+        if (grabfusionCharacterId) {
+          const imported = routed.characters?.find((entry) => entry.id === grabfusionCharacterId);
+          if (!imported) throw new Error('Imported character is absent from this book.');
+          const local = await loadBook(routed.id);
+          if (controller.signal.aborted) return;
+          if (local) {
+            // The destination browser may hold edits absent from the server snapshot.
+            selected = { ...local, characters: [...(local.characters ?? []).filter((entry) => entry.id !== imported.id), imported] };
+            await cacheBookLocally(selected);
+          } else await cacheBookFromServer(routed, revision);
+        } else await cacheBookFromServer(routed, revision);
         if (controller.signal.aborted) return;
-        setBook(routed);
-        setActiveChapterId(routed.chapters[0]?.id || '');
-        setActiveSectionId(routed.chapters[0]?.sections[0]?.id || '');
+        setBook(selected);
+        setActiveChapterId(selected.chapters[0]?.id || '');
+        setActiveSectionId(selected.chapters[0]?.sections[0]?.id || '');
         setCurrentTab(phoneInboxRef.current ? 'media' : 'editor');
       } catch {
         if (controller.signal.aborted) return;
@@ -901,7 +917,7 @@ function StudioApp() {
       }
     })();
     return () => controller.abort();
-  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang]);
+  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang, grabfusionCharacterId]);
 
   // Роль користувача приходить із сервера разом із профілем — окрім
   // випадку, коли роль для ЦІЄЇ книги зафіксована прийнятим cowork-
@@ -941,7 +957,10 @@ function StudioApp() {
     );
     if (!path) return;
     const currentUrl = new URL(window.location.href);
-    if (openImportedBook) currentUrl.searchParams.delete('from');
+    if (openImportedBook) {
+      currentUrl.searchParams.delete('from');
+      currentUrl.searchParams.delete('grabfusionCharacter');
+    }
     if (phoneInboxRef.current) {
       currentUrl.searchParams.delete('tab');
       currentUrl.searchParams.delete('bookId');
@@ -2469,6 +2488,7 @@ function StudioApp() {
         {currentTab === 'editor' && (
           <EditorView
             book={book}
+            grabfusionCharacterId={book.id === routedBookId ? grabfusionCharacterId : undefined}
             onUpdateBook={handleUpdateBook}
             activeChapterId={activeChapterId}
             activeSectionId={activeSectionId}

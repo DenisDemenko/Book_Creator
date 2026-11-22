@@ -18,11 +18,12 @@ interface PairInfo {
 }
 
 interface Props {
+  characterBookId?: string;
   onClose: () => void;
 }
 
-export const GrabfusionConnectModal: React.FC<Props> = ({ onClose }) => {
-  const { t } = useLanguage();
+export const GrabfusionConnectModal: React.FC<Props> = ({ onClose, characterBookId }) => {
+  const { t, lang } = useLanguage();
   const [pair, setPair] = useState<PairInfo | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,13 +48,19 @@ export const GrabfusionConnectModal: React.FC<Props> = ({ onClose }) => {
         setError(String(data?.error || t('dashboard.grabfusionFailed')));
         return;
       }
-      setPair({ code: String(data.code), expiresAt: String(data.expiresAt), appUrl: typeof data.appUrl === 'string' && data.appUrl ? data.appUrl : null });
+      let appUrl = typeof data.appUrl === 'string' && data.appUrl ? data.appUrl : null;
+      if (appUrl && characterBookId) {
+        const url = new URL(appUrl, window.location.origin);
+        url.searchParams.set('characterBook', characterBookId);
+        appUrl = url.href;
+      }
+      setPair({ code: String(data.code), expiresAt: String(data.expiresAt), appUrl });
     } catch {
       setError(t('dashboard.grabfusionFailed'));
     } finally {
       setBusy(false);
     }
-  }, [t]);
+  }, [t, characterBookId]);
 
   // Код створюється одразу, як вікно відкрилось: користувач прийшов саме по нього.
   useEffect(() => {
@@ -105,7 +112,7 @@ export const GrabfusionConnectModal: React.FC<Props> = ({ onClose }) => {
               <Smartphone className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">{t('dashboard.grabfusionTitle')}</h3>
+              <h3 className="text-base font-bold text-white">{characterBookId ? (lang === 'en' ? 'Character from photo' : 'Герой з фото') : t('dashboard.grabfusionTitle')}</h3>
               <p className="text-xs text-slate-400">{t('dashboard.grabfusionDesc')}</p>
             </div>
           </div>
