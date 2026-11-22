@@ -514,7 +514,7 @@ function viewCreate() {
   const stores = privateStoreReady();
   f.where = h('select', { id: 'f-where' }, h('option', { value: 'cloud', text: tr('☁ У хмарі: розпізнає ШІ (найвища якість, рукопис, фото)') }), h('option', { value: 'private', text: tr('🔒 На моєму сервері: приватно, розпізнає мій комп\u02bcютер') }));
   f.store = h('select', { id: 'f-store', hidden: true }, ...stores.map((st) => h('option', { value: st.id, text: st.name + (st.online ? '' : tr(' (не на звʼязку)')) })));
-  const whereHint = h('p', { class: 'muted', id: 'where-hint', hidden: true, text: tr('Знімки шифруються на телефоні й потрапляють лише на ваш сервер: Studio бачить шифротекст, ШІ не залучається. Підходить для друкованого тексту й чітких сканів; рукопис і фото без тексту краще розпізнає хмара.') });
+  const whereHint = h('p', { class: 'muted', id: 'where-hint', hidden: true, text: tr('Знімки шифруються на телефоні й потрапляють лише на ваш сервер: Studio бачить шифротекст, хмарний ШІ не залучається. Для фото без тексту основою стануть ваші нотатки до кадрів. Книгу, до якої додати сторінки, ви оберете на компʼютері.') });
   f.where.addEventListener('change', () => { const priv = f.where.value === 'private'; whereHint.hidden = !priv; f.store.hidden = !priv || stores.length < 2; });
   const whereBlock = canPrivate ? h('div', { id: 'where-block' }, h('label', { text: tr('Де обробити') }), f.where, f.store, whereHint) : null;
   return h('form', { class: 'card', id: 'create-form', 'data-kind': kind, onsubmit: async (e) => {
@@ -532,7 +532,9 @@ function viewCreate() {
     }
     if (kind === 'instruction') { body.instructionMode = f.mode.value; if (f.model.value.trim()) body.modelCode = f.model.value.trim(); }
     if (canPrivate && f.where.value === 'private') {
-      if (kind === 'manuscript' && f.booktype.value === 'existing') { err.textContent = tr('Приватна книга створюється нова: додавання до наявної книги Studio доступне лише в хмарі.'); return; }
+      // До наявної ПРИВАТНОЇ книги сторінки додаються на компʼютері: Studio не знає приватних книг, тож книгу автор обирає
+      // в «Приватні матеріали → З телефона» (сервер бачить лише свої книги). Номер хмарної книги сюди не передаємо.
+      if (kind === 'manuscript' && f.booktype.value === 'existing') body.appendToExisting = true;
       delete body.bookId;
       try { await startPrivateDraft(body, f.store.value); } catch (e3) { err.textContent = e3.message; }
       return;

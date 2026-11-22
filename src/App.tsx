@@ -9,8 +9,8 @@ import { parseCreativeBiblePath, parseCreativeAccessPath, parseCreativeWorkspace
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
 import { buildStarterBook, withoutDemoContent } from './utils/starterBook';
-import { setActivePrivateMaterial, setPendingPrivateOpen, takePendingPrivateStore } from './utils/privateStore';
-import { PrivateBookBadge } from './components/PrivateBookBadge';
+import { deletePrivateDoc, emitPrivateSync, putPrivateDoc, setActivePrivateMaterial, setPendingPrivateOpen, takePendingPrivateStore, type PrivateStoreInfo } from './utils/privateStore';
+import { StorageMoveBar } from './components/StorageMoveBar';
 import { loadActiveOntology } from './utils/ontologyClient';
 import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, HeroArcState } from './types';
 import { HeaderNav } from './components/HeaderNav';
@@ -96,6 +96,8 @@ import { migrateImageWrapDefaults } from './utils/wrapMigration';
 import {
   loadBook,
   saveBook,
+  syncBookToServerNow,
+  forgetServerRevision,
   cacheBookFromServer,
   cacheBookLocally,
   fetchServerBook,
@@ -1043,6 +1045,58 @@ function StudioApp() {
     setActivePrivateMaterial('book', guarded ? book.id : null);
     return () => setActivePrivateMaterial('book', null);
   }, [book.id, book.privateStore?.storeId, currentTab]);
+
+  /**
+   * Перенесення відкритої книги хмара ↔ локальний сервер (журнал #598). Порядок важливий:
+   *  - на сервер: спершу запис на локальний сервер, потім книга стає приватною (охоронець блокує подальші записи в хмару),
+   *    і лише потім видаляється хмарна копія (DELETE вмісту не несе, охоронець його пропускає);
+   *  - у хмару: охоронця знімаємо, книгу записуємо в хмару й переконуємося, що запис відбувся, і лише потім прибираємо копію
+   *    на локальному сервері. Якщо будь-який крок упав — матеріал лишається там, де був, і жодна копія не губиться.
+   */
+  const moveBookToPrivate = async (store: PrivateStoreInfo) => {
+    const at = new Date().toISOString();
+    const priv: Book = { ...book, privateStore: { storeId: store.id }, updatedAt: at };
+    await putPrivateDoc(store.id, {
+      id: priv.id,
+      kind: 'book',
+      meta: { title: priv.title || 'Без назви', status: priv.status, chapters: priv.chapters?.length ?? 0, updatedAt: at },
+      payload: priv as unknown as Record<string, unknown>,
+    });
+    await cacheBookLocally(priv);
+    setActivePrivateMaterial('book', priv.id);
+    setBook(priv);
+    const res = await fetch(`/api/books/${encodeURIComponent(priv.id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => null);
+    forgetServerRevision(priv.id);
+    if (!res || (!res.ok && res.status !== 404)) {
+      throw new Error('Книгу перенесено на локальний сервер, але хмарну копію видалити не вдалося. Видаліть її на головній сторінці («Видалити з хмари»).');
+    }
+    // Смуга над редактором з’являється вже після запису: повідомляємо їй, що запис на сервер відбувся.
+    window.setTimeout(() => emitPrivateSync({ storeId: store.id, id: priv.id, status: 'synced' }), 80);
+    setSaveToast(`Книга тепер лише на сервері «${store.name}».`);
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+  const moveBookToCloud = async () => {
+    const storeId = book.privateStore?.storeId;
+    if (!storeId) return;
+    const { privateStore: _drop, ...rest } = book;
+    const cloud: Book = { ...rest, updatedAt: new Date().toISOString() };
+    setActivePrivateMaterial('book', null);
+    forgetServerRevision(cloud.id);
+    const revision = await syncBookToServerNow(cloud);
+    if (revision === null) {
+      setActivePrivateMaterial('book', book.id);
+      throw new Error('Хмара не прийняла книгу (немає звʼязку чи бракує місця). Книга лишилась на локальному сервері.');
+    }
+    await cacheBookLocally(cloud);
+    setBook(cloud);
+    try {
+      await deletePrivateDoc(storeId, cloud.id);
+    } catch {
+      throw new Error('Книгу перенесено в хмару, але копію на локальному сервері видалити не вдалося — сервер недоступний. Видаліть її пізніше в «Приватні матеріали».');
+    }
+    setSaveToast('Книга тепер у хмарі Studio.');
+    setTimeout(() => setSaveToast(null), 4000);
+  };
 
   const persistBook = useCallback(async (bookToSave: Book): Promise<boolean> => {
     setSaveState('saving');
@@ -2250,7 +2304,9 @@ function StudioApp() {
         onOpenMobileNav={() => setMobileNavOpen(true)}
       />
 
-      {book.privateStore && !TABS_WITHOUT_OPEN_BOOK.has(currentTab) && <PrivateBookBadge storeId={book.privateStore.storeId} docId={book.id} />}
+      {!TABS_WITHOUT_OPEN_BOOK.has(currentTab) && !book.accessRestricted && !(auth.user?.isGuest ?? true) && (
+        <StorageMoveBar kind="book" privateStoreId={book.privateStore?.storeId} docId={book.id} onMoveToPrivate={moveBookToPrivate} onMoveToCloud={moveBookToCloud} />
+      )}
 
       {/* Стійкий банер помилки сховища — не зникає сам, бо це втрата даних */}
       {storageError && (

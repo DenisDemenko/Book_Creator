@@ -234,6 +234,8 @@ export interface ScanDraft {
   draftId: string;
   kind: 'course' | 'instruction' | 'manuscript';
   courseSource?: 'photos' | 'document' | null;
+  /** Книга з фото (GrabFusion «Створити книгу», приватний шлях): kind 'manuscript', а кадр — фото з нотаткою, не сторінка. */
+  photoBook?: boolean;
   instructionMode?: 'assembly' | 'operation' | null;
   modelCode?: string;
   title?: string;
@@ -389,7 +391,8 @@ export const isPrivateMaterialActive = (): boolean => activePrivate.size > 0;
 
 export function blockedByPrivacy(method: string, pathname: string): boolean {
   if (activePrivate.size === 0) return false;
-  if (['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) return false;
+  // DELETE вмісту не передає: саме ним прибирається хмарна копія, коли матеріал переносять на локальний сервер (журнал #598).
+  if (['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(method.toUpperCase())) return false;
   const p = pathname.replace(/^\/studio(?=\/api\/)/, '');
   return BLOCKED_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
 }

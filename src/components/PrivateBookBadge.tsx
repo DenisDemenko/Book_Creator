@@ -6,7 +6,7 @@ import { fetchMyPrivateStores, onPrivateSync, type PrivateSyncEvent } from '../u
  * Смуга над редактором приватної книги (журнал #549): де зберігається матеріал і чи пишеться він на локальний сервер.
  * ШІ, PDF-експорт, медіатека й публікація для такої книги вимкнені охоронцем у utils/privateStore.ts.
  */
-export function PrivateBookBadge({ storeId, docId, kind = 'book' }: { storeId: string; docId: string; kind?: 'book' | 'course' | 'instruction' }) {
+export function PrivateBookBadge({ storeId, docId, kind = 'book', action }: { storeId: string; docId: string; kind?: 'book' | 'course' | 'instruction'; /** Кнопка «Перенести…» (StorageMoveBar). */ action?: React.ReactNode }) {
   const [name, setName] = useState<string>('');
   const [last, setLast] = useState<PrivateSyncEvent | null>(null);
 
@@ -47,6 +47,7 @@ export function PrivateBookBadge({ storeId, docId, kind = 'book' }: { storeId: s
       </span>
       <span className="text-slate-300">зберігається лише на локальному сервері{name ? ` «${name}»` : ''}; у хмару не потрапляє. ШІ, PDF-експорт, медіатека й публікація недоступні.</span>
       <span className={`ml-auto ${tone}`} data-private-sync={last?.status ?? 'idle'}>{status}</span>
+      {action}
     </div>
   );
 }

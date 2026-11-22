@@ -372,6 +372,7 @@ guard.setActivePrivateMaterial('course', 'crs_x');
 t('відкрито приватний курс: запис у хмарні курси, ШІ й PDF блокуються', guard.blockedByPrivacy('POST', '/api/courses') && guard.blockedByPrivacy('PUT', '/api/courses/abc') && guard.blockedByPrivacy('POST', '/api/ai/elaborate-instruction-steps') && guard.blockedByPrivacy('POST', '/api/pdf/author-preview'));
 t('читання (GET) і службові маршрути не блокуються', !guard.blockedByPrivacy('GET', '/api/courses') && !guard.blockedByPrivacy('POST', '/api/private-store/pstore_x/token') && !guard.blockedByPrivacy('GET', '/api/auth/me'));
 t('префікс /studio (маркетплейс) розпізнається', guard.blockedByPrivacy('POST', '/studio/api/ai/x'));
+t('DELETE хмарної копії не блокується (вмісту не несе; так прибирається хмара при перенесенні на сервер, журнал #598)', !guard.blockedByPrivacy('DELETE', '/api/books/b1') && !guard.blockedByPrivacy('DELETE', '/api/courses/c1') && guard.blockedByPrivacy('PUT', '/api/books/b1'));
 guard.setActivePrivateMaterial('book', 'BK-1');
 guard.setActivePrivateMaterial('book', null);
 t('закриття книги не знімає охорону з відкритого курсу (окремі слоти)', guard.isPrivateMaterialActive() && guard.blockedByPrivacy('POST', '/api/courses'));

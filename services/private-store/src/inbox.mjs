@@ -3,7 +3,7 @@
  * своїм приватним ключем, кладе знімки як зображення, а розпізнаний текст — у запис виду `scan`. Studio бачила лише шифротекст.
  *
  *   запис `scan_<draftId>` (власник — користувач, що поклав знімок):
- *     payload = { v, draftId, kind: course|instruction|manuscript, courseSource, instructionMode, modelCode, title, craft, audience,
+ *     payload = { v, draftId, kind: course|instruction|manuscript, courseSource, photoBook, instructionMode, modelCode, title, craft, audience,
  *                 newBookTitle, createdAt, pages: [{ pageId (= номер елемента), order, assetId, mime, bytes, width, height, receivedAt,
  *                 note, textEdited, ocr: { status: queued|running|done|failed, engine, text, confidence, quality, uncertain[], … } }] }
  *     зображення сторінок — assets `scanimg_<номер елемента>`.
@@ -24,6 +24,13 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_PAGES_PER_DRAFT = 300;
 const MAX_TEXT_CHARS = 200_000;
 
+/**
+ * Чернетка з ФОТО (курс за фото майстер-класу, книга з фото): на знімках люди, речі, місця — не текст. Tesseract на таких
+ * кадрах дає сміття, тому автоматично їх розпізнає лише модель зору на цьому комп'ютері (Ollama), якщо вона налаштована;
+ * без неї основою тексту стають нотатки автора до кожного кадру (журнал #598).
+ */
+export const isPhotoDraft = (payload) => !!payload && ((payload.kind === 'course' && payload.courseSource === 'photos') || (payload.kind === 'manuscript' && payload.photoBook === true));
+
 const short = (value, max) => (typeof value === 'string' ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, max) : '');
 
 /** Заголовок конверта (від телефона, тобто недовірений) → перевірені поля. Кидає Error із причиною. */
@@ -38,6 +45,7 @@ export function parseHeader(raw) {
     draftId: raw.draftId,
     kind: raw.kind,
     courseSource: raw.kind === 'course' && COURSE_SOURCES.has(raw.courseSource) ? raw.courseSource : raw.kind === 'course' ? 'document' : null,
+    photoBook: raw.kind === 'manuscript' && raw.photoBook === true,
     instructionMode: raw.kind === 'instruction' && INSTRUCTION_MODES.has(raw.instructionMode) ? raw.instructionMode : null,
     modelCode: short(raw.modelCode, 200),
     title: short(raw.title, 200),
@@ -97,7 +105,7 @@ export class ScanService {
     const pages = payload.pages || [];
     const done = pages.filter((p) => p.ocr && p.ocr.status === 'done');
     return {
-      title: payload.title || (payload.kind === 'manuscript' && payload.newBookTitle) || (payload.kind === 'course' ? 'Курс із телефона' : payload.kind === 'instruction' ? 'Інструкція з телефона' : 'Книга з телефона'),
+      title: payload.title || (payload.kind === 'manuscript' && payload.newBookTitle) || (payload.kind === 'course' ? 'Курс із телефона' : payload.kind === 'instruction' ? 'Інструкція з телефона' : payload.photoBook ? 'Книга з фото' : 'Книга з телефона'),
       kind: payload.kind,
       pages: pages.length,
       recognized: done.length,
@@ -130,6 +138,8 @@ export class ScanService {
     const docId = `scan_${header.draftId}`;
     const assetId = `scanimg_${itemId}`;
     let duplicate = false;
+    /** Рушій автоматичного розпізнавання для ЦЬОГО знімка: null — не розпізнавати (фото без Ollama). */
+    let autoEngine = null;
     let rejected = null;
     try {
       await this.withDoc(userId, docId, (payload) => {
@@ -143,12 +153,15 @@ export class ScanService {
           rejected = 'У чернетці забагато сторінок.';
           return undefined;
         }
+        const photo = isPhotoDraft({ kind: base.kind || header.kind, courseSource: header.courseSource ?? base.courseSource, photoBook: header.photoBook || base.photoBook === true });
+        autoEngine = !this.config.autoOcr ? null : photo ? (this.config.ollamaUrl ? 'ollama' : null) : 'tesseract';
         // Заголовок чернетки: беремо найновіше непорожнє значення (телефон повторює його в кожному конверті).
         const pick = (key) => header[key] || base[key] || '';
         const next = {
           ...base,
           kind: base.kind || header.kind,
           courseSource: header.courseSource ?? base.courseSource ?? null,
+          photoBook: header.photoBook || base.photoBook === true,
           instructionMode: header.instructionMode ?? base.instructionMode ?? null,
           modelCode: pick('modelCode'),
           title: pick('title'),
@@ -170,7 +183,7 @@ export class ScanService {
               note: header.note,
               clientId: header.clientId,
               textEdited: false,
-              ocr: { status: this.config.autoOcr ? 'queued' : 'idle' },
+              ocr: { status: autoEngine ? 'queued' : 'idle' },
             },
           ].sort((a, b) => a.order - b.order || a.receivedAt.localeCompare(b.receivedAt)),
         };
@@ -186,7 +199,7 @@ export class ScanService {
     if (rejected) return { status: 'rejected', reason: rejected };
     if (duplicate) return { status: 'duplicate', docId, pageId: itemId };
     this.db.audit('inbox_stored', { subject: userId, ref: docId, detail: `${image.length} B` });
-    if (this.config.autoOcr) this.enqueueOcr({ owner: userId, docId, pageId: itemId, engine: 'tesseract' });
+    if (autoEngine) this.enqueueOcr({ owner: userId, docId, pageId: itemId, engine: autoEngine });
     return { status: 'stored', docId, pageId: itemId };
   }
 
