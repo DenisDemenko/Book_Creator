@@ -139,6 +139,14 @@ def test_full_flow(stack, browser_page, tmp_path):
     before = len(_posts(mock))
     page.set_input_files("#file-gal", _jpeg(tmp_path / "a.jpg"))
     page.wait_for_selector("[data-photo]")
+    page.locator("[data-photo] .photo-preview-trigger").first.click()
+    preview = page.locator("dialog.photo-preview[open]")
+    assert preview.is_visible()
+    page.wait_for_function("document.querySelector('dialog.photo-preview img')?.naturalWidth > 0")
+    assert preview.locator("img").evaluate("(img) => getComputedStyle(img).objectFit") == "contain"
+    preview.get_by_role("button", name="Закрити перегляд фото").click()
+    preview.wait_for(state="detached")
+
     _wait(lambda: len(_posts(mock)) == before + 1)
     page.wait_for_function("document.querySelectorAll('[data-queued]').length === 0")
     _shot(page, "3-draft")

@@ -209,7 +209,10 @@ export interface PhotoDraftSinks {
     bookTitle: string;
     chapterTitle: string;
     items: InboxItem[];
-    photoChapters?: { title: string; text: string; photoIds?: string[] }[];
+    photoChapters?: DraftModule[];
+    bookSynopsis?: string | null;
+    bookConcept?: string | null;
+    bookAudience?: string | null;
     bookIdeas?: BookIdea[];
     tokenId?: string | null;
     batchId: string;
@@ -1421,7 +1424,7 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
           placePhotos(modules, d.photos);
           d.structure = {
             modules,
-            ...(d.kind === 'course' && parsed.summary ? { summary: parsed.summary } : {}),
+            ...((d.kind === 'course' || (d.kind === 'book' && d.newBookTitle)) && parsed.summary ? { summary: parsed.summary } : {}),
             ...(d.kind === 'course' && parsed.outcomes.length ? { outcomes: parsed.outcomes } : {}),
           };
           d.assumptions = parsed.assumptions.map((a) => (a.photoId && !d.photos.some((p) => p.photoId === a.photoId) ? { ...a, photoId: null } : a));
@@ -1734,21 +1737,24 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
             target = { kind: 'express', id, studioUrl: `/express/${id}` };
           } else if (d.kind === 'book' && d.newBookTitle) {
             if (!sinks.createManuscriptBook) throw new Error('Створення книг не налаштовано.');
-            const photoChapters = (d.structure?.modules ?? []).map((module) => ({
-              title: module.title,
-              photoIds: module.lessons.flatMap((scene) => scene.photoIds),
-              text: module.lessons.map((scene) => (scene.body ?? '').trim()).filter(Boolean).join('\n\n'),
-            }));
-            const items = [...d.photos].sort((a, b) => a.order - b.order).map((photo) => ({
-              assetId: photo.assetId,
-              imageUrl: libraryUrl(photo.assetId),
-              text: [
-                photo.description && `Опис ШІ: ${photo.description}`,
-                ...d.notes.filter((note) => note.photoIds.includes(photo.photoId)).map((note) => `Нотатка автора: ${note.text}`),
-              ].filter(Boolean).join('\n\n'),
-              chapterTitle: photoChapters.find((chapter, index) => d.structure?.modules[index]?.lessons.some((scene) => scene.photoIds.includes(photo.photoId)))?.title ?? '',
-              sectionTitle: `Фото ${photo.order}`,
-            }));
+            const photoChapters = d.structure?.modules ?? [];
+            const items = [...d.photos].sort((a, b) => a.order - b.order).map((photo) => {
+              const notes = d.notes.filter((note) => note.photoIds.includes(photo.photoId)).map((note) => note.text);
+              const sourceChapterIndex = photoChapters.findIndex((chapter) =>
+                chapter.lessons.some((scene) => scene.photoIds.includes(photo.photoId)));
+              return {
+                assetId: photo.assetId,
+                imageUrl: libraryUrl(photo.assetId),
+                text: [
+                  photo.description && `Опис ШІ: ${photo.description}`,
+                  ...notes.map((note) => `Нотатка автора: ${note}`),
+                ].filter(Boolean).join('\n\n'),
+                sourceChapterIndex,
+                chapterTitle: photoChapters[sourceChapterIndex]?.title ?? '',
+                sectionTitle: `Фото ${photo.order}`,
+                grabFusion: { description: photo.description, notes, tags: photo.tags, takenAt: photo.takenAt },
+              };
+            });
             const principal = req.principal as { name?: string; role?: string } | undefined;
             const made = await sinks.createManuscriptBook({
               ownerId,
@@ -1757,6 +1763,9 @@ export function registerPhotoDraftRoutes(app: Express, deps: PhotoDraftDeps): vo
               bookTitle: d.newBookTitle,
               chapterTitle: photoChapters[0]?.title ?? d.newBookTitle,
               photoChapters,
+              bookSynopsis: d.structure?.summary,
+              bookConcept: d.craft,
+              bookAudience: d.audience,
               bookIdeas: d.bookIdeas?.filter((idea) => idea.accepted),
               items,
               tokenId: d.tokenId,

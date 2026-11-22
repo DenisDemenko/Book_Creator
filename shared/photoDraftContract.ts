@@ -311,7 +311,7 @@ export interface DraftModule {
 
 export interface DraftStructure {
   modules: DraftModule[];
-  /** Лише курс (з 1.6.0): про що курс і для кого, 1–2 речення, пише ШІ в проході «Розкласти». У Studio це `summary` курсу. */
+  /** Короткий опис курсу або синопсис книги з фото, створений у проході «Розкласти». */
   summary?: string | null;
   /** Лише курс (з 1.6.0): 2–5 результатів навчання, пише ШІ в проході «Розкласти». У Studio це `outcomes` курсу. */
   outcomes?: string[];

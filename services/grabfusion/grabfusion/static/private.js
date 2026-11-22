@@ -192,7 +192,7 @@ function viewPrivateDraft() {
   items.forEach((it, i) => {
     const url = it.blob ? (state.urls.has(it.itemId) ? state.urls.get(it.itemId) : (state.urls.set(it.itemId, URL.createObjectURL(it.blob)), state.urls.get(it.itemId))) : null;
     list.append(h('div', { class: 'card frame', 'data-private-item': it.itemId },
-      url ? h('img', { src: url, alt: 'Знімок ' + (i + 1) }) : h('div', { class: 'muted', text: '✓' }),
+      url ? photoPreview(url, `Знімок №${i + 1}`) : h('div', { class: 'muted', text: '✓' }),
       h('div', null,
         h('strong', { text: (d.kind === 'manuscript' || d.kind === 'course' ? 'Сторінка ' : 'Знімок ') + (i + 1) }),
         h('div', null, privateBadge(it), it.state === 'failed' || (it.state === 'queued' && it.error) ? h('div', { class: 'err', text: it.error }) : null),

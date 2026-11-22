@@ -221,7 +221,7 @@ export function structureSystemInstruction(kind: PhotoDraftKind, mode?: PhotoDra
     'Відповідай українською, лише JSON без пояснень:',
     kind === 'course'
       ? COURSE_JSON.replace('id із вхідних даних', 'id кадрів із вхідних даних').replace('"photoId":"id або null"', '"photoId":"id кадру або null"')
-      : '{"title":"назва до 160 символів","modules":[{"title":"","summary":"1 речення","lessons":[{"title":"","goal":"що буде зроблено або зрозуміло","photoIds":["id кадрів із вхідних даних"],"topics":["2–4 теми"]}]}],"assumptions":[{"text":"що припущено, одним реченням","photoId":"id кадру або null"}]}',
+      : `{"title":"назва до 160 символів",${fromPhotos ? '"summary":"короткий синопсис книги за планом і матеріалами автора",' : ''}"modules":[{"title":"","summary":"1 речення","lessons":[{"title":"","goal":"що буде зроблено або зрозуміло","photoIds":["id кадрів із вхідних даних"],"topics":["2–4 теми"]}]}],"assumptions":[{"text":"що припущено, одним реченням","photoId":"id кадру або null"}]}`,
   ].join('\n');
 }
 

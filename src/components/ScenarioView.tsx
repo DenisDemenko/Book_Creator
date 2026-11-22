@@ -225,6 +225,12 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             <span className="text-[11px] font-bold text-purple-400 uppercase">{t('scenario.genreAudienceLabel')}</span>
             <p className="text-xs text-slate-300">{book.genre} • {book.targetAudience}</p>
           </div>
+          {book.synopsis?.trim() && (
+            <div className="space-y-1 rounded-xl border border-slate-800 bg-slate-950/60 p-4 md:col-span-3">
+              <span className="text-[11px] font-bold uppercase text-cyan-400">{t('scenario.synopsisLabel')}</span>
+              <p className="whitespace-pre-wrap text-xs text-slate-300">{book.synopsis}</p>
+            </div>
+          )}
         </div>
       )}
 

@@ -440,12 +440,19 @@ t('відхилена пропозиція зникає, дві схвалені
 writeImpl = ({ prompt }) => {
   if (prompt.includes('Кадри (за порядком зйомки)')) {
     t('план отримує і опис, і нотатку автора', prompt.includes('Кадр.') && prompt.includes('Нотатка автора: <<<Тут Марта') && prompt.includes('Картки, схвалені автором:'));
-    return JSON.stringify({ modules: sources.photos.map((photo: any, index: number) => ({
-      title: `Глава ${index + 1}`, lessons: [{ title: `Сцена ${index + 1}`, photoIds: [photo.photoId] }],
+    return JSON.stringify({ summary: 'Марта повертається до млина й читає листа.', modules: sources.photos.map((photo: any, index: number) => ({
+      title: `Глава ${index + 1}`,
+      summary: index === 0 ? 'Повернення і знахідка.' : 'Лист у майстерні.',
+      lessons: [
+        { title: `Сцена ${index + 1}`, goal: 'Показати наслідок знахідки.', photoIds: [photo.photoId] },
+        ...(index === 0 ? [{ title: 'Сцена біля дверей', goal: 'Марта помічає тінь.', photoIds: [], topics: ['Тінь'] }] : []),
+      ],
     })) });
   }
-  const match = /=== Сцена ([^:]+):/.exec(prompt);
-  return JSON.stringify({ lessons: [{ lessonId: match?.[1], body: 'Марта повернулася до млина.' }] });
+  const matches = [...prompt.matchAll(/=== Сцена ([^:]+):.*?<<<(.+?)>>>/g)];
+  return JSON.stringify({ lessons: matches.map(([_, lessonId, title]) => ({
+    lessonId, body: title === 'Сцена біля дверей' ? 'Тінь промайнула біля дверей.' : 'Марта повернулася до млина.',
+  })) });
 };
 const startPlan = await call('POST', `${PD}/${photoBookDraftId}/structure`, { token: grab });
 await flush();
@@ -465,6 +472,26 @@ t('submit створює нову книгу з двома главами, а д
 t('прийняті картки переносяться в Studio як герой і сцена потрібної глави',
   (storedPhotoBook?.book.characters as any[])?.some((character) => character.name === 'Марта' && character.biography.includes('Уточнення автора.')) &&
   (storedPhotoBook?.book.chapters as any[])?.[0]?.sections.some((section: any) => section.scene?.title === 'Повернення' && section.scene.location === 'Млин' && section.scene.timeOfDay === 'ніч'));
+const importedChapters = storedPhotoBook?.book.chapters as any[] | undefined;
+const importedCharacter = (storedPhotoBook?.book.characters as any[])?.find((character) => character.name === 'Марта');
+t('сюжет і зміст переносяться зі структури, весь текст доступний по сценах',
+  storedPhotoBook?.book.synopsis === 'Марта повертається до млина й читає листа.' &&
+  importedChapters?.[0]?.description === 'Повернення і знахідка.' &&
+  importedChapters?.[0]?.sections.map((section: any) => section.title).join('|') === 'Сцена 1|Сцена біля дверей' &&
+  importedChapters?.[0]?.sections[0]?.content.includes('Марта повернулася до млина.') &&
+  importedChapters?.[0]?.sections[1]?.content.includes('Тінь промайнула біля дверей.') &&
+  importedChapters?.[1]?.sections[0]?.scene?.summary === 'Показати наслідок знахідки.');
+t('згаданий у сцені герой є в її складі й у складі глави',
+  !!importedCharacter && importedChapters?.[0]?.cast.includes(importedCharacter.id) &&
+  importedChapters?.[0]?.sections[0]?.scene?.characters[0]?.characterId === importedCharacter.id);
+const mediaLibrary = await import('../server/media/mediaLibraryStore');
+const bookAssets = await mediaLibrary.listAssets('u-a', { bookId: newBook.data.target.id });
+const sourceAsset = bookAssets.find((asset) => asset.provenance.grabFusion?.notes.includes('Тут Марта вирішує повернутися.'));
+const sourcePassport = sourceAsset ? await mediaLibrary.getAssetPassport(sourceAsset.id, 'u-a') : null;
+t('у паспорті першого фото є окремий опис ШІ й повна авторська нотатка',
+  bookAssets.length === 2 && bookAssets.every((asset) => asset.provenance.grabFusion?.description === 'Кадр.') &&
+  sourcePassport?.asset.provenance.grabFusion?.notes.join('|') === 'Тут Марта вирішує повернутися.' &&
+  sourcePassport?.asset.provenance.grabFusion?.takenAt?.startsWith('2026-11-01'));
 t('повторне надсилання не створює дубль', (await call('POST', `${PD}/${photoBookDraftId}/submit`, { token: grab })).status === 409);
 
 console.log('\nЗвичайні скани та фікстури');

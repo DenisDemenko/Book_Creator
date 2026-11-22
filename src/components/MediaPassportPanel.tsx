@@ -209,6 +209,30 @@ export const MediaPassportPanel: React.FC<Props> = ({ assetId, metadataRevision,
         {asset.model && <span className="text-[10px] text-slate-500">{t('mediaPassport.modelLine', { model: asset.model })}</span>}
       </div>
 
+      {asset.provenance?.grabFusion && (
+        <section className="space-y-2 rounded-lg border border-slate-800 p-3 text-xs text-slate-300" data-grabfusion-photo-details>
+          <h5 className="font-semibold text-slate-100">Grab Fusion</h5>
+          {asset.provenance.grabFusion.description && (
+            <div>
+              <h6 className="text-slate-400">{lang === 'en' ? 'AI description' : 'Опис ШІ'}</h6>
+              <p className="whitespace-pre-wrap break-words">{asset.provenance.grabFusion.description}</p>
+            </div>
+          )}
+          {asset.provenance.grabFusion.notes.length > 0 && (
+            <div>
+              <h6 className="text-slate-400">{lang === 'en' ? 'Author notes' : 'Нотатки автора'}</h6>
+              {asset.provenance.grabFusion.notes.map((note, index) => <p key={index} className="whitespace-pre-wrap break-words">{note}</p>)}
+            </div>
+          )}
+          {asset.provenance.grabFusion.tags.length > 0 && (
+            <p className="text-slate-400">{asset.provenance.grabFusion.tags.join(' · ')}</p>
+          )}
+          {asset.provenance.grabFusion.takenAt && (
+            <p className="text-slate-400">{formatMediaDate(asset.provenance.grabFusion.takenAt)}</p>
+          )}
+        </section>
+      )}
+
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="space-y-1 text-[11px] text-slate-400">
           <span>{t('mediaPassport.fieldTitle')}</span>

@@ -1,3 +1,4 @@
+import type { GrabFusionPhotoDetails } from '../../shared/mediaProvenance';
 /**
  * Відправка чернетки за фото: з чого складається результат у Studio.
  * Чисті відображення (без сховищ) — їх перевіряє тест; запис робить
@@ -259,6 +260,8 @@ export interface InboxItem {
   text: string;
   chapterTitle: string;
   sectionTitle: string;
+  sourceChapterIndex?: number;
+  grabFusion?: GrabFusionPhotoDetails;
 }
 
 /** Сторінки рукопису у порядку сторінок: по одному запису «Вхідних» на сторінку, текст — дослівно. */

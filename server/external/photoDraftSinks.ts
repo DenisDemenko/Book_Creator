@@ -14,11 +14,12 @@ import { createDraft as createExpressDraft } from '../expressStore';
 import { listUsageSince } from '../store';
 import { createScan, listScans, updateScan } from './externalApiStore';
 import { getBook, saveBook } from '../bookStore';
-import { attachAssetsToBook } from '../media/mediaLibraryStore';
+import { attachAssetsToBook, getAsset, updateMediaProvenance } from '../media/mediaLibraryStore';
 import { buildBookFromManuscript } from '../../src/utils/manuscriptBook';
-import { insertBatchIntoBook, joinManuscriptPages } from '../../src/utils/manuscriptBatch';
+import { joinManuscriptPages } from '../../src/utils/manuscriptBatch';
+import { buildDescriptionDraft, descriptionWordCount } from '../../src/utils/describeCharacterTransfer';
 import type { Book, Section, UserRole } from '../../src/types';
-import type { BookIdea } from '../../shared/photoDraftContract';
+import type { BookIdea, DraftModule } from '../../shared/photoDraftContract';
 import type { CourseInput, InboxItem } from './photoDraftMapping';
 import type { WriteTextParams } from './photoDraftRoutes';
 
@@ -105,15 +106,13 @@ export async function createInboxScans(p: {
   return first;
 }
 
-/** Add the approved cards alongside the manuscript generated from the photos. */
-function addApprovedBookCards(
+/** Map the approved plan to the same chapters and sections used by the Studio editor and scenario view. */
+function importPhotoBook(
   book: Book,
+  chapters: readonly DraftModule[],
   ideas: readonly BookIdea[],
-  photoChapters: readonly { photoIds?: string[] }[],
 ): Book {
-  const accepted = ideas.filter((idea) => idea.accepted);
-  if (!accepted.length) return book;
-  const characters = accepted.filter((idea) => idea.kind === 'character').map((idea): Book['characters'][number] => ({
+  const characters = ideas.filter((idea) => idea.accepted && idea.kind === 'character').map((idea): Book['characters'][number] => ({
     id: `char-gf-${idea.id}`,
     bookId: book.id,
     name: idea.title,
@@ -124,34 +123,76 @@ function addApprovedBookCards(
     relationships: [],
     tags: ['GrabFusion'],
   }));
-  const scenesByChapter = new Map<number, BookIdea[]>();
-  for (const scene of accepted.filter((idea) => idea.kind === 'scene')) {
-    const best = photoChapters.reduce((match, chapter, index) => {
-      const overlap = chapter.photoIds?.filter((id) => scene.photoIds.includes(id)).length ?? 0;
-      return overlap > match.overlap ? { index, overlap } : match;
+  const scenes = ideas.filter((idea) => idea.accepted && idea.kind === 'scene');
+  const claimed = new Set<string>();
+  const approvedForLesson = new Map<string, BookIdea>();
+  const unmatched = new Map<number, BookIdea[]>();
+  const normalizedTitle = (title: string) => title.trim().toLocaleLowerCase('uk');
+  const planned = chapters.flatMap((chapter, index) => chapter.lessons.map((lesson) => ({ index, lesson })));
+  for (const scene of scenes) {
+    const available = planned.filter(({ lesson }) => !claimed.has(lesson.lessonId));
+    const sameSources = ({ lesson }: typeof planned[number]) =>
+      lesson.photoIds.length > 0 && scene.photoIds.length === lesson.photoIds.length &&
+      lesson.photoIds.every((id) => scene.photoIds.includes(id));
+    const sameTitle = available.find(({ lesson }) =>
+      normalizedTitle(lesson.title) === normalizedTitle(scene.title) &&
+      lesson.photoIds.some((id) => scene.photoIds.includes(id)));
+    const match = sameTitle ?? available.find(sameSources);
+    if (match) {
+      claimed.add(match.lesson.lessonId);
+      approvedForLesson.set(match.lesson.lessonId, scene);
+      continue;
+    }
+    const best = chapters.reduce((selected, chapter, index) => {
+      const photoIds = new Set(chapter.lessons.flatMap((lesson) => lesson.photoIds));
+      const overlap = scene.photoIds.filter((id) => photoIds.has(id)).length;
+      return overlap > selected.overlap ? { index, overlap } : selected;
     }, { index: 0, overlap: 0 });
-    scenesByChapter.set(best.index, [...(scenesByChapter.get(best.index) ?? []), scene]);
+    unmatched.set(best.index, [...(unmatched.get(best.index) ?? []), scene]);
   }
-  let sceneOrder = 0;
-  const chapters = book.chapters.map((chapter, index) => {
-    const scenes = scenesByChapter.get(index);
-    if (!scenes?.length) return chapter;
-    const lastOrder = Math.max(0, ...chapter.sections.map((section) => section.order));
-    const sections = scenes.map((scene, offset): Section => {
-      const id = `sec-gf-${scene.id}`;
+
+  let timelineOrder = 0;
+  const result = chapters.map((chapter, index): Book['chapters'][number] => {
+    const chapterId = `chap-gf-${book.id}-${index + 1}`;
+    const section = (title: string, body: string, goal: string, topics: string[], order: number, idea?: BookIdea): Section => {
+      const id = `sec-gf-${book.id}-${index + 1}-${order}`;
+      const summary = [idea?.text, goal].filter(Boolean).join('\n\n');
+      const nameTokens = (value: string) => value.normalize('NFC').toLocaleLowerCase('uk').match(/[\p{L}\p{N}]+/gu)?.join(' ');
+      const text = ` ${nameTokens(`${title} ${summary} ${body}`) ?? ''} `;
+      const cast = characters.filter(({ name }) => {
+        const normalized = nameTokens(name);
+        return !!normalized && text.includes(` ${normalized} `);
+      });
       return {
-        id, chapterId: chapter.id, title: scene.title, order: lastOrder + offset + 1,
-        content: '', wordCount: 0, lastModified: book.updatedAt,
+        id, chapterId, title, order, content: body ? buildDescriptionDraft(body) : '',
+        wordCount: descriptionWordCount(body), lastModified: book.updatedAt,
         scene: {
-          id: `scene-gf-${scene.id}`, sectionId: id, title: scene.title, summary: scene.text,
-          act: 1, location: scene.location ?? '', timeOfDay: scene.timeOfDay ?? '', timelineOrder: ++sceneOrder,
-          intensityScore: 5, conflict: '', resolution: '', characters: [],
+          id: idea ? `scene-gf-${idea.id}` : `scene-${id}`, sectionId: id, title: idea?.title ?? title,
+          summary, act: 1, location: idea?.location ?? '', timeOfDay: idea?.timeOfDay ?? '',
+          timelineOrder: ++timelineOrder, intensityScore: 5, conflict: '', resolution: '',
+          characters: cast.map(({ id: characterId }) => ({ characterId, goal: '', emotionalState: '', action: '', conflict: '' })),
+          ...(topics.length ? { aiDramaturgyNotes: topics.join(', ') } : {}),
         },
       };
-    });
-    return { ...chapter, sections: [...chapter.sections, ...sections] };
+    };
+    const sections = chapter.lessons.map((lesson, i) =>
+      section(lesson.title, lesson.body?.trim() ?? '', lesson.goal ?? '', lesson.topics, i + 1, approvedForLesson.get(lesson.lessonId)));
+    for (const idea of unmatched.get(index) ?? []) {
+      sections.push(section(idea.title, '', '', [], sections.length + 1, idea));
+    }
+    return {
+      id: chapterId, bookId: book.id, title: chapter.title, order: index + 1,
+      description: chapter.summary ?? undefined, sections,
+      cast: [...new Set(sections.flatMap((item) => item.scene?.characters.map((character) => character.characterId) ?? []))],
+    };
   });
-  return { ...book, characters: [...book.characters, ...characters], chapters };
+  const wordCount = result.reduce((total, chapter) => total + chapter.sections.reduce((acc, item) => acc + item.wordCount, 0), 0);
+  return {
+    ...book, characters, chapters: result,
+    versionHistory: book.versionHistory?.map((version) => ({
+      ...version, wordCount, chapterCount: result.length,
+    })),
+  };
 }
 
 /**
@@ -166,12 +207,17 @@ export async function createBookFromManuscript(p: {
   bookTitle: string;
   chapterTitle: string;
   items: InboxItem[];
-  photoChapters?: { title: string; text: string; photoIds?: string[] }[];
+  photoChapters?: DraftModule[];
+  bookSynopsis?: string | null;
+  bookConcept?: string | null;
+  bookAudience?: string | null;
   bookIdeas?: BookIdea[];
   tokenId?: string | null;
   batchId: string;
 }): Promise<{ bookId: string; chapterTitle: string; pages: number } | null> {
-  const text = p.photoChapters?.[0]?.text ?? joinManuscriptPages(p.items.map((i) => i.text));
+  const text = p.photoChapters
+    ? p.photoChapters.flatMap((chapter) => chapter.lessons).find((lesson) => lesson.body?.trim())?.body ?? ''
+    : joinManuscriptPages(p.items.map((i) => i.text));
   const photoBookId = p.photoChapters
     ? 'BK-GF-' + createHash('sha256').update(p.ownerId + ':' + p.batchId).digest('hex').slice(0, 24)
     : undefined;
@@ -190,21 +236,28 @@ export async function createBookFromManuscript(p: {
   });
   if (!built) return null;
   let book = built.book;
-  const chapterIds = new Map([[built.chapterTitle, built.chapterId]]);
-  for (const [index, chapter] of (p.photoChapters ?? []).slice(1).entries()) {
-    const inserted = insertBatchIntoBook(book, chapter.text, {
-      title: chapter.title,
-      newChapterId: `${built.chapterId}-${index + 2}`,
-      now: book.updatedAt,
+  if (p.photoChapters) {
+    book = importPhotoBook(book, p.photoChapters, p.bookIdeas ?? []);
+    const chapterOverviews = p.photoChapters.flatMap((chapter) => {
+      const summary = chapter.summary || chapter.lessons.map((lesson) => lesson.goal || lesson.title).filter(Boolean).join(' · ');
+      return summary ? [`${chapter.title} — ${summary}`] : [];
     });
-    if (inserted) {
-      book = inserted.book;
-      chapterIds.set(chapter.title, inserted.chapterId);
-    }
+    book.synopsis = p.bookSynopsis?.trim() || chapterOverviews.join('\n\n');
+    book.logline = (p.bookConcept?.trim() || p.bookSynopsis?.trim() || p.photoChapters[0]?.summary || p.photoChapters[0]?.lessons[0]?.goal || '');
+    book.targetAudience = p.bookAudience?.trim() || undefined;
   }
-  if (p.photoChapters && p.bookIdeas?.length) book = addApprovedBookCards(book, p.bookIdeas, p.photoChapters);
   const saved = previous ?? await saveBook({ book: book as unknown as Record<string, unknown>, ownerId: p.ownerId });
+  for (const item of p.items) {
+    if (!item.grabFusion) continue;
+    const asset = await getAsset(item.assetId);
+    if (!asset || asset.ownerId !== p.ownerId || asset.provenance.grabFusion) continue;
+    await updateMediaProvenance(asset.id, p.ownerId, asset.provenance.revision, {
+      ...asset.provenance, revision: asset.provenance.revision + 1, grabFusion: item.grabFusion,
+    });
+  }
   await attachAssetsToBook(p.items.map((i) => i.assetId), p.ownerId, saved.id);
+  const savedChapters = (saved.book.chapters as Book['chapters'] | undefined) ?? book.chapters;
+  const firstChapter = savedChapters[0] ?? book.chapters[0];
   const existingScans = p.photoChapters
     ? new Map((await listScans(p.ownerId, { bookId: saved.id })).filter((scan) => scan.batchId === p.batchId).map((scan) => [scan.batchOrder, scan]))
     : new Map();
@@ -221,15 +274,16 @@ export async function createBookFromManuscript(p: {
       tokenId: p.tokenId ?? null,
       batch: { id: p.batchId, order, bookTitle: p.bookTitle || null },
     });
+    const chapter = item.sourceChapterIndex === undefined ? firstChapter : savedChapters[item.sourceChapterIndex] ?? firstChapter;
     await updateScan(scan.id, p.ownerId, {
       status: 'inserted',
       recognizedText: item.text,
       text: item.text,
-      chapterId: chapterIds.get(item.chapterTitle) ?? built.chapterId,
-      chapterTitle: item.chapterTitle || built.chapterTitle,
+      chapterId: chapter.id,
+      chapterTitle: chapter.title,
       sectionTitle: item.sectionTitle,
       modelId: 'grabfusion',
     });
   }
-  return { bookId: saved.id, chapterTitle: built.chapterTitle, pages: p.items.length };
+  return { bookId: saved.id, chapterTitle: firstChapter.title, pages: p.items.length };
 }

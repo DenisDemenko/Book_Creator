@@ -398,9 +398,31 @@ function movePhoto(photoId, delta, toIndex) { return serial(async () => {
   render();
 }); }
 
+function photoPreview(src, label) {
+  const trigger = h('button', {
+    type: 'button', class: 'photo-preview-trigger', 'aria-label': `Відкрити: ${label}`, draggable: 'false',
+  }, h('img', { src, alt: label, loading: 'lazy', draggable: 'false' }));
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const photo = h('img', { src, alt: label });
+    const error = h('p', { class: 'photo-preview-error', role: 'status', hidden: true, text: 'Не вдалося завантажити фото.' });
+    photo.addEventListener('error', () => { photo.hidden = true; error.hidden = false; });
+    const close = h('button', {
+      type: 'button', class: 'photo-preview-close', 'aria-label': 'Закрити перегляд фото', text: '✕', autofocus: true,
+    });
+    const dialog = h('dialog', { class: 'photo-preview', 'aria-label': label }, close, photo, error);
+    close.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+    dialog.addEventListener('close', () => { dialog.remove(); if (trigger.isConnected) trigger.focus(); }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+  return trigger;
+}
+
 function photoCard(p, i, total) {
   const card = h('div', { class: 'card frame', draggable: 'true', 'data-photo': p.photoId },
-    h('img', { src: `api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }),
+    photoPreview(`api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, `Кадр №${p.order}`),
     h('div', null,
       h('div', { class: 'row' }, h('strong', { text: '#' + p.order }), h('span', { class: 'badge ' + p.status, text: { processing: 'описується…', described: 'описано', failed: 'не вдалося' }[p.status] || p.status })),
       photoBook(state.draft) && p.takenAt && h('time', { datetime: p.takenAt, class: 'muted', text: new Date(p.takenAt).toLocaleDateString('uk-UA') }),
@@ -423,7 +445,7 @@ function photoCard(p, i, total) {
 function queuedCard(it) {
   const failed = it.state === 'failed';
   return h('div', { class: 'card frame', 'data-queued': it.clientId },
-    h('img', { src: urlFor(it), alt: 'Кадр у черзі' }),
+    photoPreview(urlFor(it), 'Кадр у черзі'),
     h('div', null,
       h('div', { class: 'row' }, h('span', { class: 'badge ' + (failed ? 'failed' : 'queued'), text: failed ? 'не надіслано' : 'у черзі' }),
         h('span', { class: 'muted', text: failed ? '' : (state.online ? 'надсилається…' : 'надішлеться, коли зʼявиться звʼязок') })),
@@ -1158,7 +1180,7 @@ function stepFrames(d, les) {
     const sel = h('select', { class: 'move', 'data-move': id, title: 'Перенести кадр в інший крок' }, h('option', { value: '', text: `Кадр ${p.order} →` }),
       steps.filter((x) => x.lessonId !== les.lessonId).map((x) => h('option', { value: x.lessonId, text: 'в «' + (x.title || x.lessonId).slice(0, 30) + '»' })));
     sel.addEventListener('change', () => { if (sel.value) moveFrame(id, sel.value); });
-    wrap.append(h('div', { class: 'frame-chip' }, h('img', { src: `api/drafts/${d.draftId}/photos/${id}/image`, alt: 'Кадр ' + p.order, loading: 'lazy' }), sel));
+    wrap.append(h('div', { class: 'frame-chip' }, photoPreview(`api/drafts/${d.draftId}/photos/${id}/image`, `Кадр №${p.order}`), sel));
   });
   if (!les.photoIds.length) wrap.append(h('p', { class: 'err', 'data-nofram': les.lessonId, text: 'У кроку немає кадру — перенесіть сюди кадр з іншого кроку.' }));
   return wrap;
@@ -1266,7 +1288,7 @@ function pageCard(p, i, total, readOnly) {
   const empty = p.status === 'described' && !(p.text || '').trim();
   const hintNote = (state.draft.notes || []).find((n) => n.photoIds.includes(p.photoId));
   return h('div', { class: 'card frame', 'data-page': p.photoId },
-    h('img', { src: `api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, alt: 'Сторінка ' + p.order, loading: 'lazy' }),
+    photoPreview(`api/drafts/${state.draft.draftId}/photos/${p.photoId}/image`, `Сторінка №${p.order}`),
     h('div', null,
       h('div', { class: 'row' }, h('strong', { text: 'Сторінка ' + p.order }),
         h('span', { class: 'badge ' + p.status, text: { processing: 'розпізнається…', described: 'розпізнано', failed: 'не вдалося' }[p.status] || p.status }),
@@ -1328,7 +1350,7 @@ function viewStructure(d) {
       m.summary && h('p', { class: 'muted', text: m.summary }));
     m.lessons.forEach((les) => {
       card.append(h('div', { class: 'lesson', 'data-lesson': les.lessonId },
-        d.kind === 'instruction' ? stepFrames(d, les) : h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && h('img', { src: `api/drafts/${d.draftId}/photos/${id}/image`, alt: '', loading: 'lazy' }))),
+        d.kind === 'instruction' ? stepFrames(d, les) : h('div', { class: 'thumbs' }, les.photoIds.map((id) => byId.has(id) && photoPreview(`api/drafts/${d.draftId}/photos/${id}/image`, `Кадр №${byId.get(id).order}`))),
         lessonField(d, les, 'title', T.title, false),
         lessonField(d, les, 'goal', T.goal, true),
         lessonField(d, les, 'body', T.body, true)));

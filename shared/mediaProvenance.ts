@@ -35,6 +35,12 @@ export interface AiDeclaration {
   promptReference: string | null;
   settings: Record<string, string | number | boolean>;
 }
+export interface GrabFusionPhotoDetails {
+  description: string | null;
+  notes: string[];
+  tags: string[];
+  takenAt: string | null;
+}
 export interface MediaProvenance {
   schema: 1;
   revision: number;
@@ -57,6 +63,7 @@ export interface MediaProvenance {
   canon: { by: string; at: string } | null;
   ai: AiDeclaration;
   generationContext?: MediaGenerationContext;
+  grabFusion?: GrabFusionPhotoDetails;
   declaration: { by: string; at: string } | null;
   characterIds: string[];
   locationIds: string[];
