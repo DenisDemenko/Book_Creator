@@ -244,6 +244,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
 
   return (
     <header
+      data-app-header="1"
       className="sticky top-0 z-40 w-full min-h-[var(--app-header-h)] bg-slate-950/75 border-b border-white/[0.06] backdrop-blur-2xl"
       style={sunVars}
     >

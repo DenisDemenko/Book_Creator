@@ -1,21 +1,5 @@
-import React, { useState } from 'react';
-import { 
-  Calculator, 
-  Copy, 
-  Printer, 
-  Check, 
-  TrendingUp, 
-  PackageCheck, 
-  ShieldAlert,
-  Sparkles,
-  Layers,
-  Save,
-  FileSpreadsheet,
-  FolderOpen,
-  Coins,
-  Calendar,
-  Banknote,
-} from 'lucide-react';
+import React from 'react';
+import { TrendingUp, Sparkles, Layers, Calendar } from 'lucide-react';
 import { CalculationInput, CalculationResult, Currency, CurrencyRates } from '../types';
 import { formatMoney } from '../utils/calculator';
 import { calculateProductionSchedule } from '../utils/timelineCalculator';
@@ -24,49 +8,16 @@ interface CostBreakdownDashboardProps {
   input: CalculationInput;
   result: CalculationResult;
   currency: Currency;
-  onOpenCommercialOffer: () => void;
-  onSaveCalculation: () => void;
-  onExportExcel: () => void;
-  onOpenTemplates: () => void;
   rates?: CurrencyRates;
-  onOpenCurrencySettings?: () => void;
-  onOpenApplyToProduct?: () => void;
 }
 
 export const CostBreakdownDashboard: React.FC<CostBreakdownDashboardProps> = ({
   input,
   result,
   currency,
-  onOpenCommercialOffer,
-  onSaveCalculation,
-  onExportExcel,
-  onOpenTemplates,
   rates = { USD: 41.5, EUR: 45.2 },
-  onOpenCurrencySettings,
-  onOpenApplyToProduct,
 }) => {
-  const [copied, setCopied] = useState(false);
   const schedule = calculateProductionSchedule(input);
-
-  const handleCopySummary = () => {
-    const text = `📊 Розрахунок вартості виробу з дерева та епоксидної смоли:
-- Матеріали (деревина, смола, лак, опалубка, метал, упаковка): ${formatMoney(result.materialsCostTotal, currency)}
-${input.includeElectronics ? `- Електроніка та LED (БЖ, стрічка, плата, аксесуари): ${formatMoney(result.totalElectronicsMaterialsCost, currency)}\n- Оплата пайщика (монтаж та пайка електроніки): ${formatMoney(result.soldererLaborCost, currency)}\n` : ''}- Оплата праці (столяр, збірник, дизайнер, менеджер, директор): ${formatMoney(result.laborCostTotal, currency)}
-- ЧПУ фрезерування: ${formatMoney(result.totalCncCost, currency)}${input.includeRouterBitCost !== false ? ` (верстат: ${formatMoney(result.cncMachineCost, currency)}, оператор: ${formatMoney(result.cncOperatorCost, currency)}, амортизація фрези: ${formatMoney(result.routerBitDepreciationPerProduct, currency)})` : ''}
-- Амортизація та комунальні платежі: ${formatMoney(result.totalOverheadCost, currency)}
-- AI-контент для продажу (GPT фото 20 шт + Runway промо-відео): ${formatMoney(result.totalAiMediaCostUah, currency)} ($${result.totalAiMediaCostUsd.toFixed(2)})
-- Накладні з борду витрат (ШІ+Railway+інше на одиницю): ${formatMoney(result.expenseBoardOverheadCostUah, currency)} ($${result.expenseBoardOverheadCostUsd.toFixed(2)})
-- Доставка клієнту: ${formatMoney(result.finalDeliveryCost, currency)}
----------------------------------------------
-🏷️ Повна собівартість: ${formatMoney(result.fullCostPrice, currency)}
-💰 Чистий прибуток (${input.profitMarginPercent}%): ${formatMoney(result.netProfit, currency)}
-🏛️ Податки (${input.taxRatePercent}%): ${formatMoney(result.taxAmount, currency)}
-✨ РЕКОМЕНДОВАНА ЦІНА ДЛЯ КЛІЄНТА: ${formatMoney(result.totalSellingPrice, currency)}`;
-
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
 
   // Circular gauge value (percentage of profit vs total)
   const profitRadius = 38;
@@ -93,89 +44,8 @@ ${input.includeElectronics ? `- Електроніка та LED (БЖ, стрі�
           </h2>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpenTemplates}
-            className="px-3.5 py-2 rounded-xl neo-pill-default text-xs font-medium flex items-center gap-1.5 cursor-pointer active:scale-95 text-cyan-300 hover:text-white"
-            title="Переглянути або обрати шаблон виробу за категоріями"
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Шаблони</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onSaveCalculation}
-            className="px-3.5 py-2 rounded-xl neo-pill-default text-xs font-medium flex items-center gap-1.5 cursor-pointer active:scale-95 hover:text-white"
-            title="Зберегти поточні налаштування в мої шаблони"
-          >
-            <Save className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Зберегти як шаблон</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onExportExcel}
-            className="px-3.5 py-2 rounded-xl neo-pill-default text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
-            title="Експорт повної калькуляції та специфікації BOM в Excel (.xlsx)"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Експорт в Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCopySummary}
-            className="px-3.5 py-2 rounded-xl neo-pill-default text-xs font-medium flex items-center gap-1.5 cursor-pointer active:scale-95"
-          >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-300">Скопійовано!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5 text-slate-300" />
-                <span>Скопіювати</span>
-              </>
-            )}
-          </button>
-
-          {onOpenCurrencySettings && (
-            <button
-              type="button"
-              onClick={onOpenCurrencySettings}
-              className="px-3 py-2 rounded-xl neo-pill-default text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 text-amber-300 hover:text-amber-200 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
-              title="Налаштувати поточний курс валют (USD/EUR) для імпорту"
-            >
-              <Coins className="w-3.5 h-3.5 text-amber-400" />
-              <span>Курс: ${(rates?.USD ?? 41.5).toFixed(1)}</span>
-            </button>
-          )}
-
-          {onOpenApplyToProduct && (
-            <button
-              type="button"
-              onClick={onOpenApplyToProduct}
-              className="px-3.5 py-2 rounded-xl neo-pill-default text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
-              title="Додати підсумок цього розрахунку до ціни опублікованого товару або чорнетки"
-            >
-              <Banknote className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Додати до ціни товару</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={onOpenCommercialOffer}
-            className="px-4 py-2 rounded-xl neo-pill-active text-xs font-semibold flex items-center gap-2 cursor-pointer active:scale-95 shadow-[0_0_20px_rgba(59,130,246,0.6)]"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Комерційна пропозиція (КП)</span>
-          </button>
-        </div>
+        {/* Кнопки керування (Шаблони, Excel, Курс, КП…) переїхали в «Інспектор
+            вузла» адмінки — див. CalculatorNavigator.tsx. */}
       </div>
 
       {/* Main KPI Hero Cards */}

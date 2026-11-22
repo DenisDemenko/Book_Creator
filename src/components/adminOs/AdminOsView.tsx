@@ -32,6 +32,7 @@ import { PrivateStoresPanel } from './PrivateStoresPanel';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { iconForNode } from './nodeIcons';
+import { useAppHeaderHeight } from './useAppHeaderHeight';
 import { AdminPanelView } from '../AdminPanelView';
 import { AdminModerationView } from '../AdminModerationView';
 import { AdminProductsView } from '../AdminProductsView';
@@ -164,6 +165,14 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
    */
   const [models, setModels] = useState<ChatModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
+  /**
+   * Вузол-«гніздо» в колонці інспектора: розділ може покласти туди власні
+   * інструменти (portal). Зараз ним користується «Управління цінами» —
+   * підменю розділів і кнопки калькулятора. Стан, а не ref: розділ має
+   * перемалюватися, коли гніздо з'явиться.
+   */
+  const [inspectorSlot, setInspectorSlot] = useState<HTMLDivElement | null>(null);
+  const appHeaderPx = useAppHeaderHeight();
 
   const active = findNode(activeId);
 
@@ -339,7 +348,7 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
     if (view === 'slab-tables') return <SlabInventoryPanel inventoryOnly={authUser?.role !== 'admin'} />;
     if (view === 'cabinet-facades') return authUser?.role === 'admin' ? <MaterialPricesPanel /> : <SlabInventoryPanel category="cabinet_facade" inventoryOnly />;
     if (view === 'private-stores') return authUser?.role === 'admin' ? <PrivateStoresPanel /> : <p>Потрібен доступ адміністратора.</p>;
-    if (view === 'price-management') return <FurnitureCalculatorPanel />;
+    if (view === 'price-management') return <FurnitureCalculatorPanel inspectorSlot={inspectorSlot} />;
     if (view === 'procurement') return <AdminProcurementView />;
     if (view === 'quality') return <AdminQualityView />;
     if (view === 'core-ai') {
@@ -582,8 +591,14 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
             ) : null}
           </div>
 
-          {/* Інспектор вузла */}
-          <div className="flex flex-col gap-3 border-t border-cyan-400/20 p-4 lg:border-l lg:border-t-0">
+          {/* Інспектор вузла. Внутрішній блок «липкий»: на довгих сторінках
+              (як «Управління цінами») інструменти інспектора лишаються на
+              екрані під час прокрутки, а не відʼїжджають угору. */}
+          <div className="border-t border-cyan-400/20 lg:border-l lg:border-t-0">
+          <div
+            className="flex flex-col gap-3 p-4 lg:sticky lg:top-[var(--os-inspector-top)] lg:max-h-[calc(100vh-var(--os-inspector-top))] lg:overflow-y-auto"
+            style={{ '--os-inspector-top': `${appHeaderPx}px` } as React.CSSProperties}
+          >
             <span className={`${H} text-[9.5px] font-semibold uppercase tracking-[0.16em] text-[rgba(181,217,253,.7)]`}>
               Інспектор вузла
             </span>
@@ -591,7 +606,14 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
               {React.createElement(iconForNode(active.id), { className: 'h-6 w-6 shrink-0 text-cyan-300' })}
               {active.title}
             </span>
-            <p className={`${B} text-[11.5px] leading-[1.5] text-[rgba(214,235,255,.62)]`}>{active.description}</p>
+            {/* «Управління цінами» кладе в інспектор власне підменю й кнопки, тож
+                довгий опис там скорочено до трьох рядків (повний — у підказці). */}
+            <p
+              className={`${B} text-[11.5px] leading-[1.5] text-[rgba(214,235,255,.62)] ${active.id === 'price-management' ? 'lg:line-clamp-3' : ''}`}
+              title={active.id === 'price-management' ? active.description : undefined}
+            >
+              {active.description}
+            </p>
 
             <div className="flex flex-col border-t border-cyan-400/20">
               {inspectorRows.map((row) => (
@@ -604,6 +626,8 @@ export const AdminOsView: React.FC<AdminOsViewProps> = ({ authUser, onOpenPage }
                 </div>
               ))}
             </div>
+            <div ref={setInspectorSlot} data-inspector-slot="1" />
+          </div>
           </div>
         </div>
       )}

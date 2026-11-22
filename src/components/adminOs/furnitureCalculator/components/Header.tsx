@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   const custom = templates.filter((t) => t.isCustom);
 
   return (
-    <header className="sticky top-0 z-30 w-full backdrop-blur-2xl bg-[#080d1a]/85 border-b border-white/10 px-4 lg:px-8 py-3 transition-all">
+    <header className="relative z-30 w-full backdrop-blur-2xl bg-[#080d1a]/85 border-b border-white/10 px-4 lg:px-8 py-3 transition-all">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Brand & Reference Neo-Tactile Look */}
         <div className="flex items-center gap-3">

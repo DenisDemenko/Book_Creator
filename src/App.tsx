@@ -2399,7 +2399,13 @@ function StudioApp() {
           шапку й навігацію. key={currentTab} скидає межу при переході
           на іншу вкладку, тож застосунок відновлюється сам. */}
       <ErrorBoundary key={currentTab}>
-      <div className="flex-1 flex flex-col overflow-hidden">        {/* Експрес-майстер (Wisart Book Crealiry.md §3.4). Прокручується
+      {/* Адмінка прокручується всім документом, а `overflow-hidden` робить
+          цю обгортку «контейнером прокрутки», і тоді жоден `sticky` усередині
+          не тримається (інспектор вузла, липка шапка калькулятора цін).
+          `overflow-x-clip` обрізає так само, але контейнером прокрутки не є.
+          Лише для адмінки: інші вкладки покладаються на overflow-hidden,
+          щоб внутрішні панелі мали власну прокрутку. */}
+      <div className={`flex-1 flex flex-col ${currentTab === 'admin' ? 'overflow-x-clip' : 'overflow-hidden'}`}>        {/* Експрес-майстер (Wisart Book Crealiry.md §3.4). Прокручується
             власним контейнером, бо п'ять кроків не влазять у висоту
             вкладки, а зовнішній контейнер тут із overflow-hidden. */}
         {currentTab === 'express' && (

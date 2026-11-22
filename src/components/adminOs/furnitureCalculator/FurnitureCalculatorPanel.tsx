@@ -1,5 +1,8 @@
 import {ConstructorTariffEditor} from '../ConstructorTariffEditor';
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { MaterialPricesPanel } from '../MaterialPricesPanel';
+import { useAppHeaderHeight } from '../useAppHeaderHeight';
 import { CalculationInput, Currency, ProductTemplate, CurrencyRates } from './types';
 import { PRODUCT_TEMPLATES } from './data/woodPresets';
 import { calculateWoodAndEpoxyCost, DEFAULT_CURRENCY_RATES, updateGlobalCurrencyRates, recalculateImportedMaterials } from './utils/calculator';
@@ -18,6 +21,12 @@ import { ApplyToProductModal } from './components/ApplyToProductModal';
 import { CommercialOfferModal } from './components/CommercialOfferModal';
 import { TemplatesModal } from './components/TemplatesModal';
 import { CurrencySettingsModal } from './components/CurrencySettingsModal';
+import {
+  CALC_SECTIONS,
+  CalculatorInspector,
+  CalculatorMobileNav,
+  useActiveCalcSection,
+} from './components/CalculatorNavigator';
 import './furnitureCalculator.css';
 
 // NOTE: this panel used to persist rates, custom templates and "saved calculations" to
@@ -118,7 +127,16 @@ async function saveFurnitureCalcTemplates(templates: ProductTemplate[]): Promise
   }
 }
 
-export const FurnitureCalculatorPanel: React.FC = () => {
+export interface FurnitureCalculatorPanelProps {
+  /**
+   * Вузол колонки «Інспектор вузла» адмінки. Якщо він є, підменю розділів і
+   * кнопки керування малюються туди (portal) і видні на широкому екрані;
+   * на вузькому — згорнутою панеллю в липкому рядку «Розділи» під шапкою.
+   */
+  inspectorSlot?: HTMLElement | null;
+}
+
+export const FurnitureCalculatorPanel: React.FC<FurnitureCalculatorPanelProps> = ({ inspectorSlot }) => {
   const [templates, setTemplates] = useState<ProductTemplate[]>(PRODUCT_TEMPLATES);
   const [currentPresetId, setCurrentPresetId] = useState<string>(PRODUCT_TEMPLATES[0].id);
   const [input, setInput] = useState<CalculationInput>(PRODUCT_TEMPLATES[0].input);
@@ -132,6 +150,25 @@ export const FurnitureCalculatorPanel: React.FC = () => {
   const [expenseBoardLoaded, setExpenseBoardLoaded] = useState(false);
   const [expenseBoardError, setExpenseBoardError] = useState<string | null>(null);
   const [expenseBoardPeriodLabel, setExpenseBoardPeriodLabel] = useState<string | undefined>(undefined);
+  // Висота липкого рядка «Розділи» (на широкому екрані він схований — 0):
+  // від неї рахуються і відступ після переходу до розділу, і верх смуги,
+  // що визначає «поточний» розділ.
+  const [stickyHeaderPx, setStickyHeaderPx] = useState(0);
+  // Липка шапка калькулятора стоїть під липкою шапкою Студії, тож відступ
+  // при переході — сума обох.
+  const appHeaderPx = useAppHeaderHeight();
+  const { activeId: activeSectionId, goTo: goToSection, presentSections } = useActiveCalcSection(CALC_SECTIONS, appHeaderPx + stickyHeaderPx);
+
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>('[data-calc-sticky-header]');
+    if (!header) return;
+    const measure = () => setStickyHeaderPx(header.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
 
   // Load currency rates & custom templates from the Nova server on mount
   useEffect(() => {
@@ -291,8 +328,27 @@ export const FurnitureCalculatorPanel: React.FC = () => {
   // Real-time cost calculation
   const result = calculateWoodAndEpoxyCost(input, rates);
 
+  const navigatorProps = {
+    sections: presentSections,
+    activeId: activeSectionId,
+    onGo: goToSection,
+    input,
+    result,
+    currency,
+    rates,
+    onOpenTemplates: () => setIsTemplatesModalOpen(true),
+    onSaveAsTemplate: () => setIsTemplatesModalOpen(true),
+    onExportExcel: handleExportToExcel,
+    onOpenCurrencySettings: () => setIsCurrencyModalOpen(true),
+    onOpenApplyToProduct: () => setIsApplyToProductModalOpen(true),
+    onOpenCommercialOffer: () => setIsCommercialOfferOpen(true),
+  };
+
   return (
-    <div className="furniture-calc-scope min-h-screen bg-[#080d1a] text-slate-100 selection:bg-cyan-500 selection:text-black">
+    <div
+      className="furniture-calc-scope min-h-screen bg-[#080d1a] text-slate-100 selection:bg-cyan-500 selection:text-black"
+      style={{ '--calc-sticky-top': `${appHeaderPx}px` } as React.CSSProperties}
+    >
       {/* Background Ambient Glows (Neo-Tactile depth) */}
       <div className="fixed top-10 left-1/4 w-96 h-96 neo-glow-cyan rounded-full pointer-events-none -z-10" />
       <div className="fixed bottom-10 right-1/4 w-[32rem] h-[32rem] neo-glow-blue rounded-full pointer-events-none -z-10" />
@@ -311,14 +367,53 @@ export const FurnitureCalculatorPanel: React.FC = () => {
         onOpenCurrencySettings={() => setIsCurrencyModalOpen(true)}
       />
 
-      <div className="mx-auto max-w-7xl px-4 py-4">
+      {/*
+        Липкий рядок «Розділи» під шапкою Студії. Шапка калькулятора більше не
+        липка: на телефоні разом зі шапкою Студії вона забирала б більшу
+        частину екрана, а на широкому все потрібне вже є в інспекторі.
+        Коли інспектор є (адмінка), рядок видно лише нижче lg.
+      */}
+      <div
+        data-calc-sticky-header="1"
+        className={`sticky top-[var(--calc-sticky-top,0px)] z-30 border-b border-white/10 bg-[#080d1a]/90 px-4 py-2 backdrop-blur-2xl ${inspectorSlot ? 'lg:hidden' : ''}`}
+      >
+        <CalculatorMobileNav {...navigatorProps} />
+      </div>
+
+      {inspectorSlot &&
+        createPortal(
+          <div className="hidden lg:block">
+            <CalculatorInspector {...navigatorProps} />
+          </div>,
+          inspectorSlot,
+        )}
+
+      <div id="calc-tariff-publish" className="mx-auto max-w-7xl px-4 py-4">
         <p className="mb-3 text-xs text-slate-300">Тарифи конструктора: смола з ціни за літр (густина 1,1 кг/л), фініш і решта витрат на м² базового виробу; металеве підстілля за комплект. Породи й ціна слебів задаються на складі; дерев’яні ніжки — окремою ставкою. Податки та маржа включаються в націнку. Публікація замінить ставки для нових розрахунків.</p>
         <button type="button" className="rounded-xl border border-cyan-400/40 px-4 py-3 text-sm text-cyan-300" onClick={async()=>{
           if(!window.confirm('Опублікувати ставки поточного калькулятора для нових розрахунків столів у маркетплейсі?'))return;
           try{const res=await fetch('/api/admin/slab-tables/publish-costs',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({input,rates})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Помилка публікації');showNotification(`Ставки опубліковано. Базова площа: ${data.referenceAreaM2.toFixed(3)} м².`);}catch(e){showNotification(e instanceof Error?e.message:'Не вдалося опублікувати тарифи.');}
         }}>Опублікувати тарифи конструктора столів</button>
       </div>
-      <ConstructorTariffEditor input={input} rates={rates}/>
+      <div id="calc-constructor-tariffs">
+        <ConstructorTariffEditor input={input} rates={rates}/>
+      </div>
+      {/*
+        Спільний довідник плит (ДСП, фанера) і ціни слебів — той самий екран,
+        що й у вузлі «Ціни на ДСП, фанеру, слеби»; тут він поруч із рештою
+        ставок, щоб усе ціноутворення було на одній сторінці.
+      */}
+      <section
+        id="calc-material-prices"
+        aria-label="Довідник цін матеріалів"
+        className="mx-auto my-6 max-w-7xl rounded-2xl border border-cyan-500/30 bg-slate-900 p-5 text-white"
+      >
+        <h2 className="text-xl font-bold">Довідник цін: ДСП, фанера, слеби</h2>
+        <p className="my-2 text-sm text-slate-300">
+          Спільний для конструкторів шаф, тумб і столів. Редагується й тут, і у вузлі «Ціни на ДСП, фанеру, слеби».
+        </p>
+        <MaterialPricesPanel />
+      </section>
       {/* Toast Notification */}
       {notification && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900/90 text-cyan-300 px-4 py-2.5 rounded-2xl neo-card border border-cyan-400/40 text-xs font-mono shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
@@ -329,18 +424,9 @@ export const FurnitureCalculatorPanel: React.FC = () => {
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 lg:px-8 py-6 space-y-8">
         {/* KPI Dashboard (Hero Summary) */}
-        <CostBreakdownDashboard
-          input={input}
-          result={result}
-          currency={currency}
-          onOpenCommercialOffer={() => setIsCommercialOfferOpen(true)}
-          onSaveCalculation={() => setIsTemplatesModalOpen(true)}
-          onExportExcel={handleExportToExcel}
-          onOpenTemplates={() => setIsTemplatesModalOpen(true)}
-          rates={rates}
-          onOpenCurrencySettings={() => setIsCurrencyModalOpen(true)}
-          onOpenApplyToProduct={() => setIsApplyToProductModalOpen(true)}
-        />
+        <div id="calc-summary">
+          <CostBreakdownDashboard input={input} result={result} currency={currency} rates={rates} />
+        </div>
 
         {/* Core Calculation Sections */}
         <div className="space-y-6">
