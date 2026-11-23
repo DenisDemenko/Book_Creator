@@ -455,6 +455,60 @@ def test_private_path_seals_photo_on_the_phone(stack, browser_page, tmp_path):
     assert "Секретна полиця" in page.inner_text("#private-list")
     assert not errors, errors
 
+def test_private_path_is_offered_for_every_kind(stack, browser_page, tmp_path):
+    """Журнал #598: «Де обробити» однаковий для інструкції, курсу (фото й документ), книги з фото й книги зі сторінок.
+    Книга з фото йде на сервер приватно з нотаткою до кадру; до наявної книги — без хмарного ID (книгу обирають на компʼютері)."""
+    url, mock = stack
+    ctx, page = browser_page
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    mock.state.inbox.clear()
+    page.goto(url)
+    if page.locator("#code").count():
+        page.fill("#code", "GF-OK")
+        page.click("button[type=submit]")
+    for card in ["#choose-instruction", "#choose-book", "#choose-manuscript"]:
+        page.goto(url)
+        page.wait_for_selector("#choose, #btn-new", timeout=10000)
+        if not page.locator("#choose").count():
+            page.click("#btn-new")
+            page.wait_for_selector("#choose")
+        page.click(card)
+        page.wait_for_selector("#create-form")
+        assert "На моєму сервері" in page.inner_text("#f-where"), card
+    for source in ["photos", "document"]:
+        page.goto(url)
+        page.wait_for_selector("#choose, #btn-new", timeout=10000)
+        if not page.locator("#choose").count():
+            page.click("#btn-new")
+        page.click("#choose-course")
+        page.click(f"[data-course-source='{source}'], #choose-course-{source}")
+        page.wait_for_selector("#create-form")
+        assert "На моєму сервері" in page.inner_text("#f-where"), source
+
+    # книга з фото — приватно, з нотаткою до кадру
+    page.goto(url)
+    page.wait_for_selector("#choose, #btn-new", timeout=10000)
+    if not page.locator("#choose").count():
+        page.click("#btn-new")
+    page.click("#choose-book")
+    page.wait_for_selector("#create-form")
+    page.select_option("#f-where", "private")
+    page.fill("#f-title", "Люди мого міста")
+    page.click("#create-form button[type=submit]")
+    page.wait_for_selector("#private-draft")
+    assert "Книга з фото" in page.inner_text("#private-draft")
+    page.fill("#pnote-next", "Сусід на лавці під липою")
+    page.set_input_files("#pfile-gal", [_jpeg(tmp_path / "neighbour.jpg", (1200, 900))])
+    page.wait_for_selector("[data-private-state='sent'], [data-private-state='delivered']", timeout=15000)
+    _wait(lambda: len(mock.state.inbox) == 1)
+    assert "Сусід на лавці під липою" in page.inner_text("#pframes")
+    assert page.input_value("#pnote-next") == ""
+    sealed = next(iter(mock.state.inbox.values()))["bytes"]
+    assert "Сусід".encode() not in sealed and "Люди мого міста".encode() not in sealed
+    assert not errors, errors
+
+
 def test_draft_card_studio_action_and_language_switch(stack3, browser_page):
     url, _ = stack3
     base_context, _ = browser_page

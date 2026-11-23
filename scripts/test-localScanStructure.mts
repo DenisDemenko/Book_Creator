@@ -3,8 +3,8 @@
  *
  * Дані — типові тексти, які дає OCR: «--» замість тире, перенесення слів між рядками, номери сторінок, шапки на кожній сторінці.
  */
-import { normalizePages, structureLocally } from '../shared/localScanStructure';
-import { buildPrivateBook, buildPrivateCourse, buildPrivateInstruction } from '../src/utils/localScanBuild';
+import { normalizePages, photoPageText, structureLocally, structurePhotos } from '../shared/localScanStructure';
+import { appendToPrivateBook, buildPrivateBook, buildPrivateCourse, buildPrivateInstruction } from '../src/utils/localScanBuild';
 
 let pass = 0;
 let fail = 0;
@@ -167,6 +167,22 @@ t('дуже довгий рядок без пробілів не вішає ро
   return Date.now() - started < 2000;
 })());
 t('результат не містить нічого, чого не було в тексті: усі заголовки курсу є в джерелі', course.modules.every((m) => COURSE.includes(m.title.replace(/\.$/, ''))) && course.modules.every((m) => m.lessons.every((l) => COURSE.includes(l.title))));
+
+console.log('\nКадри з фото й додавання до наявної книги (журнал #598)');
+t('текст кадру: нотатка автора, потім опис Ollama; порожнє не додається', photoPageText({ note: ' Сусід на лавці ', text: 'Чоловік у кепці.' }) === 'Сусід на лавці\n\nЧоловік у кепці.' && photoPageText({ note: '', text: null }) === '');
+const phBook = structurePhotos({ kind: 'manuscript', title: 'Люди мого міста', pages: [pg(2, 'Пані з квітами біля метро. Продає півонії.'), pg(1, 'Сусід на лавці під липою'), pg(3, '  ')] });
+t('книга з фото: один розділ, кадр = секція за порядком зйомки, порожній кадр пропущено з поясненням',
+  phBook.book!.chapters.length === 1 && phBook.book!.chapters[0].sections.length === 2 && phBook.book!.chapters[0].sections[0].title === 'Сусід на лавці під липою' && phBook.book!.chapters[0].sections[1].title === 'Пані з квітами біля метро' && phBook.notes.length === 1);
+const phCourse = structurePhotos({ kind: 'course', title: 'Гончарство', audience: 'початківці', pages: [pg(1, 'Центруємо глину'), pg(2, 'Витягуємо стінки')] });
+t('курс за фото: модуль «Майстер-клас», кадр = урок, аудиторія з форми', phCourse.course!.modules.length === 1 && phCourse.course!.modules[0].lessons.map((l) => l.title).join('|') === 'Центруємо глину|Витягуємо стінки' && phCourse.course!.audience[0] === 'початківці');
+t('без жодної нотатки — нічого не складається, є пояснення', !structurePhotos({ kind: 'course', pages: [pg(1, '')] }).course && structurePhotos({ kind: 'course', pages: [pg(1, '')] }).notes.length === 1);
+const longTitle = structurePhotos({ kind: 'manuscript', pages: [pg(1, 'Дуже довга перша фраза нотатки, яка ніяк не вміщується в заголовок секції книги і має бути обрізана')] }).book!.chapters[0].sections[0].title;
+t('довгий перший рядок обрізається до заголовка з «…»', longTitle.length <= 71 && longTitle.endsWith('…'), longTitle);
+const baseBook = buildPrivateBook(phBook.book!, { storeId: 'pstore_x', author: 'А', now: new Date('2026-11-22T10:00:00Z') });
+const appended = appendToPrivateBook(baseBook, { title: 'x', chapters: [{ title: 'Нові сторінки', sections: [{ title: 'С1', content: 'Текст' }] }] }, { now: new Date('2026-11-22T11:00:00Z') });
+t('додавання до наявної приватної книги: старі розділи на місці, новий — у кінці з наступним порядком і тим самим bookId',
+  appended.chapters.length === baseBook.chapters.length + 1 && appended.chapters[0] === baseBook.chapters[0] && appended.chapters.at(-1)!.title === 'Нові сторінки' && appended.chapters.at(-1)!.order === baseBook.chapters.length + 1 && appended.chapters.at(-1)!.bookId === baseBook.id && appended.privateStore?.storeId === 'pstore_x');
+t('ідентифікатори нових розділів не збігаються зі старими', new Set(appended.chapters.map((c) => c.id)).size === appended.chapters.length);
 
 console.log(`\n${pass} пройдено, ${fail} не пройдено`);
 process.exitCode = fail ? 1 : 0;

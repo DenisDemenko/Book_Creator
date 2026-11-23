@@ -103,8 +103,9 @@ async function downscale(file, maxSide) {
 
 /* ---------- навігація ---------- */
 function go(view) {
+  if (state.view === 'prototype' && view !== 'prototype') leavePrototype();
   state.view = view; clearTimeout(pollTimer);
-  document.getElementById('btn-back').hidden = view !== 'draft' && view !== 'private-draft';
+  document.getElementById('btn-back').hidden = view !== 'draft' && view !== 'private-draft' && view !== 'prototype';
   document.getElementById('btn-logout').hidden = !state.user;
   render();
 }
@@ -113,7 +114,7 @@ function render(force) {
   if (state.editing && state.view === 'draft') { state.needsRender = true; return; }
   state.needsRender = false;
   app.replaceChildren();
-  const v = { pair: viewPair, choose: viewChoose, 'choose-course': viewChooseCourse, list: viewList, create: viewCreate, draft: viewDraft, 'private-draft': viewPrivateDraft, boot: () => h('p', { class: 'muted', text: tr('Завантаження…') }), offline: viewOffline }[state.view];
+  const v = { pair: viewPair, choose: viewChoose, 'choose-course': viewChooseCourse, list: viewList, prototype: viewPrototype, create: viewCreate, draft: viewDraft, 'private-draft': viewPrivateDraft, boot: () => h('p', { class: 'muted', text: tr('Завантаження…') }), offline: viewOffline }[state.view];
   titleEl.textContent = state.view === 'draft' && state.draft ? (state.draft.title || tr('Чернетка без назви')) : state.view === 'private-draft' && state.privateDraft ? (state.privateDraft.title || tr('Приватна чернетка')) : 'GrabFusion';
   app.append(v());
 }
@@ -211,10 +212,200 @@ const photoBook = (draft) => draft?.kind === 'book' && !!draft.newBookTitle;
 const textPages = (d) => !!d && (d.kind === 'manuscript' || (d.kind === 'course' && d.courseSource === 'document'));
 const kindLabel = (d) => photoBook(d) ? tr('Книга з фото') : (tr(KIND[d.kind]) || d.kind) + (d.kind === 'course' && d.courseSource === 'document' ? tr(' · скан документа') : '');
 const STATUS = { collecting: 'збір кадрів', structured: 'є структура', written: 'текст написано', submitted: 'відправлено' };
+/* ---------- герой із фото ---------- */
+const prototypeBase = '/character-prototypes';
+let prototypeForm = null;
+const prototypeBookPath = (form) => prototypeBase + '/books/' + encodeURIComponent(form.bookId);
+
+function leavePrototype() {
+  if (prototypeForm?.preview?.startsWith('blob:')) URL.revokeObjectURL(prototypeForm.preview);
+  prototypeForm = null;
+}
+
+async function openPrototype(bookHint = '') {
+  leavePrototype();
+  const form = prototypeForm = {
+    bookId: '', books: null, library: null, source: null, preview: '', note: '', name: '',
+    visible: '', fiction: '', jobId: '', busy: '', error: '', saved: null,
+  };
+  go('prototype');
+  try {
+    form.books = (await api('GET', prototypeBase + '/books')).books;
+    if (form.books.some((book) => book.id === bookHint)) form.bookId = bookHint;
+    else if (bookHint) form.error = tr('Спершу збережіть книгу у Студії під тим самим обліковим записом.');
+    else if (form.books.length === 1) form.bookId = form.books[0].id;
+  } catch (error) { form.error = error.message; }
+  if (prototypeForm === form && state.view === 'prototype') render();
+}
+
+function resetPrototypeResult(form) {
+  form.jobId = '';
+  form.visible = '';
+  form.fiction = '';
+  form.error = '';
+}
+
+function choosePrototypePhoto(form, source, preview) {
+  if (form.preview.startsWith('blob:')) URL.revokeObjectURL(form.preview);
+  form.source = source;
+  form.preview = preview;
+  resetPrototypeResult(form);
+  render();
+}
+
+async function runPrototypeAction(form, action, work) {
+  if (form.busy) return;
+  form.busy = action;
+  form.error = '';
+  render();
+  try { await work(); }
+  catch (error) { form.error = error.message; }
+  finally {
+    form.busy = '';
+    if (prototypeForm === form && state.view === 'prototype') render();
+  }
+}
+
+function prototypeBody(form) {
+  const body = new FormData();
+  if (form.source.assetId) body.set('assetId', form.source.assetId);
+  else body.set('file', form.source.file, 'prototype.jpg');
+  return body;
+}
+
+async function recognizePrototype(form) {
+  if (!form.bookId || !form.source) return;
+  await runPrototypeAction(form, 'recognize', async () => {
+    const body = prototypeBody(form);
+    body.set('note', form.note);
+    body.set('language', grabLocale() === 'en-GB' ? 'en' : 'uk');
+    let jobId = form.pendingJob;
+    if (!jobId) jobId = (await api('POST', prototypeBookPath(form) + '/describe', body, true)).jobId;
+    form.pendingJob = jobId;
+    for (let poll = 0; poll < 120 && prototypeForm === form && state.view === 'prototype'; poll += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (prototypeForm !== form || state.view !== 'prototype') return;
+      let result;
+      try { result = await api('GET', prototypeBase + '/jobs/' + encodeURIComponent(jobId)); }
+      catch (error) { if (error.status === 404) form.pendingJob = ''; throw error; }
+      if (result.status === 'processing') continue;
+      form.pendingJob = '';
+      if (result.status !== 'ready' || !result.draft) throw new Error(tr('Опис не підготувався. Спробуйте розпізнати ще раз.'));
+      form.jobId = jobId;
+      form.visible = result.draft.visible;
+      form.fiction = result.draft.fiction;
+      return;
+    }
+    if (prototypeForm === form && state.view === 'prototype') throw new Error(tr('Опис ще готується. Натисніть «Розпізнати», щоб перевірити знову.'));
+  });
+}
+
+async function savePrototype(form) {
+  if (!form.jobId || !form.source) return;
+  await runPrototypeAction(form, 'save', async () => {
+    const body = prototypeBody(form);
+    for (const field of ['jobId', 'name', 'visible', 'fiction']) body.set(field, form[field]);
+    form.saved = await api('POST', prototypeBookPath(form) + '/save', body, true);
+    if (form.preview.startsWith('blob:')) URL.revokeObjectURL(form.preview);
+    form.preview = '';
+    form.source = null;
+  });
+}
+
+function viewPrototype() {
+  const form = prototypeForm;
+  const heading = h('h2', { text: tr('Герой з фото') });
+  const live = { role: 'status', 'aria-live': 'polite' };
+  if (form.saved) {
+    return h('section', { class: 'card' }, heading,
+      h('p', { ...live, text: tr('Героя збережено в «Книга і текст → Герої». Фото є в медіатеці цієї книги.') }),
+      h('button', { class: 'primary', type: 'button', text: tr('Відкрити героя у Студії'), onclick: async () => {
+        if (await ensureStudioOrigin()) location.assign(state.studioOrigin + form.saved.studioUrl);
+      } }));
+  }
+  if (!form.books) return h('section', { class: 'card' }, heading,
+    form.error ? h('p', { class: 'err', role: 'alert', text: form.error }) : h('p', { ...live, text: tr('Завантажуємо книги…') }),
+    form.error && h('button', { type: 'button', text: tr('Спробувати ще'), onclick: () => openPrototype() }));
+  if (!form.books.length) return h('section', { class: 'card' }, heading,
+    h('p', { text: tr('Спершу збережіть книгу у Студії під тим самим обліковим записом.') }));
+
+  const disabled = Boolean(form.busy);
+  const field = (tag, name, label, max) => {
+    const input = h(tag, { id: 'proto-' + name, maxlength: max, disabled, required: name !== 'note' });
+    input.value = form[name];
+    input.addEventListener('input', () => { form[name] = input.value; });
+    return h('label', { for: input.id }, label, input);
+  };
+  const select = h('select', { id: 'proto-book', disabled },
+    h('option', { value: '', text: tr('Виберіть книгу') }),
+    form.books.map(({id, title}) => h('option', { value: id, text: title || id })));
+  select.value = form.bookId;
+  select.addEventListener('change', () => {
+    form.bookId = select.value;
+    form.library = null;
+    form.pendingJob = '';
+    if (form.source?.assetId) choosePrototypePhoto(form, null, '');
+    else { resetPrototypeResult(form); render(); }
+  });
+
+  const filePicker = (id, label, capture) => {
+    const input = h('input', { id, type: 'file', accept: 'image/*', capture, disabled: disabled || !form.bookId });
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      void runPrototypeAction(form, 'photo', async () => {
+        const resized = await downscale(file, 2048);
+        if (prototypeForm !== form) return;
+        form.pendingJob = '';
+        choosePrototypePhoto(form, { file: resized }, URL.createObjectURL(resized));
+      });
+    });
+    return h('span', null, input, h('label', { class: 'btn', for: id, 'aria-disabled': disabled || !form.bookId ? 'true' : null }, label));
+  };
+  const sources = h('div', { class: 'row' },
+    filePicker('proto-camera', tr('Зняти камерою'), 'environment'),
+    filePicker('proto-device', tr('Галерея телефона'), null),
+    h('button', { type: 'button', disabled: disabled || !form.bookId, text: tr('Медіатека книги'), onclick: () =>
+      runPrototypeAction(form, 'library', async () => {
+        form.library = (await api('GET', prototypeBookPath(form) + '/photos')).photos;
+      }) }));
+  const library = form.library && (form.library.length
+    ? h('label', null, tr('Фото в медіатеці'), h('select', { disabled, onchange: (event) => {
+      const assetId = event.target.value;
+      if (!assetId) return;
+      form.pendingJob = '';
+      choosePrototypePhoto(form, { assetId }, 'api' + prototypeBookPath(form) + '/photos/' + encodeURIComponent(assetId));
+    } }, h('option', { value: '', text: tr('Виберіть фото') }),
+    form.library.map(({id, title}) => h('option', { value: id, selected: form.source?.assetId === id, text: title || id }))))
+    : h('p', { text: tr('У медіатеці цієї книги поки немає доступних фото.') }));
+  const review = form.jobId && h('form', { class: 'card', onsubmit: (event) => { event.preventDefault(); void savePrototype(form); } },
+    h('h3', { text: tr('Перевірте й затвердьте опис') }),
+    field('input', 'name', tr('Імʼя вигаданого героя'), 160),
+    field('textarea', 'visible', tr('Що видно на фото'), 2400),
+    field('textarea', 'fiction', tr('Пропозиція характеру вигаданого героя'), 2400),
+    h('button', { class: 'primary', type: 'submit', disabled, text: tr('Зберегти героя') }));
+
+  return h('div', null, h('section', { class: 'card' }, heading,
+    h('p', null, tr('Виберіть фото та книгу. ШІ опише видимі деталі й запропонує характер для вигаданого героя.')),
+    h('p', { class: 'muted', text: tr('Знімайте людей лише з їхньої згоди. ШІ не впізнає особу і не робить висновків про справжню людину: фото — лише відправна точка для вигаданого героя.') }),
+    h('label', { for: select.id }, tr('Книга'), select),
+    sources, library,
+    form.preview && h('div', { class: 'frame' }, photoPreview(form.preview, tr('Фото прототипу'))),
+    field('textarea', 'note', tr('Нотатка автора (необовʼязково)'), 500),
+    h('button', { class: 'primary', type: 'button', disabled: disabled || !form.source || !form.bookId, text: tr('Розпізнати'), onclick: () => recognizePrototype(form) }),
+    form.busy && h('p', { ...live, text: tr(form.busy === 'recognize' ? 'ШІ готує опис героя…' : 'Завантаження…') })),
+    review,
+    form.error && h('p', { class: 'err', role: 'alert', text: form.error }));
+}
+
 function viewList() {
   const box = h('div');
   box.append(h('div', { class: 'row', style: 'margin-bottom:12px' }, h('h2', { class: 'grow', text: tr('Чернетки') }),
     h('button', { class: 'primary', id: 'btn-new', text: tr('Нова чернетка'), onclick: () => go('choose') })));
+  box.append(h('section', { class: 'card' },
+    h('h3', { text: tr('Герой з фото') }),
+    h('p', { class: 'muted', text: tr('Створіть героя для наявної книги за фото прототипу.') }),
+    h('button', { class: 'primary', type: 'button', id: 'btn-character-prototype', text: tr('Додати героя з фото'), onclick: () => openPrototype() })));
   if (!state.drafts.length && !(state.privateDrafts || []).length) box.append(h('p', { class: 'muted', text: tr('Поки порожньо. Натисніть «Нова чернетка» й оберіть, що створюєте: інструкцію, курс або книгу.') }));
   for (const d of state.drafts) {
     const status = textPages(d) && d.status === 'collecting' ? 'збір сторінок' : STATUS[d.status];
@@ -279,6 +470,7 @@ function viewChoose() {
     h('p', { class: 'muted', text: tr('Оберіть, що вийде зі знімків. Далі все так само: знімаєте або скануєте, ШІ розпізнає, ви перевіряєте, і результат лягає в потрібний розділ Studio.') }),
     choiceCard('choose-instruction', '🔧', tr('Інструкція'), tr('Кроки складання чи користування виробом за кадрами й технічною документацією. Результат — експрес-чернетка в майстрі інструкцій Studio.'), () => startNew({ kind: 'instruction' })),
     choiceCard('choose-course', '🎓', tr('Курс (тренінг)'), tr('Навчальний курс за фото майстер-класу або за сканом документа з друкованим чи рукописним текстом. Результат — чернетка в розділі «Курси» Studio: назва, опис, результати, модулі й уроки.'), () => go('choose-course')),
+    choiceCard('choose-character-prototype', '👤', tr('Герой з фото'), tr('Створіть героя для наявної книги за фото прототипу.'), () => openPrototype()),
     choiceCard('choose-book', '📖', tr('Створити книгу'), tr('Збирайте фото й замітки у своєму темпі. Коли будете готові, складіть план і напишіть чернетку книги.'), () => startNew({ kind: 'book' })),
     h('p', { class: 'muted' }, h('button', { class: 'link', id: 'choose-manuscript', type: 'button', text: tr('Набрати книгу зі сторінок рукопису'), onclick: () => startNew({ kind: 'manuscript' }) })),
     privateStoresNote(),
@@ -322,7 +514,7 @@ function viewCreate() {
   const stores = privateStoreReady();
   f.where = h('select', { id: 'f-where' }, h('option', { value: 'cloud', text: tr('☁ У хмарі: розпізнає ШІ (найвища якість, рукопис, фото)') }), h('option', { value: 'private', text: tr('🔒 На моєму сервері: приватно, розпізнає мій комп\u02bcютер') }));
   f.store = h('select', { id: 'f-store', hidden: true }, ...stores.map((st) => h('option', { value: st.id, text: st.name + (st.online ? '' : tr(' (не на звʼязку)')) })));
-  const whereHint = h('p', { class: 'muted', id: 'where-hint', hidden: true, text: tr('Знімки шифруються на телефоні й потрапляють лише на ваш сервер: Studio бачить шифротекст, ШІ не залучається. Підходить для друкованого тексту й чітких сканів; рукопис і фото без тексту краще розпізнає хмара.') });
+  const whereHint = h('p', { class: 'muted', id: 'where-hint', hidden: true, text: tr('Знімки шифруються на телефоні й потрапляють лише на ваш сервер: Studio бачить шифротекст, хмарний ШІ не залучається. Для фото без тексту основою стануть ваші нотатки до кадрів. Книгу, до якої додати сторінки, ви оберете на компʼютері.') });
   f.where.addEventListener('change', () => { const priv = f.where.value === 'private'; whereHint.hidden = !priv; f.store.hidden = !priv || stores.length < 2; });
   const whereBlock = canPrivate ? h('div', { id: 'where-block' }, h('label', { text: tr('Де обробити') }), f.where, f.store, whereHint) : null;
   return h('form', { class: 'card', id: 'create-form', 'data-kind': kind, onsubmit: async (e) => {
@@ -340,7 +532,9 @@ function viewCreate() {
     }
     if (kind === 'instruction') { body.instructionMode = f.mode.value; if (f.model.value.trim()) body.modelCode = f.model.value.trim(); }
     if (canPrivate && f.where.value === 'private') {
-      if (kind === 'manuscript' && f.booktype.value === 'existing') { err.textContent = tr('Приватна книга створюється нова: додавання до наявної книги Studio доступне лише в хмарі.'); return; }
+      // До наявної ПРИВАТНОЇ книги сторінки додаються на компʼютері: Studio не знає приватних книг, тож книгу автор обирає
+      // в «Приватні матеріали → З телефона» (сервер бачить лише свої книги). Номер хмарної книги сюди не передаємо.
+      if (kind === 'manuscript' && f.booktype.value === 'existing') body.appendToExisting = true;
       delete body.bookId;
       try { await startPrivateDraft(body, f.store.value); } catch (e3) { err.textContent = e3.message; }
       return;
@@ -1531,7 +1725,9 @@ async function start(opts) {
   void flushPrivate();
   document.getElementById('btn-logout').hidden = false;
   await openList();
-  if (opts && opts.chooseFirst) go('choose'); // щойно підключили телефон: спершу «що створюємо?»
+  const prototypeBook = new URLSearchParams(location.search).get('characterBook');
+  if (prototypeBook) await openPrototype(prototypeBook);
+  else if (opts && opts.chooseFirst) go('choose'); // щойно підключили телефон: спершу «що створюємо?»
   if (state.queue.length) flushQueue();
 }
 function viewOffline() {

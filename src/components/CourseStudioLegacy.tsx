@@ -41,7 +41,7 @@ import { PickFromMediaLibraryModal } from './PickFromMediaLibraryModal';
 import { CourseGapFillModal } from './CourseGapFillModal';
 import { CourseAddPhotoModal } from './CourseAddPhotoModal';
 import { gapForProblem, photoTargetForProblem, type CourseGap, type CoursePhotoTarget } from '../../shared/courseGapFill';
-import { PrivateBookBadge } from './PrivateBookBadge';
+import { StorageMoveBar } from './StorageMoveBar';
 import {
   PrivateStoreError,
   deletePrivateDoc,
@@ -546,6 +546,63 @@ export const CourseStudioView: React.FC<{
     [loadPrivate]
   );
 
+  /**
+   * Перенесення курсу хмара ↔ локальний сервер (журнал #598) — той самий порядок, що й у книги (App.tsx): спершу запис у нове
+   * місце, перевірка, і лише потім видалення старої копії. Опублікований курс не переносимо: його спершу знімають з вітрини.
+   */
+  const moveCourseToPrivate = async (store: PrivateStoreInfo) => {
+    if (!course) return;
+    if (course.status === 'published' || moderation?.status === 'pending') {
+      throw new Error('Курс опублікований або на модерації. Спершу зніміть його з публікації, потім переносьте.');
+    }
+    const now = new Date().toISOString();
+    const priv: CourseV2 = { ...course, id: privateCourseId(), ownerId: 'local', updatedAt: now, privateStore: { storeId: store.id } };
+    await writePrivateCourse(store.id, priv);
+    const cloudId = course.id;
+    setCourse(priv);
+    setActiveId(priv.id);
+    setDirty(false);
+    try {
+      await api(`/api/courses/${cloudId}`, { method: 'DELETE' });
+    } catch {
+      throw new Error('Курс перенесено на локальний сервер, але хмарну копію видалити не вдалося. Видаліть її зі списку курсів.');
+    } finally {
+      void loadCourses();
+      void loadPrivate();
+    }
+  };
+  const moveCourseToCloud = async () => {
+    if (!course?.privateStore) return;
+    const storeId = course.privateStore.storeId;
+    const privateId = course.id;
+    setActivePrivateMaterial('course', null);
+    let created: CourseV2;
+    try {
+      created = (await api<{ course: CourseV2 }>('/api/courses', { method: 'POST', body: JSON.stringify({ title: course.title || 'Новий курс' }) })).course;
+      const { privateStore: _drop, ...rest } = course;
+      const saved = await api<{ course: CourseV2 }>(`/api/courses/${created.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...rest, id: created.id, ownerId: created.ownerId, status: 'draft', createdAt: created.createdAt }),
+      });
+      created = saved.course;
+    } catch (err) {
+      setActivePrivateMaterial('course', privateId);
+      throw new Error(`Хмара не прийняла курс: ${(err as Error).message}. Курс лишився на локальному сервері.`);
+    }
+    setCourse(created);
+    setActiveId(created.id);
+    setAccess('manage');
+    setDirty(false);
+    try {
+      await deletePrivateDoc(storeId, privateId);
+    } catch {
+      throw new Error('Курс перенесено в хмару, але копію на локальному сервері видалити не вдалося — сервер недоступний.');
+    } finally {
+      void loadCourses();
+      void loadPrivate();
+    }
+  };
+
   const saveCourse = useCallback(async () => {
     if (!course) return;
     setSaving(true);
@@ -1014,7 +1071,9 @@ export const CourseStudioView: React.FC<{
 
   return (
     <div className="w-full h-full min-h-0 flex flex-col px-4 py-4 gap-3">
-      {course.privateStore && <PrivateBookBadge storeId={course.privateStore.storeId} docId={course.id} kind="course" />}
+      {access === 'manage' || course.privateStore ? (
+        <StorageMoveBar kind="course" privateStoreId={course.privateStore?.storeId} docId={course.id} onMoveToPrivate={moveCourseToPrivate} onMoveToCloud={moveCourseToCloud} />
+      ) : null}
       {/* Верхня панель */}
       <div className="flex items-center gap-2 flex-wrap">
         <button

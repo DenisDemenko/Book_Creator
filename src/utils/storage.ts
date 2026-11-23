@@ -389,6 +389,14 @@ async function mirrorBookToServer(book: Book): Promise<void> {
  * збереження дзеркалює книгу на сервер у фоні, і чернетка могла б зібратися з попередньої
  * ревізії — без щойно обраного шаблону. Повертає ревізію сервера або null (гість/збій).
  */
+/**
+ * Забути відому ревізію хмарної копії (журнал #598): після перенесення книги на локальний сервер хмарну копію видалено, і стара
+ * ревізія в памʼяті вкладки інакше «підтвердила» б наступний запис у хмару, навіть якщо його не було.
+ */
+export function forgetServerRevision(bookId: string): void {
+  serverRevisions.delete(bookId);
+}
+
 export async function syncBookToServerNow(book: Book): Promise<number | null> {
   const lean = stripSnapshotPayloads(book);
   await mirrorBookToServer(lean);

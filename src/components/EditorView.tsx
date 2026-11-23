@@ -178,6 +178,7 @@ import { SKILL_MARKER_BY_ID } from '../data/skillMarkers';
 import { CharacterEditModal } from './CharacterEditModal';
 import { AddParticipantsModal } from './AddParticipantsModal';
 import { GenerateCharacterModal } from './GenerateCharacterModal';
+import { GrabfusionConnectModal } from './GrabfusionConnectModal';
 import { HeroJourneyModal } from './HeroJourneyModal';
 import { CoachModal, type CoachSeed } from './CoachModal';
 import { GenerateIllustrationModal } from './GenerateIllustrationModal';
@@ -229,6 +230,7 @@ const HIGHLIGHT_SWATCHES = [
 
 interface EditorViewProps {
   book: Book;
+  grabfusionCharacterId?: string;
   onUpdateBook: (updatedBook: Book, logAction?: string, logDetails?: string) => void;
   activeChapterId: string;
   activeSectionId: string;
@@ -366,6 +368,7 @@ const IconToolBtn: React.FC<{
 
 export const EditorView: React.FC<EditorViewProps> = ({
   book,
+  grabfusionCharacterId,
   onUpdateBook,
   activeChapterId,
   activeSectionId,
@@ -525,6 +528,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
   // Character editing, generation & participant adding modals
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
+  const [showPrototypeTransfer, setShowPrototypeTransfer] = useState(false);
+  const openedGrabfusionCharacter = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!grabfusionCharacterId || openedGrabfusionCharacter.current === grabfusionCharacterId) return;
+    const character = book.characters.find((entry) => entry.id === grabfusionCharacterId);
+    if (character) {
+      openedGrabfusionCharacter.current = character.id;
+      setEditingCharacter(character);
+    }
+  }, [book.characters, grabfusionCharacterId]);
   const [showAddParticipantsModal, setShowAddParticipantsModal] = useState<boolean>(false);
   const [showGenerateHeroModal, setShowGenerateHeroModal] = useState<boolean>(false);
   const [heroToEnhance, setHeroToEnhance] = useState<Character | null>(null);
@@ -4601,6 +4614,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
             <span>{t('editor.generateHero')}</span>
           </button>
 
+          {authUser && !authUser.isGuest && !book.privateStore && (
+            <button
+              type="button"
+              onClick={() => setShowPrototypeTransfer(true)}
+              className="px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 text-[11px] font-bold hover:bg-slate-700"
+            >
+              {uiLang === 'en' ? 'Character from photo' : 'Герой з фото'}
+            </button>
+          )}
+
           <button
             onClick={() => setShowHeroJourney(true)}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 [color:var(--sun-soft)] border border-slate-700 font-bold text-[11px] transition-all shadow-sm active:scale-95"
@@ -7019,6 +7042,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
           <ChevronLeft className="w-4 h-4" />
         </button>
       )}
+
+      {showPrototypeTransfer && <GrabfusionConnectModal characterBookId={book.id} onClose={() => setShowPrototypeTransfer(false)} />}
 
       {/* CHARACTER EDIT MODAL */}
       {editingCharacter && (

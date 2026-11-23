@@ -360,6 +360,30 @@ t('оцінка якості: впевнений текст — good, ненад
 t('заголовок конверта (недовірений) нормалізується: сміття у назві обрізано, невідомий вид — відмова', vinbox.parseHeader({ v: 1, draftId: 'pd_abcdef', kind: 'course', mime: 'image/png', title: '  Назва\u0007 '.repeat(50), order: 5 }).title.length <= 200 && /Невідомий вид/.test(attempt(() => vinbox.parseHeader({ v: 1, draftId: 'pd_abcdef', kind: 'hack', mime: 'image/png' }))));
 t('розпізнавання формату за заголовком: PNG/JPEG розпізнано, текст і «бомба» — відмова', vimage.sniffImage(cleanPng)?.mime === 'image/png' && vimage.sniffImage(cleanJpeg)?.mime === 'image/jpeg' && vimage.sniffImage(Buffer.from('просто текст, не зображення'.repeat(3))) === null && !!vimage.imageProblem(vimage.sniffImage(bomb)));
 
+console.log('\nЧернетки з фото: курс за фото й книга з фото (журнал #598)');
+t('заголовок: книга з фото — це manuscript із photoBook; для інших видів прапор ігнорується',
+  vinbox.parseHeader({ v: 1, draftId: 'pd_abcdef', kind: 'manuscript', photoBook: true, mime: 'image/png' }).photoBook === true &&
+  vinbox.parseHeader({ v: 1, draftId: 'pd_abcdef', kind: 'course', photoBook: true, mime: 'image/png' }).photoBook === false);
+t('isPhotoDraft: курс за фото й книга з фото — так; скан документа й рукопис — ні',
+  vinbox.isPhotoDraft({ kind: 'course', courseSource: 'photos' }) && vinbox.isPhotoDraft({ kind: 'manuscript', photoBook: true }) &&
+  !vinbox.isPhotoDraft({ kind: 'course', courseSource: 'document' }) && !vinbox.isPhotoDraft({ kind: 'manuscript' }));
+const ollamaBefore = ollamaCalls.length;
+const photoCourse = await sendItem(u1, { header: { draftId: 'pd_photo0001', kind: 'course', courseSource: 'photos', title: 'Гончарство', order: 1, note: 'Центруємо глину на кругу', mime: 'image/jpeg' }, image: phoneJpeg });
+const photoPoll1 = await vault.scans.pollOnce();
+await vault.scans.whenIdle();
+const savedOllama = vault.config.ollamaUrl;
+(vault.config as any).ollamaUrl = '';
+const photoBook = await sendItem(u1, { header: { draftId: 'pd_photo0002', kind: 'manuscript', photoBook: true, title: '', newBookTitle: 'Люди мого міста', order: 1, note: 'Сусід на лавці під липою', mime: 'image/jpeg' }, image: phoneJpeg });
+const photoPoll = await vault.scans.pollOnce();
+await vault.scans.whenIdle();
+(vault.config as any).ollamaUrl = savedOllama;
+const pc = vault.db.getDoc('u1', 'scan_pd_photo0001')!.payload;
+const pb = vault.db.getDoc('u1', 'scan_pd_photo0002')!.payload;
+t('обидві чернетки з фото прийнято', photoCourse.status === 201 && photoBook.status === 201 && photoPoll1.stored + photoPoll.stored === 2 && photoPoll.rejected === 0, JSON.stringify(photoPoll));
+t('курс за фото з Ollama: розпізнає Ollama, а не Tesseract', pc.courseSource === 'photos' && pc.pages[0].ocr.engine === 'ollama' && ollamaCalls.length === ollamaBefore + 1, JSON.stringify(pc.pages[0].ocr));
+t('книга з фото без Ollama: знімок не розпізнається автоматично, нотатка автора збережена', pb.photoBook === true && pb.kind === 'manuscript' && pb.pages[0].ocr.status === 'idle' && pb.pages[0].note === 'Сусід на лавці під липою');
+t('назва книги з фото в переліку', vault.db.listDocs('u1', 'scan').some((d: any) => d.meta.title === 'Люди мого міста'), JSON.stringify(vault.db.listDocs('u1', 'scan')));
+
 console.log('\nВідкликання сервера прибирає чергу');
 const lateItem = await sendItem(u1, { header: { draftId: 'pd_draft0003' } });
 t('елемент у черзі до відкликання', lateItem.status === 201 && inboxMod.inboxStats(store.id).pending === 1);

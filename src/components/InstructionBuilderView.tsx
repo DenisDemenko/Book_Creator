@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiPath } from '../utils/basePath';
-import { PrivateBookBadge } from './PrivateBookBadge';
+import { StorageMoveBar } from './StorageMoveBar';
 import { PrivateInstructionsDialog } from './PrivateInstructionsDialog';
 import {
   PrivateStoreError,
+  deletePrivateDoc,
   emitPrivateSync,
   fetchMyPrivateStores,
   getPrivateDoc,
@@ -50,6 +51,7 @@ import {
   instructionCompleteness,
   instructionExportFileName,
   instructionUid,
+  clearInstructionDraft,
   loadInstructionDraft,
   saveInstructionDraft,
 } from '../utils/instructionDraft';
@@ -944,11 +946,48 @@ export const InstructionBuilderView: React.FC<{
     onInstructionBookCreated?.({ title, sections, instruction, ...(illustrations.length ? { illustrations } : {}), ...(doc.pdfLayout ? { designThemeId: doc.pdfLayout.designThemeId } : {}) });
   };
 
+  /**
+   * Перенесення інструкції (журнал #598). «Не приватна» інструкція — чернетка в цьому браузері (localStorage, один слот), тож
+   * дві дороги: браузер → локальний сервер і локальний сервер → браузер. Порядок той самий, що в книги й курсу: спершу запис
+   * у нове місце, потім прибирання старого.
+   */
+  const moveInstructionToPrivate = async (store: PrivateStoreInfo) => {
+    const next: Instruction = { ...doc, updatedAt: new Date().toISOString(), privateStore: { storeId: store.id, docId: privateInstructionId() } };
+    await writePrivateInstruction(next);
+    syncedRef.current = next;
+    clearInstructionDraft();
+    setDoc(next);
+  };
+  const moveInstructionToBrowser = async () => {
+    const ps = doc.privateStore;
+    if (!ps) return;
+    const existing = loadInstructionDraft();
+    if (existing && !existing.privateStore && (existing.title.trim() || existing.steps.some((st) => st.title.trim())) &&
+      !window.confirm(`У цьому браузері вже є чернетка інструкції «${existing.title.trim() || 'без назви'}». Вона буде замінена. Продовжити?`)) return;
+    const { privateStore: _drop, ...rest } = doc;
+    const local: Instruction = { ...rest, updatedAt: new Date().toISOString() };
+    setActivePrivateMaterial('instruction', null);
+    saveInstructionDraft(local);
+    setDoc(local);
+    try {
+      await deletePrivateDoc(ps.storeId, ps.docId);
+    } catch {
+      throw new Error('Інструкцію збережено в цьому браузері, але копію на локальному сервері видалити не вдалося — сервер недоступний.');
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 print:max-w-none print:p-0">
-      {doc.privateStore && (
-        <div className="mb-3 overflow-hidden rounded-xl print:hidden">
-          <PrivateBookBadge storeId={doc.privateStore.storeId} docId={doc.privateStore.docId} kind="instruction" />
+      {!kitBinding && (
+        <div className="mb-3 overflow-hidden rounded-xl print:hidden empty:hidden">
+          <StorageMoveBar
+            kind="instruction"
+            privateStoreId={doc.privateStore?.storeId}
+            docId={doc.privateStore?.docId ?? 'local-draft'}
+            cloudLabel="зберігається в цьому браузері"
+            onMoveToPrivate={moveInstructionToPrivate}
+            onMoveToCloud={moveInstructionToBrowser}
+          />
         </div>
       )}
       <header className="mb-4 flex items-start justify-between gap-3 flex-wrap print:hidden">

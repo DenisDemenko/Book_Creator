@@ -91,3 +91,33 @@ export function buildPrivateBook(book: LocalBook, opts: { storeId: string; autho
   const versionHistory = base.versionHistory.map((v, i) => (i === 0 ? { ...v, comment: note, note, tags: ['Створення', 'Рукопис', 'Локально'] } : v));
   return { ...base, versionHistory, chapters: chapters.length ? chapters : base.chapters, privateStore: { storeId: opts.storeId } };
 }
+
+/**
+ * Сторінки з телефона — у НАЯВНУ приватну книгу (журнал #598): розділи нової частини додаються в кінець, усе інше в книзі
+ * (текст, герої, налаштування, `privateStore`) лишається як було. Так приватний шлях GrabFusion дорівнює хмарному, де
+ * рукопис можна додати до книги за її номером.
+ */
+export function appendToPrivateBook(existing: Book, part: LocalBook, opts: { now: Date }): Book {
+  const nowMs = opts.now.getTime();
+  const iso = opts.now.toISOString();
+  const start = existing.chapters.length;
+  const added = part.chapters.map((ch, ci) => {
+    const chapterId = `chap-${nowMs}-a${ci + 1}`;
+    return {
+      id: chapterId,
+      bookId: existing.id,
+      title: ch.title,
+      order: start + ci + 1,
+      sections: ch.sections.map((s, si): Section => ({
+        id: `sec-${nowMs}-a${ci + 1}-${si + 1}`,
+        chapterId,
+        title: s.title,
+        order: si + 1,
+        content: s.content,
+        wordCount: calculateWordCount(s.content),
+        lastModified: iso,
+      })),
+    };
+  });
+  return { ...existing, chapters: [...existing.chapters, ...added], updatedAt: iso };
+}

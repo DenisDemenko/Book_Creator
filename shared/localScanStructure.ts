@@ -610,3 +610,61 @@ export function structureLocally(input: LocalScanInput): LocalStructureResult {
   const r = buildBook(input, blocks, weak);
   return { kind: 'manuscript', book: r.book, structured: r.structured, stats, notes: r.notes };
 }
+
+// ---------------------------------------------------------------------------
+// Чернетки з ФОТО (журнал #598): курс за фото майстер-класу, книга з фото
+// ---------------------------------------------------------------------------
+
+/**
+ * Текст кадру з фото: нотатка автора, а під нею — опис моделі зору на його комп'ютері (Ollama), якщо він є.
+ * На таких знімках немає тексту, який можна «розкласти» правилами, тож кожен кадр стає окремою одиницею: уроком курсу чи
+ * секцією книги. Порядок кадрів — порядок зйомки. Нічого не вигадується: порожній кадр (ні нотатки, ні опису) пропускається.
+ */
+export function photoPageText(page: { note?: string | null; text?: string | null }): string {
+  return [page.note, page.text].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean).join('\n\n');
+}
+
+const firstLineTitle = (text: string, fallback: string): string => {
+  const firstLine = text.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  // Заголовок — перше речення першого рядка: «Пані з квітами біля метро. Продає півонії.» → «Пані з квітами біля метро».
+  const line = firstLine.split(/(?<=[.!?…])\s+/)[0] ?? '';
+  if (!line) return fallback;
+  const clean = line.replace(/[.!?…:;,]+$/, '');
+  return clean.length <= 70 ? clean : `${clean.slice(0, 67).replace(/\s+\S*$/, '')}…`;
+};
+
+export function structurePhotos(input: { kind: 'course' | 'manuscript'; title?: string; audience?: string; pages: ScanPageText[] }): LocalStructureResult {
+  const pages = [...input.pages].sort((a, b) => a.order - b.order).map((p) => p.text.trim());
+  const filled = pages.map((text, i) => ({ text, n: i + 1 })).filter((p) => p.text);
+  const stats = { headings: 0, steps: 0, paragraphs: filled.length, characters: filled.reduce((n, p) => n + p.text.length, 0) };
+  const skipped = pages.length - filled.length;
+  const notes = skipped ? [`Кадрів без нотатки й опису: ${skipped}. Їх пропущено — допишіть нотатку, щоб вони потрапили в матеріал.`] : [];
+  if (!filled.length) {
+    return { kind: input.kind, structured: false, stats, notes: ['Ні нотаток, ні опису кадрів немає: допишіть, що на фото, або розпізнайте кадри через Ollama.'] };
+  }
+  if (input.kind === 'course') {
+    return {
+      kind: 'course',
+      structured: false,
+      stats,
+      notes,
+      course: {
+        title: input.title || 'Курс за фото',
+        summary: '',
+        outcomes: [],
+        audience: input.audience ? [input.audience] : [],
+        modules: [{ title: 'Майстер-клас', summary: '', lessons: filled.map((p) => ({ title: firstLineTitle(p.text, `Крок ${p.n}`), body: p.text, topics: [] })) }],
+      },
+    };
+  }
+  return {
+    kind: 'manuscript',
+    structured: false,
+    stats,
+    notes,
+    book: {
+      title: input.title || 'Книга з фото',
+      chapters: [{ title: 'Нотатки з фото', sections: filled.map((p) => ({ title: firstLineTitle(p.text, `Кадр ${p.n}`), content: p.text })) }],
+    },
+  };
+}

@@ -8,18 +8,21 @@ import {
   fetchScanEngines,
   getPrivateAsset,
   getPrivateDoc,
+  listPrivateDocs,
   putPrivateDoc,
   recognizeScanPage,
   saveScanPageText,
   setActivePrivateMaterial,
+  type PrivateDocSummary,
   type PrivateStoreInfo,
   type ScanDraft,
   type ScanEngine,
   type ScanEngines,
   type ScanPage,
 } from '../utils/privateStore';
-import { structureLocally, type LocalStructureResult } from '../../shared/localScanStructure';
-import { buildPrivateBook, buildPrivateCourse, buildPrivateInstruction } from '../utils/localScanBuild';
+import { photoPageText, structureLocally, structurePhotos, type LocalStructureResult } from '../../shared/localScanStructure';
+import { appendToPrivateBook, buildPrivateBook, buildPrivateCourse, buildPrivateInstruction } from '../utils/localScanBuild';
+import type { Book } from '../types';
 
 /**
  * «Вхідні з телефона» (журнал #550): чернетка зі знімків, що телефон передав на ваш сервер запечатаними. Тут автор перевіряє
@@ -35,6 +38,15 @@ const QUALITY_LABEL: Record<string, { text: string; tone: string }> = {
 };
 const KIND_LABEL: Record<ScanDraft['kind'], string> = { course: 'Курс', instruction: 'Інструкція', manuscript: 'Книга' };
 const ENGINE_LABEL: Record<ScanEngine, string> = { tesseract: 'Tesseract', ollama: 'Ollama' };
+
+/**
+ * Чернетка з фото (курс за фото майстер-класу, книга з фото, журнал #598): кадр — не сторінка тексту. Його текст — нотатка
+ * автора з телефона плюс опис Ollama (якщо є), а розкладання — «кадр = урок / секція» (structurePhotos), а не правила заголовків.
+ */
+const isPhotoDraft = (d: ScanDraft | null): boolean =>
+  !!d && ((d.kind === 'course' && d.courseSource === 'photos') || (d.kind === 'manuscript' && d.photoBook === true));
+const initialText = (draft: ScanDraft, page: ScanPage): string =>
+  isPhotoDraft(draft) && !page.textEdited ? photoPageText({ note: page.note, text: page.ocr.text }) : page.ocr.text ?? '';
 
 const newId = (prefix: string): string => {
   const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -79,7 +91,7 @@ export function PrivateScanReview({
         setDraft(payload);
         setTexts((prev) => {
           const next = { ...prev };
-          for (const p of payload.pages) if (!dirtyRef.current.has(p.pageId) || next[p.pageId] === undefined) next[p.pageId] = p.ocr.text ?? '';
+          for (const p of payload.pages) if (!dirtyRef.current.has(p.pageId) || next[p.pageId] === undefined) next[p.pageId] = initialText(payload, p);
           return next;
         });
         if (initial) setError(null);
@@ -181,8 +193,31 @@ export function PrivateScanReview({
       await load();
     });
 
+  // Куди класти сторінки книги: нова приватна книга чи наявна (лише книги з ЦЬОГО сервера — Studio їх не бачить).
+  const [targetBookId, setTargetBookId] = useState('');
+  const [privateBooks, setPrivateBooks] = useState<PrivateDocSummary[]>([]);
+  useEffect(() => {
+    if (draft?.kind !== 'manuscript') return;
+    let cancelled = false;
+    void listPrivateDocs(store.id, 'book')
+      .then((docs) => !cancelled && setPrivateBooks(docs))
+      .catch(() => !cancelled && setPrivateBooks([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [draft?.kind, store.id]);
+
+  const photo = isPhotoDraft(draft);
   const structure: LocalStructureResult | null = useMemo(() => {
     if (!draft) return null;
+    if (isPhotoDraft(draft) && (draft.kind === 'course' || draft.kind === 'manuscript')) {
+      return structurePhotos({
+        kind: draft.kind,
+        title: draft.title || draft.newBookTitle || '',
+        audience: draft.audience,
+        pages: draft.pages.map((p) => ({ order: p.order, text: texts[p.pageId] ?? initialText(draft, p) })),
+      });
+    }
     return structureLocally({
       kind: draft.kind,
       title: draft.title || (draft.kind === 'manuscript' ? draft.newBookTitle : ''),
@@ -221,6 +256,19 @@ export function PrivateScanReview({
           meta: { title: title(ins.title), docType: ins.docType, steps: ins.steps.filter((s) => s.title.trim()).length, updatedAt: ins.updatedAt },
           payload: ins as unknown as Record<string, unknown>,
         });
+      } else if (draft.kind === 'manuscript' && structure.book && targetBookId) {
+        // Додати до наявної приватної книги: читаємо її з сервера (з ревізією), дописуємо розділи в кінець і пишемо назад.
+        kind = 'book';
+        const existing = (await getPrivateDoc(store.id, targetBookId)).payload as unknown as Book;
+        if (!existing || existing.id !== targetBookId || !Array.isArray(existing.chapters)) throw new Error('Обрану книгу на локальному сервері не вдалося прочитати.');
+        const book = appendToPrivateBook({ ...existing, privateStore: { storeId: store.id } }, structure.book, { now });
+        id = book.id;
+        await putPrivateDoc(store.id, {
+          id,
+          kind,
+          meta: { title: title(book.title), status: book.status, chapters: book.chapters.length, updatedAt: now.toISOString() },
+          payload: book as unknown as Record<string, unknown>,
+        });
       } else if (draft.kind === 'manuscript' && structure.book) {
         kind = 'book';
         const book = buildPrivateBook(structure.book, { storeId: store.id, author: '', now });
@@ -248,6 +296,7 @@ export function PrivateScanReview({
   const ollama = engines?.ollama;
   const anyPoor = !!draft && draft.pages.some((p) => p.ocr.status === 'done' && p.ocr.engine === 'tesseract' && (p.ocr.quality === 'poor' || p.ocr.quality === 'fair'));
   const done = draft ? draft.pages.filter((p) => p.ocr.status === 'done').length : 0;
+  const hasPhotoText = !!draft && draft.pages.some((p) => (texts[p.pageId] ?? initialText(draft, p)).trim());
 
   return (
     <div data-private-scan-review className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm overflow-y-auto p-3 sm:p-6" role="dialog" aria-modal="true">
@@ -304,6 +353,32 @@ export function PrivateScanReview({
                 </select>
               </label>
             </div>
+
+            {photo && (
+              <p className="text-xs text-sky-100 rounded-lg bg-sky-500/10 border border-sky-500/30 p-2.5" data-scan-photo-hint>
+                {draft.kind === 'course' ? 'Курс за фото' : 'Книга з фото'}: на кадрах немає тексту, тож кожен кадр стає окремим{' '}
+                {draft.kind === 'course' ? 'уроком' : 'фрагментом книги'}. Текст кадру — ваша нотатка з телефона
+                {ollama?.available ? ' і опис моделі Ollama на цьому комп’ютері' : ''}. Допишіть його нижче, якщо треба.
+              </p>
+            )}
+
+            {draft.kind === 'manuscript' && (
+              <label className="block text-[11px] text-slate-400" data-scan-target>
+                Куди додати
+                <select
+                  value={targetBookId}
+                  onChange={(e) => setTargetBookId(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-slate-100"
+                >
+                  <option value="">Нова приватна книга</option>
+                  {privateBooks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      До книги «{b.meta.title || 'Без назви'}»
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {draft.consumed && (
               <p className="text-xs text-emerald-200 rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-2.5">
@@ -468,12 +543,14 @@ export function PrivateScanReview({
               <button
                 type="button"
                 onClick={() => void create()}
-                disabled={busy !== null || done === 0 || working}
+                disabled={busy !== null || (photo ? !hasPhotoText : done === 0) || working}
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 disabled:opacity-40 flex items-center gap-1.5"
                 data-scan-create
               >
                 {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                Створити приватн{draft.kind === 'manuscript' ? 'у книгу' : draft.kind === 'course' ? 'ий курс' : 'у інструкцію'}
+                {draft.kind === 'manuscript' && targetBookId
+                  ? 'Додати до приватної книги'
+                  : `Створити приватн${draft.kind === 'manuscript' ? 'у книгу' : draft.kind === 'course' ? 'ий курс' : 'у інструкцію'}`}
               </button>
               <button type="button" onClick={() => void load()} className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1.5">
                 <RefreshCw className="w-3.5 h-3.5" /> Оновити

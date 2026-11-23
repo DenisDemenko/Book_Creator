@@ -9,8 +9,8 @@ import { parseCreativeBiblePath, parseCreativeAccessPath, parseCreativeWorkspace
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initialBookData } from './data/initialBook';
 import { buildStarterBook, withoutDemoContent } from './utils/starterBook';
-import { setActivePrivateMaterial, setPendingPrivateOpen, takePendingPrivateStore } from './utils/privateStore';
-import { PrivateBookBadge } from './components/PrivateBookBadge';
+import { deletePrivateDoc, emitPrivateSync, putPrivateDoc, setActivePrivateMaterial, setPendingPrivateOpen, takePendingPrivateStore, type PrivateStoreInfo } from './utils/privateStore';
+import { StorageMoveBar } from './components/StorageMoveBar';
 import { loadActiveOntology } from './utils/ontologyClient';
 import { Book, NavigationTab, AuditLogEntry, UserRole, BookVersionSnapshot, HeroArcState } from './types';
 import { HeaderNav } from './components/HeaderNav';
@@ -96,7 +96,10 @@ import { migrateImageWrapDefaults } from './utils/wrapMigration';
 import {
   loadBook,
   saveBook,
+  syncBookToServerNow,
+  forgetServerRevision,
   cacheBookFromServer,
+  cacheBookLocally,
   fetchServerBook,
   loadMeta,
   saveMeta,
@@ -281,6 +284,7 @@ function StudioApp() {
   const initialRouteRef = useRef(parseAppPath(window.location.pathname, API_BASE));
   const entrySearch = useRef(new URLSearchParams(window.location.search)).current;
   const openImportedBook = entrySearch.get('from') === 'grabfusion' && initialRouteRef.current?.tab === 'editor';
+  const grabfusionCharacterId = openImportedBook ? entrySearch.get('grabfusionCharacter') || undefined : undefined;
   const phoneInboxRef = useRef(entrySearch.get('tab') === 'inbox' &&
     window.location.pathname.replace(/\/$/, '').endsWith('/media'));
   const inboxBookId = phoneInboxRef.current ? entrySearch.get('bookId') : null;
@@ -877,18 +881,32 @@ function StudioApp() {
   // A freshly imported book can exist on the server before the phone has a local copy.
   useEffect(() => {
     if (!awaitingRoutedBook || !routedBookId || isHydrating) return;
-    if (book.id === routedBookId) { setAwaitingRoutedBook(false); return; }
+    if (book.id === routedBookId && (!grabfusionCharacterId || book.characters?.some((entry) => entry.id === grabfusionCharacterId))) {
+      setAwaitingRoutedBook(false);
+      return;
+    }
     if (auth.loading || !auth.user || auth.user.isGuest) return;
     const controller = new AbortController();
     (async () => {
       try {
         const { book: routed, revision } = await fetchServerBook(routedBookId, controller.signal);
         if (controller.signal.aborted) return;
-        await cacheBookFromServer(routed, revision);
+        let selected = routed;
+        if (grabfusionCharacterId) {
+          const imported = routed.characters?.find((entry) => entry.id === grabfusionCharacterId);
+          if (!imported) throw new Error('Imported character is absent from this book.');
+          const local = await loadBook(routed.id);
+          if (controller.signal.aborted) return;
+          if (local) {
+            // The destination browser may hold edits absent from the server snapshot.
+            selected = { ...local, characters: [...(local.characters ?? []).filter((entry) => entry.id !== imported.id), imported] };
+            await cacheBookLocally(selected);
+          } else await cacheBookFromServer(routed, revision);
+        } else await cacheBookFromServer(routed, revision);
         if (controller.signal.aborted) return;
-        setBook(routed);
-        setActiveChapterId(routed.chapters[0]?.id || '');
-        setActiveSectionId(routed.chapters[0]?.sections[0]?.id || '');
+        setBook(selected);
+        setActiveChapterId(selected.chapters[0]?.id || '');
+        setActiveSectionId(selected.chapters[0]?.sections[0]?.id || '');
         setCurrentTab(phoneInboxRef.current ? 'media' : 'editor');
       } catch {
         if (controller.signal.aborted) return;
@@ -901,7 +919,7 @@ function StudioApp() {
       }
     })();
     return () => controller.abort();
-  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang]);
+  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang, grabfusionCharacterId]);
 
   // Роль користувача приходить із сервера разом із профілем — окрім
   // випадку, коли роль для ЦІЄЇ книги зафіксована прийнятим cowork-
@@ -941,7 +959,10 @@ function StudioApp() {
     );
     if (!path) return;
     const currentUrl = new URL(window.location.href);
-    if (openImportedBook) currentUrl.searchParams.delete('from');
+    if (openImportedBook) {
+      currentUrl.searchParams.delete('from');
+      currentUrl.searchParams.delete('grabfusionCharacter');
+    }
     if (phoneInboxRef.current) {
       currentUrl.searchParams.delete('tab');
       currentUrl.searchParams.delete('bookId');
@@ -1024,6 +1045,58 @@ function StudioApp() {
     setActivePrivateMaterial('book', guarded ? book.id : null);
     return () => setActivePrivateMaterial('book', null);
   }, [book.id, book.privateStore?.storeId, currentTab]);
+
+  /**
+   * Перенесення відкритої книги хмара ↔ локальний сервер (журнал #598). Порядок важливий:
+   *  - на сервер: спершу запис на локальний сервер, потім книга стає приватною (охоронець блокує подальші записи в хмару),
+   *    і лише потім видаляється хмарна копія (DELETE вмісту не несе, охоронець його пропускає);
+   *  - у хмару: охоронця знімаємо, книгу записуємо в хмару й переконуємося, що запис відбувся, і лише потім прибираємо копію
+   *    на локальному сервері. Якщо будь-який крок упав — матеріал лишається там, де був, і жодна копія не губиться.
+   */
+  const moveBookToPrivate = async (store: PrivateStoreInfo) => {
+    const at = new Date().toISOString();
+    const priv: Book = { ...book, privateStore: { storeId: store.id }, updatedAt: at };
+    await putPrivateDoc(store.id, {
+      id: priv.id,
+      kind: 'book',
+      meta: { title: priv.title || 'Без назви', status: priv.status, chapters: priv.chapters?.length ?? 0, updatedAt: at },
+      payload: priv as unknown as Record<string, unknown>,
+    });
+    await cacheBookLocally(priv);
+    setActivePrivateMaterial('book', priv.id);
+    setBook(priv);
+    const res = await fetch(`/api/books/${encodeURIComponent(priv.id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => null);
+    forgetServerRevision(priv.id);
+    if (!res || (!res.ok && res.status !== 404)) {
+      throw new Error('Книгу перенесено на локальний сервер, але хмарну копію видалити не вдалося. Видаліть її на головній сторінці («Видалити з хмари»).');
+    }
+    // Смуга над редактором з’являється вже після запису: повідомляємо їй, що запис на сервер відбувся.
+    window.setTimeout(() => emitPrivateSync({ storeId: store.id, id: priv.id, status: 'synced' }), 80);
+    setSaveToast(`Книга тепер лише на сервері «${store.name}».`);
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+  const moveBookToCloud = async () => {
+    const storeId = book.privateStore?.storeId;
+    if (!storeId) return;
+    const { privateStore: _drop, ...rest } = book;
+    const cloud: Book = { ...rest, updatedAt: new Date().toISOString() };
+    setActivePrivateMaterial('book', null);
+    forgetServerRevision(cloud.id);
+    const revision = await syncBookToServerNow(cloud);
+    if (revision === null) {
+      setActivePrivateMaterial('book', book.id);
+      throw new Error('Хмара не прийняла книгу (немає звʼязку чи бракує місця). Книга лишилась на локальному сервері.');
+    }
+    await cacheBookLocally(cloud);
+    setBook(cloud);
+    try {
+      await deletePrivateDoc(storeId, cloud.id);
+    } catch {
+      throw new Error('Книгу перенесено в хмару, але копію на локальному сервері видалити не вдалося — сервер недоступний. Видаліть її пізніше в «Приватні матеріали».');
+    }
+    setSaveToast('Книга тепер у хмарі Studio.');
+    setTimeout(() => setSaveToast(null), 4000);
+  };
 
   const persistBook = useCallback(async (bookToSave: Book): Promise<boolean> => {
     setSaveState('saving');
@@ -2231,7 +2304,9 @@ function StudioApp() {
         onOpenMobileNav={() => setMobileNavOpen(true)}
       />
 
-      {book.privateStore && !TABS_WITHOUT_OPEN_BOOK.has(currentTab) && <PrivateBookBadge storeId={book.privateStore.storeId} docId={book.id} />}
+      {!TABS_WITHOUT_OPEN_BOOK.has(currentTab) && !book.accessRestricted && !(auth.user?.isGuest ?? true) && (
+        <StorageMoveBar kind="book" privateStoreId={book.privateStore?.storeId} docId={book.id} onMoveToPrivate={moveBookToPrivate} onMoveToCloud={moveBookToCloud} />
+      )}
 
       {/* Стійкий банер помилки сховища — не зникає сам, бо це втрата даних */}
       {storageError && (
@@ -2469,6 +2544,7 @@ function StudioApp() {
         {currentTab === 'editor' && (
           <EditorView
             book={book}
+            grabfusionCharacterId={book.id === routedBookId ? grabfusionCharacterId : undefined}
             onUpdateBook={handleUpdateBook}
             activeChapterId={activeChapterId}
             activeSectionId={activeSectionId}

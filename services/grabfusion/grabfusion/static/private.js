@@ -44,7 +44,11 @@ async function pDelDraft(draftId) {
 
 /* ---------- чи доступний приватний шлях ---------- */
 const privateStoreReady = () => (state.privateStores || []).filter((s) => s.inbox && s.inboxKey);
-const privateAvailableFor = (kind, courseSource) => privateStoreReady().length > 0 && !(kind === 'course' && courseSource === 'photos');
+// Однаковий вибір «у хмарі / на моєму сервері» для всіх видів (журнал #598): інструкція, курс (фото чи документ), книга з фото,
+// книга зі сторінок рукопису. Книга з фото їде на сервер як manuscript із photoBook (сервер знає лише course|instruction|manuscript);
+// для фото основою тексту є нотатки автора до кадрів, а розпізнає (якщо налаштовано) Ollama на комп'ютері автора.
+const privateAvailableFor = () => privateStoreReady().length > 0;
+const isPrivatePhotoDraft = (d) => !!d && ((d.kind === 'course' && d.courseSource === 'photos') || d.photoBook === true);
 const newDraftId = () => 'pd_' + NovaSealed.newItemId().slice(0, 12).replace(/[^A-Za-z0-9]/g, 'x');
 
 /* ---------- створення локальної чернетки ---------- */
@@ -52,6 +56,7 @@ async function startPrivateDraft(body, storeId) {
   const store = privateStoreReady().find((s) => s.id === storeId) || privateStoreReady()[0];
   if (!store) throw new Error(tr('Для вас немає локального сервера, що приймає знімки. Його підключає адміністратор Studio.'));
   const draft = Object.assign({ draftId: newDraftId(), storeId: store.id, storeName: store.name, createdAt: new Date().toISOString() }, body);
+  if (draft.kind === 'book') { draft.kind = 'manuscript'; draft.photoBook = true; if (!draft.newBookTitle) draft.newBookTitle = draft.title || ''; }
   await pPutDraft(draft);
   state.privateDraft = draft;
   state.privateItems = [];
@@ -74,12 +79,16 @@ async function addPrivateFiles(files) {
   if (!draft || !files.length) return;
   const side = state.limits ? state.limits.recommendedMaxSidePx : 2048;
   let order = state.privateItems.reduce((m, i) => Math.max(m, i.order), 0);
+  // Нотатка до кадру йде всередині конверта (зашифрована) разом зі знімком: для фото людей, місць і майстер-класу саме вона —
+  // текст, з якого на комп'ютері складеться книга чи курс. Після надсилання поле очищається для наступного кадру.
+  const note = (state.privateNextNote || '').trim().slice(0, 500);
+  state.privateNextNote = '';
   for (const f of files) {
     const blob = await downscale(f, side);
     const mime = (blob.type || f.type || '').toLowerCase();
     const bad = PRIVATE_MIMES.indexOf(mime) < 0;
     order += 1;
-    const item = { itemId: NovaSealed.newItemId(), draftId: draft.draftId, order, blob, mime, bytes: blob.size, state: bad ? 'failed' : 'queued',
+    const item = { itemId: NovaSealed.newItemId(), draftId: draft.draftId, order, blob, mime, bytes: blob.size, note, state: bad ? 'failed' : 'queued',
       error: bad ? tr('Формат не підтримується (наприклад HEIC). У налаштуваннях камери оберіть «Найсумісніший» і зніміть ще раз.') : '', createdAt: new Date().toISOString() };
     await pPutItem(item); state.privateItems.push(item);
   }
@@ -90,6 +99,8 @@ async function addPrivateFiles(files) {
 function privateHeader(draft, item) {
   const h0 = { v: 1, draftId: draft.draftId, kind: draft.kind, order: item.order, mime: item.mime, clientId: item.itemId };
   for (const k of ['courseSource', 'instructionMode', 'modelCode', 'title', 'craft', 'audience', 'newBookTitle']) if (draft[k]) h0[k] = draft[k];
+  if (draft.photoBook) h0.photoBook = true;
+  if (item.note) h0.note = String(item.note).slice(0, 500);
   return h0;
 }
 
@@ -175,13 +186,22 @@ function viewPrivateDraft() {
   const box = h('div', { id: 'private-draft' });
   const store = (state.privateStores || []).find((s) => s.id === d.storeId);
   const delivered = items.filter((i) => i.state === 'delivered').length;
-  box.append(h('p', { class: 'muted', text: [tr(PRIVATE_KINDS[d.kind]), d.title, d.craft, d.audience].filter(Boolean).join(' · ') + tr(" · знімків: {0}", items.length) + (delivered ? tr(", забрано сервером: {0}", delivered) : '') }));
+  box.append(h('p', { class: 'muted', text: [d.photoBook ? tr('Книга з фото') : tr(PRIVATE_KINDS[d.kind]), d.title || d.newBookTitle, d.craft, d.audience].filter(Boolean).join(' · ') + tr(" · знімків: {0}", items.length) + (delivered ? tr(", забрано сервером: {0}", delivered) : '') }));
   box.append(h('div', { class: 'card', id: 'private-note' },
     h('strong', { text: tr('🔒 Приватна чернетка: на ваш локальний сервер') }),
     h('p', { class: 'muted', text: tr("Знімки шифруються на цьому телефоні ключем вашого сервера «{0}» і йдуть до нього через Studio, яка бачить лише шифротекст. Розпізнає й перевіряє текст сам сервер на вашому комп'ютері: ШІ у хмарі не залучається.", d.storeName) }),
     h('p', { class: 'muted', text: tr('Далі: на компʼютері відкрийте Studio → «Приватні матеріали» → «З телефона» — там розпізнаний текст, перевірка й створення ') + (d.kind === 'course' ? tr('курсу') : d.kind === 'instruction' ? tr('інструкції') : tr('книги')) + '.' }),
     store && !store.online ? h('p', { class: 'err', id: 'private-offline', text: tr('Сервер зараз не на звʼязку. Знімки лежатимуть у Studio в зашифрованому вигляді до 72 годин — увімкніть компʼютер із сервером, і він їх забере.') }) : null));
   const onFiles = (e) => { addPrivateFiles([...e.target.files]); e.target.value = ''; };
+  const photoKind = isPrivatePhotoDraft(d);
+  const noteInput = h('textarea', { id: 'pnote-next', maxlength: 500, rows: photoKind ? 3 : 2,
+    placeholder: photoKind ? tr('Що на наступному кадрі: хто це, де, що відбувається, що важливо запамʼятати') : tr('Нотатка до наступного знімка (необовʼязково)') });
+  noteInput.value = state.privateNextNote || '';
+  noteInput.addEventListener('input', () => { state.privateNextNote = noteInput.value; });
+  box.append(h('div', { class: 'card', id: 'private-next-note' },
+    h('label', { for: 'pnote-next', text: photoKind ? tr('Нотатка до кадру — з неї складеться текст') : tr('Нотатка до знімка') }),
+    noteInput,
+    photoKind ? h('p', { class: 'muted', text: tr('На фото немає тексту, тож без хмарного ШІ основою книги чи курсу стануть ваші нотатки. Якщо на компʼютері налаштовано Ollama, сервер ще й опише кадр сам.') }) : null));
   box.append(h('div', { class: 'shoot' },
     h('label', { class: 'btn primary', for: 'pfile-cam', id: 'plbl-cam', text: tr('📷 Зняти') }),
     h('label', { class: 'btn', for: 'pfile-gal', id: 'plbl-gal', text: tr('З галереї') }),
@@ -194,7 +214,8 @@ function viewPrivateDraft() {
     list.append(h('div', { class: 'card frame', 'data-private-item': it.itemId },
       url ? photoPreview(url, tr("Знімок №{0}", i + 1)) : h('div', { class: 'muted', text: '✓' }),
       h('div', null,
-        h('strong', { text: (d.kind === 'manuscript' || d.kind === 'course' ? tr('Сторінка ') : tr('Знімок ')) + (i + 1) }),
+        h('strong', { text: (!photoKind && (d.kind === 'manuscript' || d.kind === 'course') ? tr('Сторінка ') : tr('Знімок ')) + (i + 1) }),
+        it.note ? h('p', { class: 'muted', text: it.note }) : null,
         h('div', null, privateBadge(it), it.state === 'failed' || (it.state === 'queued' && it.error) ? h('div', { class: 'err', text: grabApiMessage(it.errorKind, it.error) }) : null),
         h('div', { class: 'row' },
           it.state === 'failed' || it.state === 'expired' ? h('button', { class: 'small', text: tr('Спробувати ще'), onclick: async () => { if (!it.blob) return; it.state = 'queued'; it.error = ''; await pPutItem(it); render(true); void flushPrivate(); } }) : null,
