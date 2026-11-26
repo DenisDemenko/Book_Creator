@@ -29,6 +29,7 @@ import { LabyrinthError } from './core/labyrinth/model';
 import { getCoreJobQueue, getCoreRepository } from './core';
 import { scheduleCoreSync } from './core/sync';
 import { registerBookSyncRoutes } from './bookSyncRoutes';
+import { registerSteamPassportBookRoutes } from './steamPassportBookRoutes';
 import {validateEditableDocument} from '../shared/wardrobeDocument.mjs';
 import {
   BookRevisionConflict,
@@ -97,6 +98,7 @@ function fail(res: Response, err: unknown, fallback: string): void {
 export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
   // Синхронізація версій книги з іншим сервером (локальна Студія ↔ прод). Без BOOK_SYNC_* вимкнена.
   registerBookSyncRoutes(app);
+  registerSteamPassportBookRoutes(app);
 
   /** Перелік своїх книг — без вмісту: у списку він не потрібен, а важить багато. */
   app.get('/api/books', requireAuth, async (req: Request, res: Response) => {
@@ -259,6 +261,14 @@ export function registerBookRoutes(app: Express, deps: BookRoutesDeps): void {
         return res.status(404).json({ error: 'Книгу не знайдено.' });
       }
       const kind = req.params.kind as ArtifactKind;
+      if (kind === 'steam-passport') {
+        if (stored.ownerId !== req.principal?.id) {
+          return res.status(404).json({ error: 'Книгу не знайдено.' });
+        }
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.setHeader('Content-Disposition', 'attachment; filename="STEAM-passport.pdf"');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+      }
       const format: ArtifactFormat = req.query.format === 'print' ? 'print' : 'digital';
       const found = await readArtifact(req.params.id, kind, format);
       if (!found) {
