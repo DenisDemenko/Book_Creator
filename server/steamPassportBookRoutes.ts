@@ -38,7 +38,7 @@ async function ownsMarketplaceProject(teamId: string, token: string, uid: string
 export function registerSteamPassportBookRoutes(app: Express, ownsProject = ownsMarketplaceProject) {
   app.post('/api/books/import-steam-passport', requireAuth, async (req, res) => {
     const owner = req.principal;
-    if (!owner?.id || owner.isGuest) return res.status(401).json({ error: 'Authentication required.' });
+    if (!owner || owner.isGuest !== false || !owner.id) return res.status(401).json({ error: 'Authentication required.' });
     const { teamId, requestId, title, author, language, sections, pdf, cover } = req.body ?? {};
     const token = req.get('X-Fusion-Firebase-Token');
     if (typeof teamId !== 'string' || !requestIdPattern.test(teamId) ||
