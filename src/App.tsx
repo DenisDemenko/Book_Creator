@@ -288,7 +288,9 @@ function StudioApp() {
   const phoneInboxRef = useRef(entrySearch.get('tab') === 'inbox' &&
     window.location.pathname.replace(/\/$/, '').endsWith('/media'));
   const inboxBookId = phoneInboxRef.current ? entrySearch.get('bookId') : null;
-  const routedBookId = openImportedBook ? initialRouteRef.current?.projectId : inboxBookId;
+  const initialBookId = initialRouteRef.current?.projectId;
+  const isPassportEntry = initialRouteRef.current?.tab === 'editor' && /^STEAM-[a-f0-9]{32}$/.test(initialBookId ?? '');
+  const routedBookId = openImportedBook || isPassportEntry ? initialBookId : inboxBookId;
   const [awaitingRoutedBook, setAwaitingRoutedBook] = useState(!!routedBookId);
   /** Герой відкритого профілю (сторінка «Профіль персонажа», /characters/:id). */
   const [coreCharacterId, setCoreCharacterId] = useState<string | undefined>(initialRouteRef.current?.characterId);
@@ -911,15 +913,21 @@ function StudioApp() {
       } catch {
         if (controller.signal.aborted) return;
         setCurrentTab('dashboard');
-        setStorageError(lang === 'en'
-          ? 'Could not open the linked book. Check that you are signed in with the account you use in GrabFusion.'
-          : 'Не вдалося відкрити книгу. Перевірте, чи ви увійшли під тим самим обліковим записом, що й у GrabFusion.');
+        if (isPassportEntry) {
+          setStorageError(lang === 'en'
+            ? 'Could not open the passport book. Sign in with the account that owns the project.'
+            : 'Не вдалося відкрити книгу паспорта. Увійдіть під обліковим записом власника проєкту.');
+        } else {
+          setStorageError(lang === 'en'
+            ? 'Could not open the linked book. Check that you are signed in with the account you use in GrabFusion.'
+            : 'Не вдалося відкрити книгу. Перевірте, чи ви увійшли під тим самим обліковим записом, що й у GrabFusion.');
+        }
       } finally {
         if (!controller.signal.aborted) setAwaitingRoutedBook(false);
       }
     })();
     return () => controller.abort();
-  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang, grabfusionCharacterId]);
+  }, [awaitingRoutedBook, routedBookId, isHydrating, auth.loading, auth.user?.id, auth.user?.isGuest, book.id, lang, grabfusionCharacterId, isPassportEntry]);
 
   // Роль користувача приходить із сервера разом із профілем — окрім
   // випадку, коли роль для ЦІЄЇ книги зафіксована прийнятим cowork-
