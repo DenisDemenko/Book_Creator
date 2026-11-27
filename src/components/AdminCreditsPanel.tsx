@@ -271,6 +271,8 @@ const UsersSection: React.FC<{ onChanged: () => void; flash: (m: string) => void
   const [reason, setReason] = useState('');
   const [plan, setPlan] = useState('start');
   const [cycle, setCycle] = useState('monthly');
+  const [giftBusy, setGiftBusy] = useState(false);
+  const [giftDraft, setGiftDraft] = useState<{ userId: string; serial: number; code: string; href: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -317,6 +319,33 @@ const UsersSection: React.FC<{ onChanged: () => void; flash: (m: string) => void
     }
   };
 
+  const sendGift = async (user: UserRow) => {
+    if (!window.confirm(`Створити подарунковий сертифікат «${plan}» і надіслати на ${user.email}?`)) return;
+    setGiftBusy(true);
+    setGiftDraft(null);
+    try {
+      const gift: { serial: number; code: string; sent: boolean } = await post(
+        `/api/admin/credits/users/${user.id}/gift`, 'POST', { plan, cycle },
+      );
+      if (gift.sent) {
+        flash(`Сертифікат №${gift.serial} надіслано через Gmail.`);
+        return;
+      }
+      const params = new URLSearchParams({
+        view: 'cm',
+        fs: '1',
+        to: user.email,
+        su: `NOVA Studio — подарунковий сертифікат №${gift.serial}`,
+        body: `Тариф ${plan}, ${cycle === 'annual' ? 'рік' : 'місяць'} без оплати.\nКод: ${gift.code}\n\nУвійдіть у NOVA Studio під цим акаунтом, відкрийте сторінку підписок і введіть код у полі «Подарунковий сертифікат».`,
+      });
+      setGiftDraft({ userId: user.id, serial: gift.serial, code: gift.code, href: `https://mail.google.com/mail/?${params}` });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Не вдалося створити сертифікат.');
+    } finally {
+      setGiftBusy(false);
+    }
+  };
+
   const q = query.trim().toLowerCase();
   const rows = users.filter((u) => !q || u.email.toLowerCase().includes(q) || u.name.toLowerCase().includes(q));
 
@@ -358,7 +387,15 @@ const UsersSection: React.FC<{ onChanged: () => void; flash: (m: string) => void
                       <option value="monthly">місяць</option><option value="annual">рік</option>
                     </select>
                     <button onClick={() => assign(u.id)} className="px-3 py-1 rounded-lg text-xs badge-glass text-slate-200">Призначити тариф</button>
+                    <button type="button" onClick={() => sendGift(u)} disabled={giftBusy || plan === 'free'}
+                      className="px-3 py-1 rounded-lg text-xs badge-glass text-slate-200 disabled:opacity-40">Надіслати сертифікат через Gmail</button>
                   </div>
+                  {giftDraft?.userId === u.id && (
+                    <p role="status" className="mb-3 text-amber-300">
+                      Сертифікат №{giftDraft.serial} створено. Автоматичне надсилання не вдалося. Код <code>{giftDraft.code}</code>.{' '}
+                      <a href={giftDraft.href} target="_blank" rel="noopener noreferrer" className="underline">Відкрити чернетку в Gmail</a>
+                    </p>
+                  )}
                   <table className="w-full text-[11px] text-slate-400">
                     <thead><tr className="text-slate-500 text-left">
                       <th className="font-medium">Час</th><th className="font-medium">Подія</th>

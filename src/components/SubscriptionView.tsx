@@ -88,6 +88,9 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
 
+  const [giftCode, setGiftCode] = useState('');
+  const [redeemingGift, setRedeemingGift] = useState(false);
+
   const isRegistered = !!authUser && !authUser.isGuest;
 
   const loadMe = useCallback(async () => {
@@ -244,6 +247,28 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
     );
   }
 
+  const redeemGift = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRedeemingGift(true);
+    try {
+      const res = await fetch('/api/subscription/gift/redeem', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: giftCode }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+      setGiftCode('');
+      await loadMe();
+      setNotice({ kind: 'success', text: lang === 'en' ? 'Gift certificate redeemed.' : 'Подарунковий сертифікат активовано.' });
+    } catch (error) {
+      setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Не вдалося активувати сертифікат.' });
+    } finally {
+      setRedeemingGift(false);
+    }
+  };
+
   const currentPlanId = myInfo?.subscription?.plan;
 
   return (
@@ -283,6 +308,19 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({ authUser }) 
           {notice.kind === 'error' && <AlertTriangle className="w-4 h-4 shrink-0" />}
           <span>{notice.text}</span>
         </div>
+      )}
+
+      {isRegistered && (
+        <form onSubmit={redeemGift} className="max-w-2xl mx-auto p-4 rounded-2xl glass-panel flex flex-wrap items-end gap-3">
+          <label className="flex-1 min-w-48 text-sm">
+            {lang === 'en' ? 'Gift certificate' : 'Подарунковий сертифікат'}
+            <input className="glass-input w-full mt-1" value={giftCode} onChange={event => setGiftCode(event.target.value)}
+              autoComplete="off" spellCheck={false} maxLength={40} required />
+          </label>
+          <button type="submit" disabled={redeemingGift || !giftCode.trim()} className="badge-glass rounded-lg px-3 py-2 disabled:opacity-40">
+            {lang === 'en' ? 'Redeem' : 'Активувати'}
+          </button>
+        </form>
       )}
 
       {/* Мій поточний тариф */}

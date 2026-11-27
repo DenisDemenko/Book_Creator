@@ -20,6 +20,7 @@
 import crypto from 'node:crypto';
 import type { Express } from 'express';
 import { requireAuth } from './auth';
+import { redeemSubscriptionGift, SubscriptionGiftError } from './subscriptionGifts';
 import { recordPayment, updatePaymentStatus } from './store';
 import {
   PLANS,
@@ -71,6 +72,17 @@ export function registerSubscriptionRoutes(app: Express): void {
     } catch (err) {
       console.error('[subscription] me:', err);
       res.status(500).json({ error: 'Не вдалося завантажити дані підписки.' });
+    }
+  });
+
+  app.post('/api/subscription/gift/redeem', requireAuth, (req, res) => {
+    try {
+      res.json(redeemSubscriptionGift(req.principal!.id, req.body?.code));
+    } catch (error) {
+      if (error instanceof SubscriptionGiftError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Не вдалося активувати сертифікат.' });
     }
   });
 

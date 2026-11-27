@@ -58,6 +58,7 @@ import { IMAGE_ENGINES, seedreamConfig } from './imageGeneration';
 import { SEEDREAM_FAL_MODEL } from './pricing';
 import { geminiClient } from './aiCore';
 import { mailConfig } from './mail';
+import { issueSubscriptionGift, SubscriptionGiftError } from './subscriptionGifts';
 import { PLANS, PLAN_ORDER, priceFor, resolveSubscription, getActiveTaxRegime, setTaxRegime, updatePricingConfig, activateSubscription, type PlanId } from './subscriptions';
 import { upsertSubscription } from './store';
 import { getDb, isAvailable } from './db';
@@ -767,6 +768,32 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true, balance });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Не вдалося призначити тариф.' });
+    }
+  });
+
+  app.post('/api/admin/credits/users/:id/gift', requireAdmin, async (req, res) => {
+    const { plan, cycle } = req.body || {};
+    if (!(PLAN_ORDER as string[]).includes(plan) || plan === 'free') {
+      return res.status(400).json({ error: 'Оберіть платний тариф для подарунка.' });
+    }
+    if (cycle !== 'monthly' && cycle !== 'annual') {
+      return res.status(400).json({ error: 'Оберіть місяць або рік.' });
+    }
+    try {
+      const user = await findUserById(String(req.params.id));
+      if (!user || user.disabled || !user.email) {
+        return res.status(404).json({ error: 'Чинний акаунт отримувача не знайдено.' });
+      }
+      const gift = await issueSubscriptionGift({
+        userId: user.id, email: user.email, adminId: req.principal!.id,
+        plan: plan as Exclude<PlanId, 'free'>, cycle,
+      });
+      res.set('Cache-Control', 'no-store').status(201).json(gift);
+    } catch (error) {
+      if (error instanceof SubscriptionGiftError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Не вдалося створити сертифікат.' });
     }
   });
 

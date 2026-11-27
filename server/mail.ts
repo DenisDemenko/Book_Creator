@@ -240,6 +240,13 @@ export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; err
   return { ok: false, error: `${apiError}; SMTP: ${viaSmtp.error}` };
 }
 
+export async function sendViaGmail(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
+  if (!mailConfig.smtpEnabled || mailConfig.host.toLowerCase() !== 'smtp.gmail.com') {
+    return { ok: false, error: 'Gmail SMTP не налаштовано.' };
+  }
+  return sendViaSmtp(input);
+}
+
 async function sendViaSmtp(input: SendMailInput): Promise<{ ok: boolean; error?: string }> {
   let hosts: string[];
   try {

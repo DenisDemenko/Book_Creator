@@ -612,7 +612,7 @@ function rowToSubscription(row: SubscriptionRow): StoredSubscription {
   };
 }
 
-function insertSubscriptionRow(sub: StoredSubscription): void {
+export function insertSubscriptionRow(sub: StoredSubscription): void {
   getDb()!
     .prepare(
       `INSERT INTO subscriptions (user_id, plan, billing_cycle, status, current_period_start, current_period_end, provider, provider_ref, created_at, updated_at)
@@ -638,6 +638,10 @@ function insertSubscriptionRow(sub: StoredSubscription): void {
 
 export async function getSubscription(userId: string): Promise<StoredSubscription | undefined> {
   if (useJson()) return jsonStore.getSubscription(userId);
+  return readSqliteSubscription(userId);
+}
+
+export function readSqliteSubscription(userId: string): StoredSubscription | undefined {
   const row = getDb()!
     .prepare('SELECT * FROM subscriptions WHERE user_id = ?')
     .get(userId) as SubscriptionRow | undefined;
