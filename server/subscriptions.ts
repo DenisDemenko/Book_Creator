@@ -310,7 +310,7 @@ export async function setTaxRegime(id: TaxRegimeId): Promise<void> {
 applyTaxRegime(DEFAULT_TAX_REGIME);
 
 /** Довжина періоду підписки в добах. Річний — календарний рік, а не 12×30. */
-function periodDays(cycle: BillingCycle): number {
+export function periodDays(cycle: BillingCycle): number {
   return cycle === 'annual' ? 365 : 30;
 }
 

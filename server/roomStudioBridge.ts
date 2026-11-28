@@ -128,10 +128,9 @@ export function registerRoomStudioBridge(app: Express) {
         }
       }
       const sub = await resolveSubscription(user.id);
-      const activePaidPlan =
-        sub.status === "active" &&
-        Date.parse(sub.currentPeriodEnd) > Date.now() &&
-        ["pro", "ultra"].includes(sub.plan);
+      const subscriptionActive =
+        sub.status === "active" && Date.parse(sub.currentPeriodEnd) > Date.now();
+      const activePaidPlan = subscriptionActive && ["pro", "ultra"].includes(sub.plan);
       if (action === "recognize-plan") {
         if (!activePaidPlan)
           return res.status(403).json({
@@ -140,7 +139,11 @@ export function registerRoomStudioBridge(app: Express) {
         return await recognizeRoomPlan(req, res, user);
       }
       if (action === "access")
-        return res.json({ plan: sub.plan, active: activePaidPlan });
+        return res.json({
+          plan: sub.plan,
+          active: activePaidPlan,
+          yamahaScore: administrator || (subscriptionActive && ["start", "pro", "ultra", "team"].includes(sub.plan)),
+        });
       if (action === "result") {
         const jobKey = req.body.jobKey;
         if (typeof jobKey !== "string" || !/^room:[a-f0-9-]{36}$/.test(jobKey))

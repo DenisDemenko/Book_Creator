@@ -176,6 +176,17 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   updated_at          TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS subscription_gifts (
+  serial INTEGER PRIMARY KEY AUTOINCREMENT,
+  code_hash TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL,
+  issued_by TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  billing_cycle TEXT NOT NULL,
+  issued_at TEXT NOT NULL,
+  redeemed_at TEXT
+);
+
 -- Файл «ім'я_автора.md»: AI-аналіз авторського стилю (Фаза 1, 1.1). По
 -- одному запису на користувача — повторна генерація перезаписує вміст.
 CREATE TABLE IF NOT EXISTS user_styles (
